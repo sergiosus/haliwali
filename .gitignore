@@ -4,6 +4,7 @@
 /.data/
 /public/uploads/
 /uploads_private/
+/app/data/raw/
 
 # env
 .env

@@ -1,0 +1,80 @@
+[
+  {
+    "id": "reg-1777528006961-69b3750db4565",
+    "email": "crude1@ya.ru",
+    "phone": "",
+    "passwordHash": "$2b$10$82EjqrlUAH4pdt1pkNV4weONFYE4So4sO85b3oF1.uP6BLNBVp9pW",
+    "confirmMethod": "email",
+    "codeHash": "209eee6ad29a8a657924f45c6dc28f67839f1162dd63717c0f32f2cf75c40539",
+    "expiresAt": 1777528606961,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777528006961,
+    "lastSentAt": 1777528006961
+  },
+  {
+    "id": "reg-1777592184987-a94b5b2676508",
+    "email": "crude1@ya.ru",
+    "phone": "",
+    "passwordHash": "$2b$10$harJYpc2SlqVmxF.JuPHOeRj82UMITkKRUAzd6.fbWYnuco0282tm",
+    "confirmMethod": "email",
+    "codeHash": "7bc5ce6a07c2039ae376ea10d4774d17e3b9b58be8ae4b3fe81248e0872d27d3",
+    "expiresAt": 1777592784987,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777592184987,
+    "lastSentAt": 1777592184987
+  },
+  {
+    "id": "reg-1777596201023-df3d50f2c34a8",
+    "email": "crude1@ya.ru",
+    "phone": "",
+    "passwordHash": "$2b$10$MvI0S3DkGQH6.4hgCcNuDOuXiTVE8/e9EY5GmB2YfTPj3UbTSpbSG",
+    "confirmMethod": "email",
+    "codeHash": "216fdd30200023f10a03b96bd7fc9025ea54b64034cbbdb33c0758bb293aa5be",
+    "expiresAt": 1777596801023,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777596201023,
+    "lastSentAt": 1777596201023
+  },
+  {
+    "id": "reg-1777596467175-2e54b691d2f46",
+    "email": "crude1@ya.ru",
+    "phone": "",
+    "passwordHash": "$2b$10$UdPJvfPxXoXsTyGGKG2wEuVv1.bHfiAWz6FT6I7eJaUzdmDv4nPYW",
+    "confirmMethod": "email",
+    "codeHash": "97036f55f66842715b124db9767c4b6954f347e9534643cf47bae2bc5098e87d",
+    "expiresAt": 1777597067175,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777596467175,
+    "lastSentAt": 1777596467175
+  },
+  {
+    "id": "reg-1777642396290-f8e0cd2680843",
+    "email": "kostashu@yahoo.com",
+    "phone": "",
+    "passwordHash": "$2b$10$vZaTp7Wb94uR0lgY1pN0num5al.AmcoyRNqdnFdNDGDqr45Waz4li",
+    "confirmMethod": "email",
+    "codeHash": "44ef5c6fc5bf424e21815b216e96c001b145c349273c92f1d9a1106ddf83a0f4",
+    "expiresAt": 1777642996290,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777642396290,
+    "lastSentAt": 1777642396290
+  },
+  {
+    "id": "reg-1777642459636-e023080b3c461",
+    "email": "kostashu@yahoo.com",
+    "phone": "",
+    "passwordHash": "$2b$10$qiDVAAoI5ZNKt0/7gtRjDeASL5GrExcSgJN3MSN3KPvAuDYdboBKe",
+    "confirmMethod": "email",
+    "codeHash": "9d70d1e3893847f413746d1c993f52325ed8d67c2cf3e626d685cdac2ef3d315",
+    "expiresAt": 1777643059636,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777642459636,
+    "lastSentAt": 1777642459636
+  }
+]

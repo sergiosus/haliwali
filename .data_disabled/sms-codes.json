@@ -1,0 +1,128 @@
+[
+  {
+    "value": "admin@grinextrade.ru",
+    "type": "email",
+    "codeHash": "a6533e33e29d9f9d6ca769e8e102118087a439efed97d753213bc0573448256b",
+    "expiresAt": 1777434984728,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777434684728
+  },
+  {
+    "value": "info@imbatruck.com",
+    "type": "email",
+    "codeHash": "d65bf2a5228ce2669fa1095f8b8346cba352d908082d77d5681a53aacb1b89e2",
+    "expiresAt": 1777436570810,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777436270810
+  },
+  {
+    "value": "+79124475419",
+    "type": "phone",
+    "codeHash": "369c77390423f0f1242ae8897af0f8d5452d857b249fbd91465d5766eb7403c0",
+    "expiresAt": 1777436905934,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777436305934
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "8619ab80e073e4c6b362c306f47d7362b7fbceacbf58533f4753ea60a5ec8d75",
+    "expiresAt": 1777960627180,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777960327180
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "7d2b974189d1529f74fc99cb2d30a84694dec5245bf9b42a3938ca1203204597",
+    "expiresAt": 1777961559404,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777961259404
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "f4b9a10ae00441cec787f79644e594bedd61ac590e1ec8910ee7b92e71f604b1",
+    "expiresAt": 1777961756924,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777961456924
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "c6f2142e9875bbad04c05bdf2e76f11b790a18831bde9b189c09d25ea9317c12",
+    "expiresAt": 1777962789287,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777962489287
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "eee5df5093b0a37fbf19dd0b7f57591cf11147f41fdaa4256a20a6bffff1e516",
+    "expiresAt": 1777964731244,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777964431244
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "bb1821406a966ef1b1ef5cec0e0d7217704dc807240eb4054c36fdc7f77107eb",
+    "expiresAt": 1777964797717,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777964497717
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "495b253201054d1eddfa62db9fbc290d171f2b9fce44d8aa39097e62e10d7406",
+    "expiresAt": 1777964965533,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777964665533
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "c7cb2f75312dfc5f0b063013446d89fbd023c125d6e3b937f43ec38b3894d972",
+    "expiresAt": 1777966393825,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777966093825
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "96ada3ea44c96642e4f70d3ab1ea66e52f48aaa446fb481ea631ef2603fcaf80",
+    "expiresAt": 1777984425973,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777984125973
+  },
+  {
+    "value": "crude1@ya.ru",
+    "type": "email",
+    "codeHash": "eeeda1479953900a2ebf1e384f8474db018bbd6cd274bfb5ef3f1ce25df1532c",
+    "expiresAt": 1777984636398,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777984336398
+  },
+  {
+    "value": "kostashu@yahoo.com",
+    "type": "email",
+    "codeHash": "69ba21c6836dde13128d3e9da334291a07d9a9c2a4a8a32b92a229fa58dc8246",
+    "expiresAt": 1777991642386,
+    "attempts": 0,
+    "consumed": true,
+    "createdAt": 1777991342386
+  }
+]

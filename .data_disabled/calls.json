@@ -1,0 +1,30 @@
+{
+  "b233ee07-7965-4fc3-a4b7-2ea1e0de50f7": {
+    "callId": "b233ee07-7965-4fc3-a4b7-2ea1e0de50f7",
+    "chatId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+    "roomToken": "d9139ccb-640e-4008-bdf5-ae1dab3053e4",
+    "callerId": "user-d5982eba-11b5-4780-893c-087558903245",
+    "participantIds": [
+      "user-d5982eba-11b5-4780-893c-087558903245",
+      "user-cf0673dd-c83a-43ee-9838-752a596e6863"
+    ],
+    "createdAt": 1777708080745,
+    "updatedAt": 1777708199042,
+    "expiresAt": 1777709880745,
+    "status": "ended"
+  },
+  "96630a0d-76ed-483f-9421-119fb7551e4d": {
+    "callId": "96630a0d-76ed-483f-9421-119fb7551e4d",
+    "chatId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+    "roomToken": "85ec124b-694b-4298-aa35-8dfbe73048e8",
+    "callerId": "user-d5982eba-11b5-4780-893c-087558903245",
+    "participantIds": [
+      "user-d5982eba-11b5-4780-893c-087558903245",
+      "user-cf0673dd-c83a-43ee-9838-752a596e6863"
+    ],
+    "createdAt": 1777708216739,
+    "updatedAt": 1777710058086,
+    "expiresAt": 1777710016739,
+    "status": "ended"
+  }
+}

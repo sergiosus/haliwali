@@ -3,11 +3,13 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --accent: #ff7a00;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -23,4 +25,69 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Legal pages (/terms, /about): one column, left-aligned, no justified stretch between sections */
+.legal-document-body {
+  text-align: left;
+  line-height: 1.6;
+}
+
+.legal-document-body p,
+.legal-document-body div,
+.legal-document-body span {
+  text-align: left;
+  text-justify: auto;
+}
+
+.legal-document-body p {
+  line-height: 1.6;
+}
+
+/* Prevent Chrome/WebKit autofill yellow background */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0px 1000px #fff inset;
+  box-shadow: 0 0 0px 1000px #fff inset;
+  -webkit-text-fill-color: var(--foreground);
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* Haliwali logo: replace native "i" dot with a bold orange dot */
+.custom-i {
+  position: relative;
+  display: inline-block;
+  font-weight: inherit;
+  line-height: 1;
+  transform: translateY(1px);
+  font-feature-settings: "liga" 0;
+  text-decoration: none;
+  color: transparent; /* hides native dotted i glyph */
+}
+
+/* Render a dotless i for the stem, then add our own dot */
+.custom-i::before {
+  content: "ı"; /* dotless i */
+  position: absolute;
+  inset: 0;
+  color: var(--foreground);
+}
+
+.custom-i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-46%);
+  width: 8px;
+  height: 8px;
+  background: #ff6a00;
+  border-radius: 9999px;
 }

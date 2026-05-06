@@ -1,0 +1,28 @@
+{
+  "usersById": {
+    "user-d5982eba-11b5-4780-893c-087558903245": {
+      "userId": "user-d5982eba-11b5-4780-893c-087558903245",
+      "email": "crude1@ya.ru",
+      "phone": "",
+      "phoneVisible": false,
+      "passwordHash": "$2b$10$UdPJvfPxXoXsTyGGKG2wEuVv1.bHfiAWz6FT6I7eJaUzdmDv4nPYW",
+      "createdAt": 1777596496686,
+      "lastSeenAt": 1777843257102,
+      "name": "серж"
+    },
+    "user-cf0673dd-c83a-43ee-9838-752a596e6863": {
+      "userId": "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+      "email": "kostashu@yahoo.com",
+      "phone": "",
+      "phoneVisible": false,
+      "passwordHash": "$2b$10$qiDVAAoI5ZNKt0/7gtRjDeASL5GrExcSgJN3MSN3KPvAuDYdboBKe",
+      "createdAt": 1777642473764,
+      "lastSeenAt": 1777956225261
+    }
+  },
+  "emailIndex": {
+    "crude1@ya.ru": "user-d5982eba-11b5-4780-893c-087558903245",
+    "kostashu@yahoo.com": "user-cf0673dd-c83a-43ee-9838-752a596e6863"
+  },
+  "phoneIndex": {}
+}

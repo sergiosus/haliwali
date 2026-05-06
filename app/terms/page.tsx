@@ -1,0 +1,170 @@
+import Link from "next/link";
+import { BackNavButton } from "../components/BackNavButton";
+
+const linkClass =
+  "font-medium text-[#2563eb] underline underline-offset-2 hover:opacity-80 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/35";
+
+const legalContentClass = [
+  "legalContent mx-auto w-full max-w-[720px]",
+  "text-left text-[15px] text-black/80 md:text-base",
+  "leading-[1.45] [&]:leading-[1.45]",
+  "[&_section]:text-left [&_section]:leading-[1.45]",
+  "[&_p]:text-left [&_p]:leading-[1.45] [&_p]:mt-0 [&_p]:mb-[10px]",
+  "[&_span]:text-left [&_span]:leading-[1.45]",
+  "[&_a]:text-left [&_a]:leading-[1.45]",
+  "[&_div]:text-left [&_div]:leading-[1.45]",
+  "[&_h2]:mt-6 [&_h2]:mb-[10px]",
+].join(" ");
+
+export default function TermsPage() {
+  return (
+    <div className="min-h-full bg-black/[0.03] text-black">
+      <div className="mx-auto w-full max-w-[1100px] px-4 sm:px-6">
+        <header className="flex items-center py-4">
+          <BackNavButton className="text-sm text-black/60 hover:text-black" />
+        </header>
+
+        <main className="pb-16 pt-2 md:pb-20 md:pt-4">
+          <article
+            className={[
+              "mx-auto w-full max-w-[1024px] rounded-2xl border border-black/[0.08] bg-white px-6 py-8 shadow-[0_8px_30px_rgba(0,0,0,0.06)]",
+              "sm:px-8 sm:py-9 md:px-10 md:py-10",
+            ].join(" ")}
+          >
+            <h1 className="text-2xl font-semibold tracking-tight text-black md:text-3xl">
+              Пользовательское соглашение
+            </h1>
+            <p className="mx-auto mt-3 max-w-[720px] text-left text-[15px] leading-[1.6] text-black/70 md:text-base">
+              Дата последнего обновления: 2026
+            </p>
+
+            <div className={`mt-8 ${legalContentClass}`}>
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">1. Общие положения</h2>
+                <p>Настоящее Пользовательское соглашение регулирует порядок использования сервиса Haliwali.</p>
+                <p>Оператором сервиса Haliwali является ООО «ГРИНЕКС ТРЕЙД» (далее — «Сервис»).</p>
+                <p>Используя сайт, пользователь подтверждает согласие с условиями настоящего соглашения.</p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">2. О сервисе</h2>
+                <p>
+                  Сервис Haliwali является информационной площадкой, предназначенной для размещения объявлений и
+                  взаимодействия пользователей.
+                </p>
+                <p>
+                  Сервис не является продавцом, исполнителем, покупателем или посредником и не участвует в расчетах
+                  между пользователями.
+                </p>
+                <p>Все сделки заключаются напрямую между пользователями.</p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">3. Регистрация и аккаунт</h2>
+                <p>Для использования отдельных функций требуется регистрация.</p>
+                <p>Пользователь обязуется предоставлять достоверную информацию.</p>
+                <p>Пользователь несет ответственность за сохранность своих учетных данных.</p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">4. Размещение информации</h2>
+                <p>Пользователь самостоятельно размещает объявления и несет ответственность за их содержание.</p>
+                <p>Запрещается размещение незаконной, ложной или вводящей в заблуждение информации.</p>
+                <p>Сервис вправе удалять объявления и ограничивать доступ пользователя при нарушении условий.</p>
+                <p id="appendix-listing-deletion-and-complaints">
+                  В случае удаления объявления пользователем оно может быть временно сохранено в системе в течение
+                  ограниченного периода времени. В указанный период объявление недоступно для публичного просмотра,
+                  однако может использоваться Сервисом для целей рассмотрения жалоб, предотвращения нарушений и
+                  обеспечения безопасности.
+                </p>
+                <p>
+                  В случае поступления жалоб на объявление информация о нём может сохраняться и использоваться для
+                  модерации, даже если объявление было удалено пользователем.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">5. Ответственность</h2>
+                <p>Пользователи самостоятельно несут ответственность за заключаемые сделки.</p>
+                <p>Сервис не гарантирует достоверность информации, размещаемой пользователями.</p>
+                <p>Сервис не несет ответственности за действия пользователей, качество товаров и услуг, а также за любые убытки, возникшие в результате использования сервиса.</p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">6. Ограничение доступа</h2>
+                <p>
+                  Сервис вправе ограничить или заблокировать доступ пользователя при нарушении условий, при необходимости
+                  без предварительного уведомления.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">7. Персональные данные</h2>
+                <p>
+                  Использование сайта регулируется{" "}
+                  <Link href="/privacy" className={linkClass}>
+                    Политикой конфиденциальности
+                  </Link>
+                  .
+                </p>
+                <p>
+                  Регистрируясь на сайте, пользователь дает согласие на обработку персональных данных в соответствии с{" "}
+                  <Link href="/privacy" className={linkClass}>
+                    Политикой конфиденциальности
+                  </Link>
+                  .
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">8. Изменение условий</h2>
+                <p>Сервис вправе изменять настоящее соглашение.</p>
+                <p>Продолжение использования сайта означает согласие с изменениями.</p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">9. Удаление аккаунта</h2>
+                <p>
+                  Пользователь вправе запросить удаление аккаунта одним из доступных способов: с немедленным удалением
+                  либо с отсрочкой удаления на 10 календарных дней.
+                </p>
+                <p>
+                  При выборе немедленного удаления аккаунт и связанные с ним персональные данные удаляются или обезличиваются
+                  без возможности восстановления, за исключением случаев, когда дальнейшее хранение отдельных данных
+                  требуется в соответствии с законодательством Российской Федерации.
+                </p>
+                <p>
+                  При выборе удаления с отсрочкой аккаунт переводится в режим ожидания удаления на срок 10 календарных дней.
+                  В течение данного срока пользователь может восстановить аккаунт.
+                </p>
+                <p>
+                  По истечении 10 календарных дней аккаунт удаляется, а персональные данные пользователя удаляются или
+                  обезличиваются, за исключением случаев, когда их дальнейшее хранение требуется в соответствии с
+                  законодательством Российской Федерации.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">10. Применимое право</h2>
+                <p>
+                  Все отношения, связанные с использованием сервиса, регулируются законодательством Российской
+                  Федерации.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">11. Контакты</h2>
+                <p>По вопросам работы сервиса пользователь может обратиться:</p>
+                <p>
+                  <a href="mailto:info@grinextrade.ru" className={linkClass}>
+                    info@grinextrade.ru
+                  </a>
+                </p>
+              </section>
+            </div>
+          </article>
+        </main>
+      </div>
+    </div>
+  );
+}

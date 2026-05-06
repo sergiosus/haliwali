@@ -1,0 +1,81 @@
+{
+  "conversations": {
+    "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863": {
+      "conversationId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+      "listingId": "task-1777703833526",
+      "listingTitle": "врапорлиотьлдб",
+      "listingOwnerId": "user-d5982eba-11b5-4780-893c-087558903245",
+      "participantIds": [
+        "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+        "user-d5982eba-11b5-4780-893c-087558903245"
+      ],
+      "buyerId": "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+      "lastMessageText": "сам такой😊",
+      "lastMessageAt": 1777709029214,
+      "createdAt": 1777707766249,
+      "updatedAt": 1777709061790,
+      "messages": [
+        {
+          "id": "1777707766249-d7b6c48e3d9e9eda",
+          "conversationId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "listingId": "task-1777703833526",
+          "senderId": "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "recipientId": "user-d5982eba-11b5-4780-893c-087558903245",
+          "text": "fghkljhhhhhh",
+          "createdAt": 1777707766249,
+          "readAt": 1777707812780,
+          "type": "text",
+          "senderName": "kostashu"
+        },
+        {
+          "id": "1777707797828-1ddefd1214776a2c",
+          "conversationId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "listingId": "task-1777703833526",
+          "senderId": "user-d5982eba-11b5-4780-893c-087558903245",
+          "recipientId": "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "text": "ghbdtn",
+          "createdAt": 1777707797828,
+          "readAt": 1777707814136,
+          "type": "text",
+          "senderName": "crude1"
+        },
+        {
+          "id": "1777708929140-2070af3b9d4c283f",
+          "conversationId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "listingId": "task-1777703833526",
+          "senderId": "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "recipientId": "user-d5982eba-11b5-4780-893c-087558903245",
+          "text": "jkjklk😊😊😊",
+          "createdAt": 1777708929140,
+          "readAt": 1777709006496,
+          "type": "text",
+          "senderName": "kostashu@yahoo.com"
+        },
+        {
+          "id": "1777708995907-a115181e605575e1",
+          "conversationId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "listingId": "task-1777703833526",
+          "senderId": "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "recipientId": "user-d5982eba-11b5-4780-893c-087558903245",
+          "text": "uhhjkmp",
+          "createdAt": 1777708995907,
+          "readAt": 1777709006496,
+          "type": "text",
+          "senderName": "kostashu@yahoo.com"
+        },
+        {
+          "id": "1777709029214-b4465b6a9a997065",
+          "conversationId": "task-1777703833526::user-d5982eba-11b5-4780-893c-087558903245::user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "listingId": "task-1777703833526",
+          "senderId": "user-d5982eba-11b5-4780-893c-087558903245",
+          "recipientId": "user-cf0673dd-c83a-43ee-9838-752a596e6863",
+          "text": "сам такой😊",
+          "createdAt": 1777709029214,
+          "readAt": 1777709061790,
+          "type": "text",
+          "senderName": "crude1@ya.ru"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "value": "+79124475419",
+    "type": "phone",
+    "codeHash": "b28355666cc7fdf255aa28c36270bae197804e1a0e702a9f405189d5f487e71d",
+    "expiresAt": 1777436659559,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1777436059559
+  },
+  {
+    "value": "+79226880355",
+    "type": "phone",
+    "codeHash": "10fbe88e50fbc591ea7ed92cbd4084583f8d418ab90a69e765f949ae749fe1fb",
+    "expiresAt": 1778089889194,
+    "attempts": 0,
+    "consumed": false,
+    "createdAt": 1778089289194
+  }
+]

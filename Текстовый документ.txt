@@ -1,0 +1,7 @@
+NODE_ENV=production
+DATABASE_URL=postgresql://haliwali_user:QgHcnh5r78gdr90klPcsQQ@localhost:5432/haliwali
+SESSION_SECRET=sNIW95x67pCXkkekR+B+N+tANycDK2ns8kiXv2vvWao=
+SITE_URL=https://haliwali.ru
+NEXT_PUBLIC_SITE_URL=https://haliwali.ru
+DEBUG_AUTH=false
+NEXT_PUBLIC_DEBUG_AUTH=false

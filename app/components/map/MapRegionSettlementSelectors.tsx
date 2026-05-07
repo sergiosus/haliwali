@@ -239,7 +239,7 @@ export function MapRegionSettlementSelectors({
   const shown = homepageLocationLabelFromScope(scope);
 
   return (
-    <div className="grid gap-2">
+    <div className="grid min-w-0 max-w-full gap-2">
       <div>
         <div className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Регион</div>
         <select

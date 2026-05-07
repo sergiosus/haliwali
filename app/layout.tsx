@@ -68,7 +68,7 @@ export default function RootLayout({
       <head>
         <meta charSet="utf-8" />
       </head>
-      <body className="flex min-h-full flex-col">
+      <body className="flex min-h-full min-w-0 flex-col overflow-x-hidden">
         <AuthBootstrap />
         <Suspense
           fallback={

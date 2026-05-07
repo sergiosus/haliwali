@@ -44,7 +44,7 @@ function SearchIcon({ className }: { className?: string }) {
  */
 function HeaderHaliwaliLogo() {
   return (
-    <span className="inline-block origin-left scale-90 text-3xl font-extrabold tracking-tight md:text-4xl">
+    <span className="inline-block whitespace-nowrap text-2xl font-extrabold tracking-tight sm:text-3xl md:origin-left md:scale-[0.9] md:text-4xl">
       Hal<span className="custom-i">i</span>wal<span className="custom-i">i</span>
     </span>
   );
@@ -55,7 +55,6 @@ export function SiteHeader() {
   const pathname = usePathname();
   const sp = useSearchParams();
   const isHome = pathname === "/";
-  const isMapPage = pathname === "/map";
   /** Полноэкранный вход в админку — без меню обычного пользователя и без «Привет, …». */
   const suppressUserChromeForAdmin = pathname === "/admin";
 
@@ -365,7 +364,7 @@ export function SiteHeader() {
   const postCta = (
     <Link
       href="/post"
-      className="inline-flex items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600"
+      className="inline-flex w-full max-w-full items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600 md:w-auto"
     >
       Разместить объявление
     </Link>
@@ -373,7 +372,7 @@ export function SiteHeader() {
 
   /** Avoid showing «Войти» while auth is syncing or during SSR/hydration. Logged-in users see the menu whenever `userId` is set (includes `loading` re-fetch after `refreshAuthFromServer`). */
   const authHeaderPlaceholder = (
-    <span className="inline-block min-h-[36px] min-w-[150px]" aria-hidden />
+    <span className="inline-block min-h-[36px] min-w-0 shrink-0 sm:min-w-[120px]" aria-hidden />
   );
   const authBlock = suppressUserChromeForAdmin ? null : !mounted ? (
     authHeaderPlaceholder
@@ -406,20 +405,26 @@ export function SiteHeader() {
         }}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        className="cursor-pointer whitespace-nowrap text-left"
+        className="cursor-pointer text-left md:whitespace-nowrap"
       >
-        <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 hover:underline">
+        <div className="inline-flex min-w-0 max-w-[min(18rem,calc(100vw-13rem))] items-center gap-2 text-sm font-semibold text-gray-800 hover:underline md:max-w-none">
           {userAvatar ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={userAvatar} alt="" className="h-7 w-7 rounded-full border border-black/10 object-cover" />
+            <img src={userAvatar} alt="" className="h-7 w-7 shrink-0 rounded-full border border-black/10 object-cover" />
           ) : (
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-gray-100 text-[11px] text-black/60">
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-black/10 bg-gray-100 text-[11px] text-black/60">
               {(userLabel || "U").slice(0, 1).toUpperCase()}
             </span>
           )}
-          <span>{userLabel ? `Привет, ${userLabel}` : "Привет"}</span>
-          {userVerified ? <span aria-label="Подтверждённый пользователь">✓</span> : null}
-          <span aria-hidden="true">▾</span>
+          <span className="min-w-0 truncate">{userLabel ? `Привет, ${userLabel}` : "Привет"}</span>
+          {userVerified ? (
+            <span className="shrink-0" aria-label="Подтверждённый пользователь">
+              ✓
+            </span>
+          ) : null}
+          <span className="shrink-0" aria-hidden="true">
+            ▾
+          </span>
         </div>
       </button>
 
@@ -509,7 +514,10 @@ export function SiteHeader() {
       ) : null}
     </div>
   ) : auth.status === "ready" ? (
-    <Link href="/login" className="text-sm font-semibold text-gray-800 hover:underline">
+    <Link
+      href="/login"
+      className="block max-w-[min(16rem,calc(100vw-8rem))] text-right text-xs font-semibold leading-tight text-gray-800 break-words [overflow-wrap:anywhere] hover:underline sm:max-w-none sm:text-sm"
+    >
       Войти / Регистрация
     </Link>
   ) : (
@@ -518,17 +526,15 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-gray-200 bg-white">
-      <div className="mx-auto w-full max-w-7xl px-6 py-3">
+      <div className="mx-auto w-full min-w-0 max-w-7xl px-3 py-3 sm:px-6">
         <div className="flex flex-col gap-3 md:hidden">
-          <div className="flex items-center justify-between gap-4">
-            <Link href="/" className="inline-flex min-w-0 items-center leading-none">
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <Link href="/" className="inline-flex min-w-0 shrink items-center leading-none">
               <HeaderHaliwaliLogo />
             </Link>
-            <div className="flex shrink-0 items-center gap-8">
-              {suppressUserChromeForAdmin ? null : postCta}
-              {authBlock}
-            </div>
+            <div className="min-w-0 shrink">{authBlock}</div>
           </div>
+          {suppressUserChromeForAdmin ? null : <div className="w-full min-w-0 max-w-full">{postCta}</div>}
           <div className="relative w-full">
             <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
@@ -539,19 +545,9 @@ export function SiteHeader() {
               className="h-11 w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 text-sm text-black outline-none placeholder:text-black/40 focus:border-gray-300 focus:ring-2 focus:ring-[rgba(255,122,0,0.2)]"
             />
           </div>
-          {!isHome && !isMapPage ?
-            <div className="flex justify-center">
-              <Link
-                href="/map"
-                className="text-sm font-semibold text-black/65 hover:text-black hover:underline"
-              >
-                На карте
-              </Link>
-            </div>
-          : null}
         </div>
 
-        <div className="hidden items-center justify-between gap-6 md:flex">
+        <div className="hidden min-w-0 items-center justify-between gap-6 md:flex">
           <Link href="/" className="inline-flex shrink-0 items-center leading-none">
             <HeaderHaliwaliLogo />
           </Link>
@@ -565,14 +561,6 @@ export function SiteHeader() {
               className="h-11 w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 text-sm text-black outline-none placeholder:text-black/40 focus:border-gray-300 focus:ring-2 focus:ring-[rgba(255,122,0,0.2)]"
             />
           </div>
-          {!suppressUserChromeForAdmin && !isHome && !isMapPage ?
-            <Link
-              href="/map"
-              className="shrink-0 whitespace-nowrap text-sm font-semibold text-black/65 hover:text-black hover:underline"
-            >
-              На карте
-            </Link>
-          : null}
           <div className="flex shrink-0 items-center gap-8">
             {suppressUserChromeForAdmin ? null : postCta}
             {authBlock}

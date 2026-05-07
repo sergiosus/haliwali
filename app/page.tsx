@@ -387,12 +387,12 @@ function HaliwaliLanding() {
   }
 
   return (
-    <div className="min-h-full bg-black/[0.03] text-black">
-      <header className="w-full px-6 py-4">
-        <div className="flex w-full flex-col space-y-3">
+    <div className="min-h-full min-w-0 max-w-full bg-black/[0.03] text-black">
+      <header className="min-w-0 max-w-full w-full px-3 py-4 sm:px-6">
+        <div className="flex min-w-0 max-w-full w-full flex-col space-y-3">
           <div className="mt-6 flex w-full justify-center">
-            <div className="w-full px-4 text-center">
-              <p className="whitespace-nowrap text-lg font-semibold leading-tight text-gray-800 md:text-xl">
+            <div className="w-full min-w-0 max-w-full px-1 text-center sm:px-4">
+              <p className="text-lg font-semibold leading-tight break-words text-gray-800 md:text-xl">
                 Размещайте задачи, продавайте товары и находите клиентов по всей России без посредников
               </p>
               <p className="mt-1 text-sm leading-tight text-gray-500">
@@ -403,7 +403,7 @@ function HaliwaliLanding() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1200px] px-4 pb-16 sm:px-6">
+      <main className="mx-auto w-full min-w-0 max-w-full max-w-[1200px] px-4 pb-16 sm:px-6">
           {normalizeQuery(directorySearch) ? (
             <section className="mb-4">
               <div className="rounded-3xl border border-black/10 bg-white p-5">

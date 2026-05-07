@@ -307,16 +307,16 @@ export default function MapBrowsePage() {
   const scopeLabel = homepageLocationLabelFromScope(mapScope);
 
   return (
-    <div className="flex h-[calc(100dvh-57px)] max-h-[calc(100dvh-57px)] min-h-0 w-full flex-col overflow-hidden bg-black/[0.03] text-black md:flex-row">
-      <aside className="order-2 flex min-h-0 flex-1 flex-col overflow-hidden border-black/10 md:order-1 md:h-full md:w-[360px] md:min-w-[320px] md:max-w-[360px] md:flex-none md:shrink-0 md:border-r">
+    <div className="flex h-[calc(100dvh-57px)] max-h-[calc(100dvh-57px)] min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden bg-black/[0.03] text-black md:flex-row">
+      <aside className="order-2 flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden border-black/10 md:order-1 md:h-full md:w-[360px] md:min-w-[320px] md:max-w-[360px] md:flex-none md:shrink-0 md:border-r">
         <div
           ref={listRef}
           className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
         >
           <div className="space-y-3 border-b border-black/10 bg-white p-3">
-            <div className="flex items-center justify-between gap-2">
-              <h1 className="text-base font-semibold text-black/90">Объявления на карте</h1>
-              <Link href="/" className="text-xs font-semibold text-black/50 hover:text-black hover:underline">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <h1 className="min-w-0 flex-1 text-base font-semibold text-black/90 break-words">Объявления на карте</h1>
+              <Link href="/" className="shrink-0 text-xs font-semibold text-black/50 hover:text-black hover:underline">
                 На главную
               </Link>
             </div>
@@ -356,13 +356,13 @@ export default function MapBrowsePage() {
               </select>
             </div>
 
-            <label className="grid gap-1">
+            <label className="grid min-w-0 gap-1">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Поиск по тексту</span>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Заголовок, описание…"
-                className="h-10 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-black/20"
+                className="h-10 min-w-0 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-black/20"
               />
             </label>
 
@@ -381,50 +381,50 @@ export default function MapBrowsePage() {
                     <option value="used">Б/у</option>
                   </select>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-black/80">
+                <label className="flex min-w-0 flex-wrap items-start gap-2 text-sm text-black/80">
                   <input
                     type="checkbox"
                     checked={productDeliveryCategory}
                     onChange={(e) => setProductDeliveryCategory(e.target.checked)}
-                    className="h-4 w-4 accent-black"
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-black"
                   />
-                  Категория про доставку / перевозки
+                  <span className="min-w-0 flex-1 break-words">Категория про доставку / перевозки</span>
                 </label>
               </div>
             )}
 
             {(listingKind === "all" || listingKind === "service") && (
-              <label className="flex items-center gap-2 text-sm text-black/80">
+              <label className="flex min-w-0 flex-wrap items-start gap-2 text-sm text-black/80">
                 <input
                   type="checkbox"
                   checked={serviceRemoteOnly}
                   onChange={(e) => setServiceRemoteOnly(e.target.checked)}
-                  className="h-4 w-4 accent-black"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-black"
                 />
-                Услуги: удалённо / онлайн (по тексту)
+                <span className="min-w-0 flex-1 break-words">Услуги: удалённо / онлайн (по тексту)</span>
               </label>
             )}
 
             {(listingKind === "all" || listingKind === "task") && (
               <div className="grid gap-2 rounded-xl border border-black/10 bg-black/[0.02] p-2">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Задачи</div>
-                <label className="flex items-center gap-2 text-sm text-black/80">
+                <label className="flex min-w-0 flex-wrap items-start gap-2 text-sm text-black/80">
                   <input
                     type="checkbox"
                     checked={taskUrgentOnly}
                     onChange={(e) => setTaskUrgentOnly(e.target.checked)}
-                    className="h-4 w-4 accent-black"
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-black"
                   />
-                  Срочные (по слову в тексте)
+                  <span className="min-w-0 flex-1 break-words">Срочные (по слову в тексте)</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-black/80">
+                <label className="flex min-w-0 flex-wrap items-start gap-2 text-sm text-black/80">
                   <input
                     type="checkbox"
                     checked={taskRemoteOnly}
                     onChange={(e) => setTaskRemoteOnly(e.target.checked)}
-                    className="h-4 w-4 accent-black"
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-black"
                   />
-                  Удалённая задача (по тексту)
+                  <span className="min-w-0 flex-1 break-words">Удалённая задача (по тексту)</span>
                 </label>
               </div>
             )}
@@ -452,24 +452,24 @@ export default function MapBrowsePage() {
               </div>
             )}
 
-            <label className="flex items-center gap-2 text-sm text-black/80">
+            <label className="flex min-w-0 flex-wrap items-start gap-2 text-sm text-black/80">
               <input
                 type="checkbox"
                 checked={onlyWithPhoto}
                 onChange={(e) => setOnlyWithPhoto(e.target.checked)}
-                className="h-4 w-4 accent-black"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-black"
               />
-              Только с фото
+              <span className="min-w-0 flex-1 break-words">Только с фото</span>
             </label>
 
-            <label className="flex items-center gap-2 text-sm text-black/80">
+            <label className="flex min-w-0 flex-wrap items-start gap-2 text-sm text-black/80">
               <input
                 type="checkbox"
                 checked={onlyWithPrice}
                 onChange={(e) => setOnlyWithPrice(e.target.checked)}
-                className="h-4 w-4 accent-black"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-black"
               />
-              Только с ценой
+              <span className="min-w-0 flex-1 break-words">Только с ценой</span>
             </label>
 
             <div className="grid gap-1.5">
@@ -498,7 +498,7 @@ export default function MapBrowsePage() {
               </select>
             </div>
 
-            <div className="text-xs text-black/50">
+            <div className="min-w-0 break-words text-xs text-black/50">
               Локация: {scopeLabel}. Без координат объявление только в списке, не на карте.
             </div>
           </div>

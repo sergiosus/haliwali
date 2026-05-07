@@ -4,6 +4,7 @@ type SendEmailArgs = {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 };
 
 function smtpConfig() {
@@ -46,6 +47,7 @@ export async function sendEmail(
   const to = (args.to ?? "").trim();
   const subject = (args.subject ?? "").trim();
   const text = (args.text ?? "").trim();
+  const html = (args.html ?? "").trim();
   if (!to) throw new Error("BAD_TO");
 
   const startedAt = Date.now();
@@ -66,6 +68,7 @@ export async function sendEmail(
       to,
       subject,
       text,
+      ...(html ? { html } : {}),
     });
 
     const messageId = typeof (info as any)?.messageId === "string" ? (info as any).messageId : undefined;

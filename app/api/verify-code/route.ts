@@ -28,6 +28,7 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { value?: string; code?: string };
   const value = body.value ?? "";
   const type: "email" | "phone" = value.includes("@") ? "email" : "phone";
+  console.log("[OTP] route start", { route: "/api/verify-code", channel: type });
   const normalized = type === "email" ? normalizeEmail(value) : normalizePhone(value);
   const ip = extractIp(req);
   if (!normalized) return NextResponse.json({ error: "Неверный код" }, { status: 400 });

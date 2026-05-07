@@ -21,6 +21,8 @@ export async function POST(req: Request) {
   const csrf = denyIfMutationOriginForbidden(req);
   if (csrf) return csrf;
 
+  console.log("[OTP] route start", { route: "/api/profile/phone/request-code", channel: "phone" });
+
   const userId = await getUserIdFromSessionCookie();
   if (!userId) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
 

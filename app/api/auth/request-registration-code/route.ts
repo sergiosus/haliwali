@@ -6,12 +6,14 @@
  * `/api/send-code` + `/api/verify-code` (those are login-only).
  */
 import { NextResponse } from "next/server";
-import { createHash, randomInt } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import { isValidPhone, normalizeEmail, normalizePhone, PHONE_VALIDATION_MESSAGE } from "../../../lib/identity";
 import { userEmailOrPhoneTaken } from "../../../lib/serverUsersStore";
+import { sendMail } from "../../../lib/serverMail";
+import { otpGenerate6, otpHash } from "../../../lib/serverSms";
 import {
   type PendingRegistration,
   registrationFindLatestForCooldown,
@@ -129,17 +131,31 @@ export async function POST(req: Request) {
 
   const isDevBypass = process.env.NODE_ENV !== "production";
 
+  console.log("[OTP] route start", { route: "/api/auth/request-registration-code", channel: confirmMethod });
+
   /** Plaintext OTP for `registration_pending.codeHash`; never sent in production JSON responses or logs via this branch. */
   let code = "";
   if (isDevBypass) {
-    code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    code = otpGenerate6();
   } else if (confirmMethod === "phone") {
     const sms = await sendPhoneCode({ phoneRaw: phone, codesPath: SMS_CODES_PATH, ratePath: SMS_RATE_PATH });
     if (!sms.ok) {
       return NextResponse.json({ error: sms.error, cooldownSec: sms.cooldownSec ?? 0 }, { status: sms.status });
     }
   } else {
-    code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    code = otpGenerate6();
+    // Production email OTP delivery via SMTP.
+    try {
+      await sendMail({ to: email, subject: "Код подтверждения", text: `Ваш код: ${code}` });
+    } catch (e) {
+      // Don't leak code; server logs will contain SMTP error details from serverMail.
+      console.error("[OTP] smtp send failed", {
+        route: "/api/auth/request-registration-code",
+        to: email.includes("@") ? `${email.slice(0, 1)}*@${email.split("@")[1]}` : "***",
+        err: e instanceof Error ? e.message : String(e),
+      });
+      return NextResponse.json({ error: "Не удалось отправить код" }, { status: 500 });
+    }
   }
   const next: PendingRegistration = {
     id: `reg-${now}-${Math.random().toString(16).slice(2)}`,
@@ -147,7 +163,7 @@ export async function POST(req: Request) {
     phone,
     passwordHash: await bcrypt.hash(password, 10),
     confirmMethod,
-    codeHash: code ? sha256(code) : "",
+    codeHash: code ? otpHash(code) : "",
     expiresAt: now + EXPIRY_MS,
     attempts: 0,
     consumed: false,

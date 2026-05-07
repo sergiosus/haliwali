@@ -19,7 +19,7 @@ import {
   registrationFindActive,
   registrationMarkConsumed,
 } from "../../../lib/serverRegistrationStore";
-import { verifyPhoneCode } from "../../../lib/serverSms";
+import { otpHash, verifyPhoneCode } from "../../../lib/serverSms";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
 import { createUserSession, setUserSessionCookie } from "../../../lib/serverSession";
 import { toUserPublicDTO } from "../../../lib/dto";
@@ -48,6 +48,7 @@ export async function POST(req: Request) {
   const phone = normalizePhone(body.phone ?? "");
   const code = (body.code ?? "").trim();
   const identifier = confirmMethod === "email" ? email : phone;
+  console.log("[OTP] route start", { route: "/api/auth/verify-registration-code", channel: confirmMethod });
 
   if (confirmMethod !== "email" && confirmMethod !== "phone") {
     return NextResponse.json({ error: "Выберите способ подтверждения" }, { status: 400 });
@@ -71,7 +72,7 @@ export async function POST(req: Request) {
     const pendingPhoneOtpDev =
       process.env.NODE_ENV !== "production" && typeof current.codeHash === "string" && current.codeHash.length > 0;
     if (pendingPhoneOtpDev) {
-      if (sha256(code) !== current.codeHash) {
+      if (otpHash(code) !== current.codeHash) {
         await registrationBumpAttempts(current.id);
         return NextResponse.json({ error: "Неверный код" }, { status: 400 });
       }
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: checked.error }, { status: checked.status });
       }
     }
-  } else if (sha256(code) !== current.codeHash) {
+  } else if (otpHash(code) !== current.codeHash) {
     await registrationBumpAttempts(current.id);
     return NextResponse.json({ error: "Неверный код" }, { status: 400 });
   }

@@ -91,6 +91,7 @@ export async function POST(req: Request) {
   };
   const value = body.value ?? "";
   const type = body.type;
+  console.log("[OTP] route start", { route: "/api/send-code", channel: type });
   const ip = extractIp(req);
   const phoneSendStart = type === "phone" ? Date.now() : 0;
 

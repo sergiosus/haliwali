@@ -1,81 +1,88 @@
+import nodemailer from "nodemailer";
+
 type SendEmailArgs = {
   to: string;
   subject: string;
   text: string;
 };
 
-function mailerSendApiKey(): string {
-  const raw = (process.env.MAILERSEND_API_KEY ?? "").trim();
-  if (!raw) throw new Error("MAILERSEND_API_KEY is not configured");
-  return raw;
+function smtpConfig() {
+  const host = (process.env.SMTP_HOST ?? "").trim();
+  const portRaw = (process.env.SMTP_PORT ?? "").trim();
+  const secureRaw = (process.env.SMTP_SECURE ?? "").trim();
+  const user = (process.env.SMTP_USER ?? "").trim();
+  const pass = (process.env.SMTP_PASSWORD ?? "").trim();
+
+  if (!host) throw new Error("SMTP_HOST is not configured");
+  const port = Number(portRaw || "587");
+  if (!Number.isFinite(port) || port <= 0) throw new Error("SMTP_PORT is invalid");
+
+  // Accept "true"/"false"/"1"/"0" and default to false (STARTTLS with 587).
+  const secure =
+    secureRaw === "true" || secureRaw === "1"
+      ? true
+      : secureRaw === "false" || secureRaw === "0" || !secureRaw
+        ? false
+        : (() => {
+            throw new Error("SMTP_SECURE is invalid");
+          })();
+
+  if (!user) throw new Error("SMTP_USER is not configured");
+  if (!pass) throw new Error("SMTP_PASSWORD is not configured");
+
+  return { host, port, secure, auth: { user, pass } };
 }
 
-function fromAddress(): string {
-  const raw = (process.env.MAIL_FROM ?? "").trim();
-  if (raw) return raw;
-  // Safe default; must be overridden in production.
-  return "no-reply@haliwali.local";
+function fromField(): string {
+  const address = (process.env.SMTP_FROM ?? "").trim() || "no-reply@haliwali.local";
+  const name = (process.env.SMTP_FROM_NAME ?? "").trim();
+  // Nodemailer `from` accepts "Name <email>" or "email".
+  return name ? `${name} <${address}>` : address;
 }
 
-export async function sendEmail(args: SendEmailArgs): Promise<{ ok: true; status: number; messageId?: string }> {
+export async function sendEmail(
+  args: SendEmailArgs,
+): Promise<{ ok: true; status: "sent"; messageId?: string }> {
   const to = (args.to ?? "").trim();
   const subject = (args.subject ?? "").trim();
   const text = (args.text ?? "").trim();
   if (!to) throw new Error("BAD_TO");
 
   const startedAt = Date.now();
+  const safeTo = to.includes("@")
+    ? `${to.split("@")[0]?.slice(0, 2) ?? ""}***@${to.split("@")[1]}`
+    : "***";
 
-  const r = await fetch("https://api.mailersend.com/v1/email", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${mailerSendApiKey()}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
-      from: { email: fromAddress() },
-      to: [{ email: to }],
-      subject,
-      text,
-    }),
-  });
-
-  const messageId =
-    r.headers.get("x-message-id") ??
-    r.headers.get("x-mailersend-message-id") ??
-    r.headers.get("x-ms-message-id") ??
-    undefined;
-
-  if (!r.ok) {
-    let bodyText = "";
-    try {
-      bodyText = await r.text();
-    } catch {
-      bodyText = "";
-    }
-    const snippet = bodyText.trim().slice(0, 1200);
-    console.error("[email][mailersend] failed", {
-      status: r.status,
-      to,
-      subjectLen: subject.length,
-      textLen: text.length,
-      messageId,
-      body: snippet || undefined,
-      elapsedMs: Date.now() - startedAt,
-    });
-    throw new Error(`MAILERSEND_FAILED_${r.status}`);
-  }
-
-  console.log("[email][mailersend] sent", {
-    status: r.status,
-    to,
+  console.log("[email][smtp] start", {
+    to: safeTo,
     subjectLen: subject.length,
     textLen: text.length,
-    messageId,
-    elapsedMs: Date.now() - startedAt,
   });
 
-  return { ok: true, status: r.status, ...(messageId ? { messageId } : {}) };
+  try {
+    const transporter = nodemailer.createTransport(smtpConfig());
+    const info = await transporter.sendMail({
+      from: fromField(),
+      to,
+      subject,
+      text,
+    });
+
+    const messageId = typeof (info as any)?.messageId === "string" ? (info as any).messageId : undefined;
+    console.log("[email][smtp] sent", {
+      to: safeTo,
+      messageId,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return { ok: true, status: "sent", ...(messageId ? { messageId } : {}) };
+  } catch (e) {
+    console.error("[email][smtp] failed", {
+      to: safeTo,
+      err: e instanceof Error ? e.message : String(e),
+      elapsedMs: Date.now() - startedAt,
+    });
+    throw e;
+  }
 }
 
 // Backwards-compatible wrapper for existing flows.

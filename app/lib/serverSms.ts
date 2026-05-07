@@ -1,5 +1,6 @@
 import { createHash, randomInt } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import nodemailer from "nodemailer";
 import { isValidPhone, normalizeEmail, normalizePhone, PHONE_VALIDATION_MESSAGE } from "./identity";
 import { getPool, usesPostgres } from "./pgPool";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
@@ -212,20 +213,57 @@ async function sendSmsViaProvider(phone: string, message: string) {
 }
 
 async function sendEmailViaProvider(email: string, subject: string, text: string) {
-  const endpoint = process.env.EMAIL_PROVIDER_URL?.trim();
-  const apiKey = process.env.EMAIL_PROVIDER_API_KEY?.trim();
-  if (!endpoint || !apiKey) {
+  console.log("[OTP] env", {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: process.env.SMTP_SECURE,
+    user: process.env.SMTP_USER,
+    from: process.env.SMTP_FROM,
+  });
+
+  console.log("[OTP] sending", { to: email });
+
+  const host = (process.env.SMTP_HOST ?? "").trim();
+  const portRaw = (process.env.SMTP_PORT ?? "").trim();
+  const secureRaw = (process.env.SMTP_SECURE ?? "").trim();
+  const user = (process.env.SMTP_USER ?? "").trim();
+  const pass = (process.env.SMTP_PASSWORD ?? "").trim();
+  const fromAddress = (process.env.SMTP_FROM ?? "").trim() || "no-reply@haliwali.local";
+  const fromName = (process.env.SMTP_FROM_NAME ?? "").trim();
+
+  // In development, allow OTP flows to proceed without email delivery.
+  if (!host || !user || !pass) {
     if (process.env.NODE_ENV === "development") {
-      const safe = email.includes("@") ? `${email.split("@")[0]?.slice(0, 2) ?? ""}***@${email.split("@")[1]}` : "***";
+      const safe = email.includes("@")
+        ? `${email.split("@")[0]?.slice(0, 2) ?? ""}***@${email.split("@")[1]}`
+        : "***";
       console.log(`[email-code][dev] to=${safe} subjLen=${subject.length} textLen=${text.length}`);
     }
     return;
   }
-  await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ to: email, subject, text }),
-  });
+
+  const port = Number(portRaw || "587");
+  const secure =
+    secureRaw === "true" || secureRaw === "1"
+      ? true
+      : secureRaw === "false" || secureRaw === "0" || !secureRaw
+        ? false
+        : false;
+
+  const from = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+    });
+    const info = await transporter.sendMail({ from, to: email, subject, text });
+    console.log("[OTP] sent ok", info);
+  } catch (error) {
+    console.error("[OTP] send failed", error);
+  }
 }
 
 function normalizeByType(raw: string, type: VerifyType) {

@@ -357,14 +357,17 @@ async function sendEmailOtp(
 
     setStage("create-transporter");
     stage = "create-transporter";
+    console.log("[OTP_EMAIL] preparing smtp");
     console.log("[OTP_EMAIL] creating transporter");
     const transporter = nodemailer.createTransport(smtpConfigOrThrow());
     console.log("[OTP_EMAIL] creating transporter success");
 
     setStage("verify-transporter");
     stage = "verify-transporter";
+    console.log("[OTP_EMAIL] smtp verify start");
     console.log("[OTP_EMAIL] verifying transporter start");
     await transporter.verify();
+    console.log("[OTP_EMAIL] smtp verify ok");
     console.log("[OTP_EMAIL] verifying transporter success");
 
     setStage("send-mail");
@@ -376,6 +379,21 @@ async function sendEmailOtp(
       subject,
       text,
     });
+    const accepted = Array.isArray((info as any)?.accepted) ? (info as any).accepted : [];
+    if (accepted.length === 0) {
+      const err = new Error("SMTP_NOT_ACCEPTED");
+      (err as any).response = (info as any)?.response;
+      (err as any).rejected = (info as any)?.rejected;
+      throw err;
+    }
+    console.log("[OTP_EMAIL] sendMail ok", {
+      messageId: (info as any)?.messageId,
+      accepted: (info as any)?.accepted,
+      rejected: (info as any)?.rejected,
+      pending: (info as any)?.pending,
+      response: (info as any)?.response,
+      envelope: (info as any)?.envelope,
+    });
     console.log("[OTP_EMAIL] sendMail success", {
       messageId: (info as any)?.messageId,
       accepted: (info as any)?.accepted,
@@ -385,6 +403,15 @@ async function sendEmailOtp(
       envelope: (info as any)?.envelope,
     });
   } catch (e) {
+    console.error("[OTP_EMAIL] sendMail error", {
+      stage,
+      name: e instanceof Error ? e.name : undefined,
+      message: e instanceof Error ? e.message : String(e),
+      code: (e as any)?.code,
+      command: (e as any)?.command,
+      response: (e as any)?.response,
+      responseCode: (e as any)?.responseCode,
+    });
     console.error("[OTP_EMAIL] failed", {
       stage,
       name: e instanceof Error ? e.name : undefined,

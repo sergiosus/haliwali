@@ -90,6 +90,7 @@ export async function POST(req: Request) {
     type?: "email" | "phone";
     captchaToken?: string;
   };
+  console.log("[OTP_SEND] body parsed", { bodyKeys: Object.keys(body ?? {}) });
   console.log("[OTP_SEND] body keys", { keys: Object.keys(body ?? {}) });
   const value = body.value ?? "";
   const type = body.type;
@@ -114,6 +115,7 @@ export async function POST(req: Request) {
   if (type === "phone" && !isValidPhone(value)) {
     return await finishPhone(NextResponse.json({ error: PHONE_VALIDATION_MESSAGE }, { status: 400 }));
   }
+  console.log("[OTP_SEND] validation passed");
 
   await mkdir(DATA_DIR, { recursive: true });
   const codeIpLimit = await checkIpRateLimit({
@@ -157,11 +159,11 @@ export async function POST(req: Request) {
     }
   }
 
-  console.log("[OTP_SEND] before store");
+  console.log("[OTP_SEND] calling sendVerificationCode");
   let result: Awaited<ReturnType<typeof sendVerificationCode>>;
   try {
     result = await sendVerificationCode({ valueRaw: value, type, codesPath: CODES_PATH, ratePath: RATE_PATH });
-    console.log("[OTP_SEND] after store");
+    console.log("[OTP_SEND] sendVerificationCode result", { ok: (result as any)?.ok, status: (result as any)?.status });
   } catch (e) {
     console.error("[OTP_SEND] failed", {
       name: e instanceof Error ? e.name : undefined,
@@ -169,10 +171,12 @@ export async function POST(req: Request) {
       code: (e as any)?.code,
       stack: e instanceof Error ? e.stack : undefined,
     });
-    if (type === "phone") {
-      return await finishPhone(NextResponse.json({ error: "Не удалось отправить код" }, { status: 500 }));
-    }
-    return NextResponse.json({ error: "Не удалось отправить код" }, { status: 500 });
+    const errPayload = NextResponse.json(
+      { error: "Не удалось отправить код подтверждения" },
+      { status: 500 },
+    );
+    if (type === "phone") return await finishPhone(errPayload);
+    return errPayload;
   }
   if (!result.ok) {
     if (type === "phone") {

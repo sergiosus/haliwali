@@ -344,14 +344,30 @@ async function sendEmailOtp(
   getStage: () => string,
   setStage: (s: "smtp-env" | "create-transporter" | "verify-transporter" | "send-mail") => void,
 ) {
-  const toMasked = maskEmailForLogs(email);
   let stage = getStage();
   try {
     setStage("smtp-env");
     stage = "smtp-env";
-    const env = smtpEnvPresence();
-    console.log("[OTP_EMAIL] smtp env summary", env);
-    if (!env.host || !env.port || !env.secure || !env.userPresent || !env.passPresent || !env.fromPresent) {
+    const host = (process.env.SMTP_HOST ?? "").trim();
+    const portRaw = (process.env.SMTP_PORT ?? "").trim();
+    const secureRaw = (process.env.SMTP_SECURE ?? "").trim();
+    const userPresent = Boolean((process.env.SMTP_USER ?? "").trim());
+    const passPresent = Boolean((process.env.SMTP_PASSWORD ?? "").trim());
+    const from = (process.env.SMTP_FROM ?? "").trim();
+
+    const port = Number(portRaw || "587");
+    const secure =
+      secureRaw === "true" || secureRaw === "1"
+        ? true
+        : secureRaw === "false" || secureRaw === "0" || !secureRaw
+          ? false
+          : (() => {
+              throw new Error("SMTP_SECURE is invalid");
+            })();
+
+    console.log("[OTP_EMAIL] smtp config host=%s port=%s secure=%s", host, String(port), String(secure));
+
+    if (!host || !Number.isFinite(port) || port <= 0 || !userPresent || !passPresent || !from) {
       throw new Error("SMTP_ENV_MISSING");
     }
 
@@ -359,9 +375,8 @@ async function sendEmailOtp(
     stage = "create-transporter";
     console.log("[OTP_EMAIL] preparing smtp");
     const cfg = smtpConfigOrThrow();
-    console.log(`[OTP_EMAIL] smtp config host=${cfg.host} port=${cfg.port} secure=${cfg.secure}`);
     console.log("[OTP_EMAIL] creating transporter");
-    const transporter = nodemailer.createTransport(cfg);
+    const transporter = nodemailer.createTransport(cfg); // createTransport required
     console.log("[OTP_EMAIL] creating transporter success");
 
     setStage("verify-transporter");
@@ -372,7 +387,7 @@ async function sendEmailOtp(
 
     setStage("send-mail");
     stage = "send-mail";
-    console.log(`[OTP_EMAIL] sendMail start to=${email}`);
+    console.log("[OTP_EMAIL] sendMail start to=%s", maskEmailForLogs(email));
     const info = await transporter.sendMail({
       from: smtpFromField(),
       to: email,
@@ -380,17 +395,23 @@ async function sendEmailOtp(
       text,
     });
     const accepted = Array.isArray((info as any)?.accepted) ? (info as any).accepted : [];
+    const rejected = Array.isArray((info as any)?.rejected) ? (info as any).rejected : [];
+    const response = String((info as any)?.response ?? "");
+    const messageId = String((info as any)?.messageId ?? "");
+
     if (!accepted || accepted.length === 0) {
       throw new Error("SMTP did not accept OTP email");
     }
-    const rejected = (info as any)?.rejected;
-    const response = (info as any)?.response;
-    const messageId = (info as any)?.messageId;
+
     console.log(
-      `[OTP_EMAIL] sendMail ok accepted=${JSON.stringify(accepted)} rejected=${JSON.stringify(rejected)} response=${JSON.stringify(response)} messageId=${JSON.stringify(messageId)}`,
+      "[OTP_EMAIL] sendMail ok accepted=%o rejected=%o response=%s messageId=%s",
+      accepted,
+      rejected,
+      response,
+      messageId,
     );
   } catch (e) {
-    console.error("[OTP_EMAIL] sendMail failed");
+    console.error("[OTP_EMAIL] sendMail failed", e);
     console.error("[OTP_EMAIL] failed", {
       stage,
       name: e instanceof Error ? e.name : undefined,

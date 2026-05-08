@@ -206,7 +206,7 @@ export async function sendVerificationCode(opts: {
   } else {
     console.log("[OTP] channel=email");
     console.log("[OTP_SEND] before email");
-    await sendEmailOtp(value, "Код подтверждения", `Ваш код: ${code}`, () => stage, (s) => {
+    await sendEmailOtp(value, "Код подтверждения Haliwali", `Ваш код: ${code}`, () => stage, (s) => {
       stage = s;
     });
     console.log("[OTP_SEND] email sent");
@@ -358,8 +358,10 @@ async function sendEmailOtp(
     setStage("create-transporter");
     stage = "create-transporter";
     console.log("[OTP_EMAIL] preparing smtp");
+    const cfg = smtpConfigOrThrow();
+    console.log(`[OTP_EMAIL] smtp config host=${cfg.host} port=${cfg.port} secure=${cfg.secure}`);
     console.log("[OTP_EMAIL] creating transporter");
-    const transporter = nodemailer.createTransport(smtpConfigOrThrow());
+    const transporter = nodemailer.createTransport(cfg);
     console.log("[OTP_EMAIL] creating transporter success");
 
     setStage("verify-transporter");

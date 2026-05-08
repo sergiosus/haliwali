@@ -158,8 +158,22 @@ export async function POST(req: Request) {
   }
 
   console.log("[OTP_SEND] before store");
-  const result = await sendVerificationCode({ valueRaw: value, type, codesPath: CODES_PATH, ratePath: RATE_PATH });
-  console.log("[OTP_SEND] after store");
+  let result: Awaited<ReturnType<typeof sendVerificationCode>>;
+  try {
+    result = await sendVerificationCode({ valueRaw: value, type, codesPath: CODES_PATH, ratePath: RATE_PATH });
+    console.log("[OTP_SEND] after store");
+  } catch (e) {
+    console.error("[OTP_SEND] failed", {
+      name: e instanceof Error ? e.name : undefined,
+      message: e instanceof Error ? e.message : String(e),
+      code: (e as any)?.code,
+      stack: e instanceof Error ? e.stack : undefined,
+    });
+    if (type === "phone") {
+      return await finishPhone(NextResponse.json({ error: "Не удалось отправить код" }, { status: 500 }));
+    }
+    return NextResponse.json({ error: "Не удалось отправить код" }, { status: 500 });
+  }
   if (!result.ok) {
     if (type === "phone") {
       return await finishPhone(

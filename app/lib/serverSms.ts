@@ -1,9 +1,9 @@
 import { createHash, randomInt } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import nodemailer from "nodemailer";
 import { isValidPhone, normalizeEmail, normalizePhone, PHONE_VALIDATION_MESSAGE } from "./identity";
 import { getPool, usesPostgres } from "./pgPool";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
-import { sendMail } from "./serverMail";
 
 type VerifyType = "email" | "phone";
 type VerificationCodeRecord = {
@@ -32,6 +32,58 @@ export function otpGenerate6(): string {
 
 export function otpHash(code: string): string {
   return sha256(code);
+}
+
+function smtpEnvPresence() {
+  return {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: process.env.SMTP_SECURE,
+    userPresent: Boolean((process.env.SMTP_USER ?? "").trim()),
+    passPresent: Boolean((process.env.SMTP_PASSWORD ?? "").trim()),
+    from: process.env.SMTP_FROM,
+  };
+}
+
+function smtpConfigOrThrow() {
+  const host = (process.env.SMTP_HOST ?? "").trim();
+  const portRaw = (process.env.SMTP_PORT ?? "").trim();
+  const secureRaw = (process.env.SMTP_SECURE ?? "").trim();
+  const user = (process.env.SMTP_USER ?? "").trim();
+  const pass = (process.env.SMTP_PASSWORD ?? "").trim();
+
+  if (!host) throw new Error("SMTP_HOST is not configured");
+  const port = Number(portRaw || "587");
+  if (!Number.isFinite(port) || port <= 0) throw new Error("SMTP_PORT is invalid");
+
+  const secure =
+    secureRaw === "true" || secureRaw === "1"
+      ? true
+      : secureRaw === "false" || secureRaw === "0" || !secureRaw
+        ? false
+        : (() => {
+            throw new Error("SMTP_SECURE is invalid");
+          })();
+
+  if (!user) throw new Error("SMTP_USER is not configured");
+  if (!pass) throw new Error("SMTP_PASSWORD is not configured");
+
+  return { host, port, secure, auth: { user, pass } };
+}
+
+function smtpFromField(): string {
+  const address = (process.env.SMTP_FROM ?? "").trim() || "no-reply@haliwali.local";
+  const name = (process.env.SMTP_FROM_NAME ?? "").trim();
+  return name ? `${name} <${address}>` : address;
+}
+
+function maskEmailForLogs(email: string): string {
+  const t = (email ?? "").trim();
+  const at = t.indexOf("@");
+  if (at < 1) return "***";
+  const domain = t.slice(at + 1);
+  const first = t.slice(0, 1) || "*";
+  return `${first}*@${domain}`;
 }
 
 export async function sendVerificationCode(opts: {
@@ -254,28 +306,29 @@ function maskPhone(phone: string): string {
 }
 
 async function sendEmailOtp(email: string, subject: string, text: string) {
-  console.log("[OTP] env", {
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    secure: process.env.SMTP_SECURE,
-    user: process.env.SMTP_USER,
-    from: process.env.SMTP_FROM,
-  });
-
-  const toMasked = maskEmail(email);
-  console.log("[OTP] sending", { to: toMasked });
-
+  const toMasked = maskEmailForLogs(email);
+  console.log("[SMTP] env presence", smtpEnvPresence());
   try {
-    // Validates SMTP_* env vars internally; throws on misconfig.
-    await sendMail({ to: email, subject, text });
-    console.log("[OTP] smtp config ok");
-    console.log("[OTP] smtp send ok", { to: toMasked });
-  } catch (error) {
-    console.error("[OTP] smtp send failed", {
-      to: toMasked,
-      err: error instanceof Error ? error.message : String(error),
+    const transporter = nodemailer.createTransport(smtpConfigOrThrow());
+    console.log("[SMTP] transporter created");
+    console.log("[SMTP] before sendMail", { to: toMasked });
+    const info = await transporter.sendMail({
+      from: smtpFromField(),
+      to: email,
+      subject,
+      text,
     });
-    throw error;
+    const messageId = typeof (info as any)?.messageId === "string" ? (info as any).messageId : undefined;
+    console.log("[SMTP] sendMail success", { to: toMasked, messageId });
+  } catch (e) {
+    console.error("[SMTP] sendMail failed", {
+      to: toMasked,
+      name: e instanceof Error ? e.name : undefined,
+      message: e instanceof Error ? e.message : String(e),
+      code: (e as any)?.code,
+      stack: e instanceof Error ? e.stack : undefined,
+    });
+    throw e;
   }
 }
 

@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root {
   --background: #ffffff;
@@ -8,7 +6,7 @@
   --accent: #ff7a00;
 }
 
-/* Tailwind v3: keep CSS variables as-is (no @theme). */
+/* Keep CSS variables as-is (no @theme). */
 
 @media (prefers-color-scheme: dark) {
   :root {

@@ -144,19 +144,34 @@ Still keep **backups until** you have verified production only uses PostgreSQL f
 From the cloned repository on the server:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm exec tsc --noEmit
-pnpm run build
-NODE_ENV=production pnpm start
+npm install
+rm -rf .next
+npm run build
+NODE_ENV=production npm run start
 ```
 
 Bind to `127.0.0.1` behind a reverse proxy, or set `HOSTNAME` / `PORT` as supported by your Next.js version. Example:
 
 ```bash
-PORT=3000 HOSTNAME=127.0.0.1 NODE_ENV=production pnpm start
+PORT=3000 HOSTNAME=127.0.0.1 NODE_ENV=production npm run start
 ```
 
 Use **systemd**, **PM2**, or similar to restart on failure and on reboot.
+
+### PM2 restart safety
+
+- Always run **`npm run build`** successfully before restarting the process.
+- If `npm run build` fails, **do not run `pm2 restart`** (you will end up with `next start` failing with “Could not find a production build in the .next directory”).
+
+Recommended deploy sequence:
+
+```bash
+git pull
+npm install
+rm -rf .next
+npm run build
+pm2 restart haliwali --update-env
+```
 
 ---
 

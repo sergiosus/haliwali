@@ -126,12 +126,14 @@ export async function sendVerificationCode(opts: {
     const rateKey = `${purpose}:${value}`;
     const rateOk = await smsRateLimitOkPg(pool, { key: rateKey, nowMs: now, limit: MAX_SENDS_PER_WINDOW, windowMs: RATE_WINDOW_MS });
     if (!rateOk.ok) {
+      console.log("[OTP_EMAIL] rate-limit deny", { type: opts.type });
       return { ok: false as const, error: "Слишком много запросов. Попробуйте позже.", status: 429 };
     }
 
     const last = await findLastActiveCodePg(pool, { purpose, target: value });
     if (last && now - last.createdAtMs < RESEND_COOLDOWN_MS) {
       const left = Math.ceil((RESEND_COOLDOWN_MS - (now - last.createdAtMs)) / 1000);
+      console.log("[OTP_EMAIL] cooldown active", { type: opts.type, leftSec: left });
       return { ok: false as const, error: `Отправить код повторно через ${left} сек`, status: 429, cooldownSec: left };
     }
   } else {
@@ -139,6 +141,7 @@ export async function sendVerificationCode(opts: {
     const rate = await readJson<RateMap>(opts.ratePath, {});
     const recent = (rate[value] ?? []).filter((ts) => now - ts < RATE_WINDOW_MS);
     if (recent.length >= MAX_SENDS_PER_WINDOW) {
+      console.log("[OTP_EMAIL] rate-limit deny", { type: opts.type });
       return { ok: false as const, error: "Слишком много запросов. Попробуйте позже.", status: 429 };
     }
 
@@ -148,11 +151,14 @@ export async function sendVerificationCode(opts: {
       .find((r) => r.type === opts.type && r.value === value && !r.consumed && now < r.expiresAt);
     if (last && now - last.createdAt < RESEND_COOLDOWN_MS) {
       const left = Math.ceil((RESEND_COOLDOWN_MS - (now - last.createdAt)) / 1000);
+      console.log("[OTP_EMAIL] cooldown active", { type: opts.type, leftSec: left });
       return { ok: false as const, error: `Отправить код повторно через ${left} сек`, status: 429, cooldownSec: left };
     }
   }
 
+  if (opts.type === "email") console.log("[OTP_EMAIL] code generation start");
   const code = otpGenerate6();
+  if (opts.type === "email") console.log("[OTP_EMAIL] code generation success");
   if (opts.type === "email") {
     console.log("[OTP_EMAIL] email target", { to: maskEmailForLogs(value) });
     console.log("[OTP_EMAIL] code generated");
@@ -353,6 +359,7 @@ async function sendEmailOtp(
     stage = "create-transporter";
     console.log("[OTP_EMAIL] creating transporter");
     const transporter = nodemailer.createTransport(smtpConfigOrThrow());
+    console.log("[OTP_EMAIL] creating transporter success");
 
     setStage("verify-transporter");
     stage = "verify-transporter";
@@ -373,7 +380,9 @@ async function sendEmailOtp(
       messageId: (info as any)?.messageId,
       accepted: (info as any)?.accepted,
       rejected: (info as any)?.rejected,
+      pending: (info as any)?.pending,
       response: (info as any)?.response,
+      envelope: (info as any)?.envelope,
     });
   } catch (e) {
     console.error("[OTP_EMAIL] failed", {

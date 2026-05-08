@@ -159,12 +159,27 @@ export async function POST(req: Request) {
     }
   }
 
-  console.log("[OTP_SEND] calling sendVerificationCode");
+  const maskedValue = (() => {
+    const raw = (value ?? "").trim();
+    if (!raw) return "***";
+    if (raw.includes("@")) {
+      const [local, domain] = raw.split("@");
+      const first = (local ?? "").slice(0, 1) || "*";
+      return `${first}***@${domain ?? ""}`;
+    }
+    const digits = raw.replace(/[^\d]/g, "");
+    if (digits.length < 4) return "+****";
+    return `+${digits.slice(0, 1)}****${digits.slice(-4)}`;
+  })();
+
+  console.log(`[OTP_SEND] calling sendVerificationCode type=${type} value=${maskedValue}`);
   let result: Awaited<ReturnType<typeof sendVerificationCode>>;
   try {
     result = await sendVerificationCode({ valueRaw: value, type, codesPath: CODES_PATH, ratePath: RATE_PATH });
     console.log("[OTP_SEND] sendVerificationCode result", { ok: (result as any)?.ok, status: (result as any)?.status });
+    console.log("[OTP_SEND] sendVerificationCode ok");
   } catch (e) {
+    console.error("[OTP_SEND] sendVerificationCode failed");
     console.error("[OTP_SEND] failed", {
       name: e instanceof Error ? e.name : undefined,
       message: e instanceof Error ? e.message : String(e),

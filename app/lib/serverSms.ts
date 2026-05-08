@@ -364,15 +364,13 @@ async function sendEmailOtp(
 
     setStage("verify-transporter");
     stage = "verify-transporter";
-    console.log("[OTP_EMAIL] smtp verify start");
-    console.log("[OTP_EMAIL] verifying transporter start");
+    console.log("[OTP_EMAIL] verify start");
     await transporter.verify();
-    console.log("[OTP_EMAIL] smtp verify ok");
-    console.log("[OTP_EMAIL] verifying transporter success");
+    console.log("[OTP_EMAIL] verify ok");
 
     setStage("send-mail");
     stage = "send-mail";
-    console.log("[OTP_EMAIL] sendMail start", { to: toMasked });
+    console.log(`[OTP_EMAIL] sendMail start to=${email}`);
     const info = await transporter.sendMail({
       from: smtpFromField(),
       to: email,
@@ -380,38 +378,17 @@ async function sendEmailOtp(
       text,
     });
     const accepted = Array.isArray((info as any)?.accepted) ? (info as any).accepted : [];
-    if (accepted.length === 0) {
-      const err = new Error("SMTP_NOT_ACCEPTED");
-      (err as any).response = (info as any)?.response;
-      (err as any).rejected = (info as any)?.rejected;
-      throw err;
+    if (!accepted || accepted.length === 0) {
+      throw new Error("SMTP did not accept OTP email");
     }
-    console.log("[OTP_EMAIL] sendMail ok", {
-      messageId: (info as any)?.messageId,
-      accepted: (info as any)?.accepted,
-      rejected: (info as any)?.rejected,
-      pending: (info as any)?.pending,
-      response: (info as any)?.response,
-      envelope: (info as any)?.envelope,
-    });
-    console.log("[OTP_EMAIL] sendMail success", {
-      messageId: (info as any)?.messageId,
-      accepted: (info as any)?.accepted,
-      rejected: (info as any)?.rejected,
-      pending: (info as any)?.pending,
-      response: (info as any)?.response,
-      envelope: (info as any)?.envelope,
-    });
+    const rejected = (info as any)?.rejected;
+    const response = (info as any)?.response;
+    const messageId = (info as any)?.messageId;
+    console.log(
+      `[OTP_EMAIL] sendMail ok accepted=${JSON.stringify(accepted)} rejected=${JSON.stringify(rejected)} response=${JSON.stringify(response)} messageId=${JSON.stringify(messageId)}`,
+    );
   } catch (e) {
-    console.error("[OTP_EMAIL] sendMail error", {
-      stage,
-      name: e instanceof Error ? e.name : undefined,
-      message: e instanceof Error ? e.message : String(e),
-      code: (e as any)?.code,
-      command: (e as any)?.command,
-      response: (e as any)?.response,
-      responseCode: (e as any)?.responseCode,
-    });
+    console.error("[OTP_EMAIL] sendMail failed");
     console.error("[OTP_EMAIL] failed", {
       stage,
       name: e instanceof Error ? e.name : undefined,

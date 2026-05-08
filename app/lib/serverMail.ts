@@ -50,6 +50,16 @@ export async function sendEmail(
   const html = (args.html ?? "").trim();
   if (!to) throw new Error("BAD_TO");
 
+  // Diagnostics only: presence (never log password).
+  console.log("[OTP_SEND] smtp env presence", {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: process.env.SMTP_SECURE,
+    userPresent: Boolean((process.env.SMTP_USER ?? "").trim()),
+    passPresent: Boolean((process.env.SMTP_PASSWORD ?? "").trim()),
+    from: process.env.SMTP_FROM,
+  });
+
   const startedAt = Date.now();
   const safeTo = to.includes("@")
     ? `${to.split("@")[0]?.slice(0, 2) ?? ""}***@${to.split("@")[1]}`
@@ -62,6 +72,7 @@ export async function sendEmail(
   });
 
   try {
+    console.log("[OTP_SEND] before email", { to: safeTo });
     const transporter = nodemailer.createTransport(smtpConfig());
     const info = await transporter.sendMail({
       from: fromField(),
@@ -72,6 +83,7 @@ export async function sendEmail(
     });
 
     const messageId = typeof (info as any)?.messageId === "string" ? (info as any).messageId : undefined;
+    console.log("[OTP_SEND] email sent", { to: safeTo, messageId });
     console.log("[email][smtp] sent", {
       to: safeTo,
       messageId,
@@ -79,6 +91,12 @@ export async function sendEmail(
     });
     return { ok: true, status: "sent", ...(messageId ? { messageId } : {}) };
   } catch (e) {
+    console.error("[OTP_SEND] failed", {
+      name: e instanceof Error ? e.name : undefined,
+      message: e instanceof Error ? e.message : String(e),
+      code: (e as any)?.code,
+      stack: e instanceof Error ? e.stack : undefined,
+    });
     console.error("[email][smtp] failed", {
       to: safeTo,
       err: e instanceof Error ? e.message : String(e),

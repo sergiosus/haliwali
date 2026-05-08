@@ -40,6 +40,7 @@ export async function sendVerificationCode(opts: {
   codesPath: string;
   ratePath: string;
 }) {
+  console.log("[OTP_SEND] send start", { channel: opts.type });
   const dev = process.env.NODE_ENV !== "production";
   const value = normalizeByType(opts.valueRaw, opts.type);
   if (opts.type === "email") {
@@ -84,6 +85,7 @@ export async function sendVerificationCode(opts: {
 
   const code = otpGenerate6();
   const ttlMs = opts.type === "phone" ? CODE_TTL_MS_PHONE : CODE_TTL_MS_EMAIL;
+  console.log("[OTP_SEND] before store", { channel: opts.type, usesPostgres: usesPostgres() });
   if (usesPostgres()) {
     const pool = getPool();
     await insertCodePg(pool, {
@@ -113,6 +115,7 @@ export async function sendVerificationCode(opts: {
     rate[value] = recent;
     await writeJson(opts.ratePath, rate);
   }
+  console.log("[OTP_SEND] after store", { channel: opts.type });
 
   console.log("[OTP] send start", { channel: opts.type });
   if (opts.type === "phone") {
@@ -121,7 +124,9 @@ export async function sendVerificationCode(opts: {
     if (!sms.ok) return { ok: false as const, error: sms.error, status: sms.status };
   } else {
     console.log("[OTP] channel=email");
+    console.log("[OTP_SEND] before email");
     await sendEmailOtp(value, "Код подтверждения", `Ваш код: ${code}`);
+    console.log("[OTP_SEND] email sent");
   }
   return {
     ok: true as const,

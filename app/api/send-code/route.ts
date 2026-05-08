@@ -81,6 +81,7 @@ function resolvePhoneLoginSmsGate(
 }
 
 export async function POST(req: Request) {
+  console.log("[OTP_SEND] route hit");
   const csrf = denyIfMutationOriginForbidden(req);
   if (csrf) return csrf;
 
@@ -89,8 +90,10 @@ export async function POST(req: Request) {
     type?: "email" | "phone";
     captchaToken?: string;
   };
+  console.log("[OTP_SEND] body keys", { keys: Object.keys(body ?? {}) });
   const value = body.value ?? "";
   const type = body.type;
+  console.log("[OTP_SEND] email present", { present: value.includes("@") });
   console.log("[OTP] route start", { route: "/api/send-code", channel: type });
   const ip = extractIp(req);
   const phoneSendStart = type === "phone" ? Date.now() : 0;
@@ -154,7 +157,9 @@ export async function POST(req: Request) {
     }
   }
 
+  console.log("[OTP_SEND] before store");
   const result = await sendVerificationCode({ valueRaw: value, type, codesPath: CODES_PATH, ratePath: RATE_PATH });
+  console.log("[OTP_SEND] after store");
   if (!result.ok) {
     if (type === "phone") {
       return await finishPhone(

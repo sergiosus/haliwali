@@ -35,13 +35,20 @@ export function otpHash(code: string): string {
 }
 
 function smtpEnvPresence() {
+  const host = (process.env.SMTP_HOST ?? "").trim();
+  const port = (process.env.SMTP_PORT ?? "").trim();
+  const secure = (process.env.SMTP_SECURE ?? "").trim();
+  const userPresent = Boolean((process.env.SMTP_USER ?? "").trim());
+  const passPresent = Boolean((process.env.SMTP_PASSWORD ?? "").trim());
+  const from = (process.env.SMTP_FROM ?? "").trim();
   return {
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    secure: process.env.SMTP_SECURE,
-    userPresent: Boolean((process.env.SMTP_USER ?? "").trim()),
-    passPresent: Boolean((process.env.SMTP_PASSWORD ?? "").trim()),
-    from: process.env.SMTP_FROM,
+    host,
+    port,
+    secure,
+    userPresent,
+    passPresent,
+    fromPresent: Boolean(from),
+    from: from || undefined,
   };
 }
 
@@ -73,8 +80,7 @@ function smtpConfigOrThrow() {
 
 function smtpFromField(): string {
   const address = (process.env.SMTP_FROM ?? "").trim() || "no-reply@haliwali.local";
-  const name = (process.env.SMTP_FROM_NAME ?? "").trim();
-  return name ? `${name} <${address}>` : address;
+  return address;
 }
 
 function maskEmailForLogs(email: string): string {
@@ -92,9 +98,19 @@ export async function sendVerificationCode(opts: {
   codesPath: string;
   ratePath: string;
 }) {
+  console.log("[OTP_EMAIL] helper entered");
+  let stage:
+    | "normalize"
+    | "rate-limit"
+    | "store-code"
+    | "smtp-env"
+    | "create-transporter"
+    | "verify-transporter"
+    | "send-mail" = "normalize";
   console.log("[OTP_SEND] send start", { channel: opts.type });
   const dev = process.env.NODE_ENV !== "production";
   const value = normalizeByType(opts.valueRaw, opts.type);
+  console.log("[OTP_EMAIL] type/value normalized", { type: opts.type, value });
   if (opts.type === "email") {
     if (!value)
       return { ok: false as const, error: "Некорректный email или телефон", status: 400 };
@@ -104,6 +120,7 @@ export async function sendVerificationCode(opts: {
 
   const now = Date.now();
   const purpose = `${derivePurpose(opts.codesPath)}:${opts.type}`;
+  stage = "rate-limit";
   if (usesPostgres()) {
     const pool = getPool();
     const rateKey = `${purpose}:${value}`;
@@ -136,8 +153,13 @@ export async function sendVerificationCode(opts: {
   }
 
   const code = otpGenerate6();
+  if (opts.type === "email") {
+    console.log("[OTP_EMAIL] email target", { to: maskEmailForLogs(value) });
+    console.log("[OTP_EMAIL] code generated");
+  }
   const ttlMs = opts.type === "phone" ? CODE_TTL_MS_PHONE : CODE_TTL_MS_EMAIL;
   console.log("[OTP_SEND] before store", { channel: opts.type, usesPostgres: usesPostgres() });
+  stage = "store-code";
   if (usesPostgres()) {
     const pool = getPool();
     await insertCodePg(pool, {
@@ -168,6 +190,7 @@ export async function sendVerificationCode(opts: {
     await writeJson(opts.ratePath, rate);
   }
   console.log("[OTP_SEND] after store", { channel: opts.type });
+  if (opts.type === "email") console.log("[OTP_EMAIL] code stored");
 
   console.log("[OTP] send start", { channel: opts.type });
   if (opts.type === "phone") {
@@ -177,9 +200,12 @@ export async function sendVerificationCode(opts: {
   } else {
     console.log("[OTP] channel=email");
     console.log("[OTP_SEND] before email");
-    await sendEmailOtp(value, "Код подтверждения", `Ваш код: ${code}`);
+    await sendEmailOtp(value, "Код подтверждения", `Ваш код: ${code}`, () => stage, (s) => {
+      stage = s;
+    });
     console.log("[OTP_SEND] email sent");
   }
+  if (opts.type === "email") console.log("[OTP_EMAIL] helper success");
   return {
     ok: true as const,
     value,
@@ -305,27 +331,59 @@ function maskPhone(phone: string): string {
   return `+${digits.slice(0, 1)}****${digits.slice(-4)}`;
 }
 
-async function sendEmailOtp(email: string, subject: string, text: string) {
+async function sendEmailOtp(
+  email: string,
+  subject: string,
+  text: string,
+  getStage: () => string,
+  setStage: (s: "smtp-env" | "create-transporter" | "verify-transporter" | "send-mail") => void,
+) {
   const toMasked = maskEmailForLogs(email);
-  console.log("[SMTP] env presence", smtpEnvPresence());
+  let stage = getStage();
   try {
+    setStage("smtp-env");
+    stage = "smtp-env";
+    const env = smtpEnvPresence();
+    console.log("[OTP_EMAIL] smtp env summary", env);
+    if (!env.host || !env.port || !env.secure || !env.userPresent || !env.passPresent || !env.fromPresent) {
+      throw new Error("SMTP_ENV_MISSING");
+    }
+
+    setStage("create-transporter");
+    stage = "create-transporter";
+    console.log("[OTP_EMAIL] creating transporter");
     const transporter = nodemailer.createTransport(smtpConfigOrThrow());
-    console.log("[SMTP] transporter created");
-    console.log("[SMTP] before sendMail", { to: toMasked });
+
+    setStage("verify-transporter");
+    stage = "verify-transporter";
+    console.log("[OTP_EMAIL] verifying transporter start");
+    await transporter.verify();
+    console.log("[OTP_EMAIL] verifying transporter success");
+
+    setStage("send-mail");
+    stage = "send-mail";
+    console.log("[OTP_EMAIL] sendMail start", { to: toMasked });
     const info = await transporter.sendMail({
       from: smtpFromField(),
       to: email,
       subject,
       text,
     });
-    const messageId = typeof (info as any)?.messageId === "string" ? (info as any).messageId : undefined;
-    console.log("[SMTP] sendMail success", { to: toMasked, messageId });
+    console.log("[OTP_EMAIL] sendMail success", {
+      messageId: (info as any)?.messageId,
+      accepted: (info as any)?.accepted,
+      rejected: (info as any)?.rejected,
+      response: (info as any)?.response,
+    });
   } catch (e) {
-    console.error("[SMTP] sendMail failed", {
-      to: toMasked,
+    console.error("[OTP_EMAIL] failed", {
+      stage,
       name: e instanceof Error ? e.name : undefined,
       message: e instanceof Error ? e.message : String(e),
       code: (e as any)?.code,
+      command: (e as any)?.command,
+      response: (e as any)?.response,
+      responseCode: (e as any)?.responseCode,
       stack: e instanceof Error ? e.stack : undefined,
     });
     throw e;

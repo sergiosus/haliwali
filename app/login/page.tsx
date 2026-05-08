@@ -405,7 +405,8 @@ function LoginPageInner() {
                       const raw = loginId;
                       const normalizedEmail = raw.trim().toLowerCase();
                       const typeEmail = raw.includes("@");
-                      const normalized = typeEmail ? normalizedEmail : normalizePhone(raw);
+                      const normalizedPhone = normalizePhone(raw);
+                      const normalized = typeEmail ? normalizedEmail : normalizedPhone;
                       if (loginCodeStep === "request") {
                         if (!raw) {
                           setLoginError("Укажите email или телефон");
@@ -425,14 +426,16 @@ function LoginPageInner() {
                         }
                         setLoading(true);
                         try {
+                          const reqType: "email" | "phone" = typeEmail ? "email" : "phone";
+                          const reqValue = reqType === "email" ? normalizedEmail : normalizedPhone;
                           const response = await fetch("/api/send-code", {
                             method: "POST",
                             credentials: "include",
                             cache: "no-store",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
-                              value: normalized,
-                              type: typeEmail ? "email" : "phone",
+                              type: reqType,
+                              value: reqValue,
                             }),
                           });
                           const data = (await response.json().catch(() => ({}))) as { error?: string; devCode?: string };

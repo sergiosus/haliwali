@@ -4,7 +4,6 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import type { Listing } from "../../lib/listings";
 import { isPublicStatus, useListingsStore } from "../../lib/listings";
 import { allDirectoryItems, getDirectoryItemBySlug, normalizeQuery } from "../../lib/directory";
 import { matchesListingQuery } from "../../lib/search";

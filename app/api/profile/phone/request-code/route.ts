@@ -44,10 +44,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Этот номер уже используется другим аккаунтом." }, { status: 409 });
     }
   } else {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[phone-owners][prod] Postgres disabled; skipping JSON owners store", { path: OWNERS_PATH });
+    } else {
     assertFileStoreNotUsedInProduction("profilePhone.requestCode.readOwnersJson", { path: OWNERS_PATH });
     const owners = await readJson<OwnerMap>(OWNERS_PATH, {});
     if (owners[phone] && owners[phone] !== userId) {
       return NextResponse.json({ error: "Этот номер уже используется другим аккаунтом." }, { status: 409 });
+    }
     }
   }
 

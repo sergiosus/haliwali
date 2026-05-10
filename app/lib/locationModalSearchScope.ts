@@ -56,16 +56,6 @@ export function incomingModalFieldsToScope(v: IncomingLocationModalFields | null
   return normalizeSearchScope(base);
 }
 
-export type ScopeSearchIntent = "all" | "region" | "city";
-
-/** @deprecated intent chips removed — kept for compatibility; returns rows unchanged. */
-export function filterBrowseRowsByIntent(
-  rows: readonly BrowseGeoPickRow[],
-  _intent: ScopeSearchIntent,
-): BrowseGeoPickRow[] {
-  return [...rows];
-}
-
 export function searchScopeWholeRussia(): SearchScopeLocation {
   return { ...DEFAULT_SEARCH_SCOPE };
 }

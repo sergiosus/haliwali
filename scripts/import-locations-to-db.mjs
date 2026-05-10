@@ -395,7 +395,6 @@ async function insertSettlements(pool, rows) {
     await pool.query(sql, params);
     inserted += chunk.length;
     if (inserted % 5000 === 0) {
-      // eslint-disable-next-line no-console
       console.log(`... upserted ${inserted}/${rows.length}`);
     }
   }
@@ -463,40 +462,33 @@ try {
   if (!hasSubjects || !hasSettlements) {
     const migrationPath = path.join(projectRoot(), "db", "migrations", "20260506_locations_reference_data.sql");
     const sql = fs.readFileSync(migrationPath, "utf8");
-    // eslint-disable-next-line no-console
     console.log("Applying migration:", migrationPath);
     await pool.query(sql);
   }
 
   const subjects = buildSubjectRows();
-  // eslint-disable-next-line no-console
   console.log(`subjects: ${subjects.length}`);
   await insertSubjects(pool, subjects);
 
   const validSubjectSlugSet = new Set(subjects.map((s) => s.slug));
   const settlements = loadSettlementsJson();
-  // eslint-disable-next-line no-console
   console.log(`raw settlements rows: ${settlements.length}`);
 
   const { out, skippedBadName, skippedNoSubject, skippedNoCoords } = mainFilterAndNormalize(
     settlements,
     validSubjectSlugSet,
   );
-  // eslint-disable-next-line no-console
   console.log(`import rows (deduped): ${out.length}`);
-  // eslint-disable-next-line no-console
   console.log({ skippedBadName, skippedNoSubject, skippedNoCoords });
 
   await insertSettlements(pool, out);
 
   const citySeeds = buildCanonicalCitySeedRows(validSubjectSlugSet);
-  // eslint-disable-next-line no-console
   console.log(`canonical city seeds: ${citySeeds.length}`);
   await insertSettlements(pool, citySeeds);
 
   const r1 = await pool.query("SELECT count(*)::int AS n FROM location_subjects");
   const r2 = await pool.query("SELECT count(*)::int AS n FROM location_settlements");
-  // eslint-disable-next-line no-console
   console.log(`DB counts: subjects=${r1.rows[0]?.n} settlements=${r2.rows[0]?.n}`);
 } finally {
   await pool.end().catch(() => void 0);

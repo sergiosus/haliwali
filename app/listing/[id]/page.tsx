@@ -20,6 +20,7 @@ import { pingPresenceThrottled } from "../../lib/clientPresencePing";
 import { fastReplyEligibleFromLocalChats } from "../../lib/chatFastReply";
 import { appendReturnUrlQuery, pathnameWithSearchSansReturn } from "../../lib/returnNavigation";
 import { formatListingCardAuthor } from "../../lib/listingCardAuthorDisplay";
+import { extractListingPhotos, formatViewCountRu } from "../../lib/listingCardMeta";
 import { listingPath } from "../../lib/seo";
 
 export default function ListingPage() {
@@ -130,7 +131,7 @@ function ListingDetail({
   backHref: string;
   listingChatReturnHref: string;
 }) {
-  const images = getListingImages(listing).slice(0, 10);
+  const images = extractListingPhotos(listing).slice(0, 10);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   const router = useRouter();
@@ -479,7 +480,7 @@ function ListingDetail({
               </div>
               <div className="min-w-0 flex-1 text-right text-sm leading-tight text-black/50">
                 <div className="break-all">ID: {listing.id}</div>
-                {viewCount != null ? <div>Просмотры: {viewCount}</div> : null}
+                <div>{formatViewCountRu(viewCount ?? 0)}</div>
                 <div>{formatListedDayRu(listing.createdAt)}</div>
                 {listing.updatedAt ? <div>Обновлено: {formatListedDayRu(listing.updatedAt)}</div> : null}
               </div>
@@ -528,20 +529,6 @@ function formatListedDayRu(ts: number) {
   } catch {
     return "";
   }
-}
-
-function getListingImages(listing: PublicListingDTO): string[] {
-  const l = listing as unknown as {
-    photos?: unknown;
-    images?: unknown;
-    imageUrls?: unknown;
-    photoUrls?: unknown;
-  };
-  const candidates = [l.photos, l.images, l.imageUrls, l.photoUrls];
-  for (const c of candidates) {
-    if (Array.isArray(c) && c.every((x) => typeof x === "string")) return c as string[];
-  }
-  return [];
 }
 
 function sectionLabelFromListingType(type: Listing["type"]) {

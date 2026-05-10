@@ -79,7 +79,6 @@ export async function appendReplySample(userId: string, replyMs: number): Promis
   if (!id || !Number.isFinite(replyMs) || replyMs < 0) return;
   const capped = Math.min(replyMs, 24 * 60 * 60 * 1000);
   if (usesPostgres()) {
-    const now = Date.now();
     await getPool().query(
       `INSERT INTO reply_stats (key, user_id, listing_id, replies_count, sum_ms, updated_at)
        VALUES ($1, $2, NULL, 1, $3, now())

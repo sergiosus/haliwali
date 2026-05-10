@@ -43,10 +43,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Этот номер уже используется другим аккаунтом." }, { status: 409 });
     }
   } else {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[phone-owners][prod] Postgres disabled; skipping JSON owners store", { path: OWNERS_PATH });
+      ownersJson = {};
+    } else {
     assertFileStoreNotUsedInProduction("profilePhone.verifyCode.readOwnersJson", { path: OWNERS_PATH });
     ownersJson = await readJson<OwnerMap>(OWNERS_PATH, {});
     if (ownersJson[phone] && ownersJson[phone] !== userId) {
       return NextResponse.json({ error: "Этот номер уже используется другим аккаунтом." }, { status: 409 });
+    }
     }
   }
 
@@ -69,10 +74,14 @@ export async function POST(req: Request) {
       [phone, userId],
     );
   } else {
-    const owners = ownersJson ?? (await readJson<OwnerMap>(OWNERS_PATH, {}));
-    owners[phone] = userId;
-    assertFileStoreNotUsedInProduction("profilePhone.verifyCode.writeOwnersJson", { path: OWNERS_PATH });
-    await writeFile(OWNERS_PATH, JSON.stringify(owners, null, 2), "utf8");
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[phone-owners][prod] Postgres disabled; not writing JSON owners store", { path: OWNERS_PATH });
+    } else {
+      const owners = ownersJson ?? (await readJson<OwnerMap>(OWNERS_PATH, {}));
+      owners[phone] = userId;
+      assertFileStoreNotUsedInProduction("profilePhone.verifyCode.writeOwnersJson", { path: OWNERS_PATH });
+      await writeFile(OWNERS_PATH, JSON.stringify(owners, null, 2), "utf8");
+    }
   }
   await touchUserLastSeen(USERS_PATH, userId);
   return NextResponse.json({ ok: true, phoneVerified: true, verifiedAt: Date.now() });

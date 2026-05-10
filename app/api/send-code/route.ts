@@ -21,6 +21,7 @@ import {
 } from "../../lib/smsLoginMessages";
 import { captchaIsEnabled, captchaPasses, checkIpRateLimit, extractIp, logSuspicious } from "../../lib/serverAbuse";
 import { denyIfMutationOriginForbidden } from "../../lib/serverCsrf";
+import { isDebugAuthServer } from "../../lib/debugAuth";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const CODES_PATH = path.join(DATA_DIR, "sms-codes.json");
@@ -52,6 +53,10 @@ async function readOwnersMap(): Promise<Record<string, string>> {
     }
     return out;
   }
+  if (process.env.NODE_ENV === "production") {
+    console.warn("[phone-owners][prod] Postgres disabled; skipping JSON owners store", { path: OWNERS_PATH });
+    return {};
+  }
   assertFileStoreNotUsedInProduction("sendCode.readOwnersJson", { path: OWNERS_PATH });
   try {
     const raw = await readFile(OWNERS_PATH, "utf8");
@@ -81,7 +86,8 @@ function resolvePhoneLoginSmsGate(
 }
 
 export async function POST(req: Request) {
-  console.log("[OTP_SEND] route hit");
+  const dbg = isDebugAuthServer();
+  if (dbg) console.log("[OTP_SEND] route hit");
   const csrf = denyIfMutationOriginForbidden(req);
   if (csrf) return csrf;
 
@@ -90,12 +96,9 @@ export async function POST(req: Request) {
     type?: "email" | "phone";
     captchaToken?: string;
   };
-  console.log("[OTP_SEND] body parsed", { bodyKeys: Object.keys(body ?? {}) });
-  console.log("[OTP_SEND] body keys", { keys: Object.keys(body ?? {}) });
   const value = body.value ?? "";
   const type = body.type;
-  console.log("[OTP_SEND] email present", { present: value.includes("@") });
-  console.log("[OTP] route start", { route: "/api/send-code", channel: type });
+  if (dbg) console.log("[OTP_SEND] parsed", { channel: type, hasCaptchaToken: typeof body.captchaToken === "string" });
   const ip = extractIp(req);
   const phoneSendStart = type === "phone" ? Date.now() : 0;
 
@@ -115,7 +118,7 @@ export async function POST(req: Request) {
   if (type === "phone" && !isValidPhone(value)) {
     return await finishPhone(NextResponse.json({ error: PHONE_VALIDATION_MESSAGE }, { status: 400 }));
   }
-  console.log("[OTP_SEND] validation passed");
+  if (dbg) console.log("[OTP_SEND] validation_ok", { channel: type });
 
   await mkdir(DATA_DIR, { recursive: true });
   const codeIpLimit = await checkIpRateLimit({
@@ -172,19 +175,22 @@ export async function POST(req: Request) {
     return `+${digits.slice(0, 1)}****${digits.slice(-4)}`;
   })();
 
-  console.log(`[OTP_SEND] calling sendVerificationCode type=${type} value=${maskedValue}`);
+  if (dbg) console.log("[OTP_SEND] sendVerificationCode:start", { channel: type, target: maskedValue });
   let result: Awaited<ReturnType<typeof sendVerificationCode>>;
   try {
     result = await sendVerificationCode({ valueRaw: value, type, codesPath: CODES_PATH, ratePath: RATE_PATH });
-    console.log("[OTP_SEND] sendVerificationCode result", { ok: (result as any)?.ok, status: (result as any)?.status });
-    console.log("[OTP_SEND] sendVerificationCode ok");
+    if (dbg) {
+      console.log("[OTP_SEND] sendVerificationCode:done", {
+        ok: result.ok,
+        ...(result.ok ? {} : { status: result.status }),
+      });
+    }
   } catch (e) {
-    console.error("[OTP_SEND] sendVerificationCode failed");
-    console.error("[OTP_SEND] failed", {
+    console.error("[OTP_SEND] sendVerificationCode:exception", {
       name: e instanceof Error ? e.name : undefined,
       message: e instanceof Error ? e.message : String(e),
-      code: (e as any)?.code,
-      stack: e instanceof Error ? e.stack : undefined,
+      ...(dbg && typeof (e as { code?: unknown })?.code !== "undefined" ? { code: (e as { code?: unknown }).code } : {}),
+      ...(dbg && e instanceof Error && e.stack ? { stack: e.stack } : {}),
     });
     const errPayload = NextResponse.json(
       { error: "Не удалось отправить код подтверждения" },

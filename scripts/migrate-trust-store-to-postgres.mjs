@@ -40,7 +40,6 @@ function loadEnvIfNeeded() {
 loadEnvIfNeeded();
 const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
 if (!DATABASE_URL) {
-  // eslint-disable-next-line no-console
   console.error("DATABASE_URL missing");
   process.exit(2);
 }
@@ -231,7 +230,6 @@ try {
     }
   }
 
-  // eslint-disable-next-line no-console
   console.log({
     replyStats: { imported: importedReply, skipped: skippedReply, errors: replyErrors, path: REPLY_STATS_PATH },
     listingViews: { imported: importedViews, skipped: skippedViews, errors: viewErrors, path: LISTING_VIEWS_PATH },

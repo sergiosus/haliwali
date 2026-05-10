@@ -4,10 +4,6 @@ import { homeCategoryGridSections } from "./directory";
 import type { Listing } from "./listingModel";
 import { dedupeListingsById, isListingPubliclyListed } from "./listingModel";
 
-export function resolveHomeGridCategorySlug(l: Listing): string {
-  return (l.categorySlug ?? "").trim() || "other";
-}
-
 export function computeHomeCategoryCounts(
   listings: readonly Listing[],
   opts?: { listingLocationFilter?: (l: Listing) => boolean },

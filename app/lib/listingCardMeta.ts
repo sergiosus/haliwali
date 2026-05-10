@@ -1,5 +1,36 @@
 import type { Listing } from "./listingModel";
 
+/**
+ * Normalizes stored listing photo URLs for browser `<img src>` (uploads are root-relative).
+ * Legacy rows may omit the leading `/`, which breaks resolution on nested routes
+ * (e.g. `/listing/service-123-title` → wrong `.../listing/uploads/...`).
+ */
+export function publicListingImageSrc(raw: string): string {
+  const t = String(raw ?? "").trim();
+  if (!t) return t;
+  const lower = t.toLowerCase();
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("blob:") ||
+    lower.startsWith("data:")
+  ) {
+    return t;
+  }
+  if (t.startsWith("//")) return `https:${t}`;
+  if (t.startsWith("/")) return t;
+  return `/${t.replace(/^\/+/, "")}`;
+}
+
+function normalizePhotoUrlList(urls: string[]): string[] {
+  const out: string[] = [];
+  for (const u of urls) {
+    const n = publicListingImageSrc(u);
+    if (n) out.push(n);
+  }
+  return out;
+}
+
 export function extractListingPhotos(listing: unknown): string[] {
   const l = listing as {
     photos?: unknown;
@@ -9,7 +40,9 @@ export function extractListingPhotos(listing: unknown): string[] {
   };
   const candidates = [l.photos, l.images, l.imageUrls, l.photoUrls];
   for (const c of candidates) {
-    if (Array.isArray(c) && c.every((x): x is string => typeof x === "string")) return c;
+    if (Array.isArray(c) && c.every((x): x is string => typeof x === "string")) {
+      return normalizePhotoUrlList(c);
+    }
   }
   return [];
 }

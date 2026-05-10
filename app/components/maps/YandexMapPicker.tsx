@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { loadYandexMaps, type YmapsNamespace } from "../../lib/maps/yandexLoader";
 import { calculateDistanceKm } from "@/lib/shared/geo";
 import { GeolocationButton } from "../map/GeolocationButton";
@@ -29,6 +37,8 @@ export type MapListingMarker = {
   previewCity: string;
   /** Optional first listing photo URL for popup thumbnail. */
   previewImage?: string;
+  /** Optional price line (e.g. products). */
+  previewPrice?: string;
 };
 
 export type MapViewportBounds = {
@@ -95,21 +105,49 @@ type Props = {
   userLocation?: MapCenter | null;
   /** Pick nearest settlement to this point (parent resolves). */
   onUserLocationMarkerClick?: (at: MapCenter) => void;
-  /** After «Моё местоположение» succeeds — parent can mirror `userLocation` for one marker source. */
+  /** After browser geolocation succeeds — parent can mirror `userLocation` for one marker source. */
   onGeolocationButtonSuccess?: (at: MapCenter) => void;
-  /** Default true — location modal search circle. Disable for full-page map browse. */
-  showViewportCircle?: boolean;
+  /**
+   * Craigslist-style fixed viewport overlay (DOM): dim/blur outside a centered circular window; map pans underneath.
+   * Not geographic — does not use `ymaps.Circle`.
+   */
+  viewportSearchOverlay?: boolean;
   showGeolocationButton?: boolean;
   listingMarkers?: readonly MapListingMarker[];
   onListingMarkerClick?: (id: string) => void;
+  /**
+   * When true: marker click invokes `onListingMarkerClick` but does not “pin” the preview via click
+   * (homepage hover-led Craigslist-style UX).
+   */
+  listingMarkerClickNavigatesOnly?: boolean;
   /** Debounced map pan/zoom end — viewport center + geographic bounds for “search in area”. */
   onViewportStable?: (args: { center: MapCenter; bounds: MapViewportBounds }) => void;
+  /**
+   * Increment from parent to animate map back to {@link recenterTarget} (keeps zoom). Starts at 0.
+   * Parent should sync {@link recenterTick} with `center` changes (see internal reset) to avoid replays.
+   */
+  recenterTick?: number;
+  /** Geographic target for the latest recenter request; falls back to {@link center} if missing. */
+  recenterTarget?: MapCenter | null;
 };
 
 const CENTER_EMIT_DEBOUNCE_MS = 140;
 const VIEWPORT_STABLE_DEBOUNCE_MS = 420;
+/** Delay before hiding listing hover popup after pointer leaves marker/card (no flicker). */
+const LISTING_POPUP_LEAVE_DELAY_MS = 1600;
 /** Minimum movement (m, approx) before emitting duplicate center. */
 const CENTER_EMIT_MIN_MOVE_M = 35;
+
+/** Nearby settlements: tiny filled raster dot (avoids `*CircleDotIcon` / preset ring blobs). */
+const SETTLEMENT_MAP_DOT_PX = 6;
+
+function settlementMapDotHref(fill: string): string {
+  const d = SETTLEMENT_MAP_DOT_PX;
+  const c = d / 2;
+  const r = Math.max(0.8, c - 0.55);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${c}" cy="${c}" r="${r}" fill="${fill}"/></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 
 function centerMovedEnough(a: MapCenter, b: MapCenter): boolean {
   const dKm = calculateDistanceKm(a.lat, a.lng, b.lat, b.lng);
@@ -142,8 +180,7 @@ function ListingPopupThumb({ url }: { url?: string }) {
 }
 
 /**
- * Interactive map with a fixed viewport-centered UI circle (Craigslist-style).
- * Search center is always `map.getCenter()` — no `ymaps.Circle` / geo circle overlay.
+ * Interactive map. Optional Craigslist viewport overlay via {@link viewportSearchOverlay} (fixed screen ring, map moves under it).
  */
 export function YandexMapPicker({
   center,
@@ -156,11 +193,14 @@ export function YandexMapPicker({
   userLocation = null,
   onUserLocationMarkerClick,
   onGeolocationButtonSuccess,
-  showViewportCircle = true,
+  viewportSearchOverlay = false,
   showGeolocationButton = true,
   listingMarkers = [],
   onListingMarkerClick,
   onViewportStable,
+  listingMarkerClickNavigatesOnly = false,
+  recenterTick = 0,
+  recenterTarget = null,
 }: Props) {
   const holderRef = useRef<HTMLDivElement | null>(null);
   const effLat = center.lat;
@@ -180,6 +220,7 @@ export function YandexMapPicker({
   const onUserLocationMarkerClickRef = useRef(onUserLocationMarkerClick);
   const onGeolocationButtonSuccessRef = useRef(onGeolocationButtonSuccess);
   const onListingMarkerClickRef = useRef(onListingMarkerClick);
+  const listingMarkerClickNavigatesOnlyRef = useRef(listingMarkerClickNavigatesOnly);
   const onViewportStableRef = useRef(onViewportStable);
   onCenterChangeRef.current = onCenterChange;
   onMapClickRef.current = onMapClick;
@@ -187,9 +228,13 @@ export function YandexMapPicker({
   onUserLocationMarkerClickRef.current = onUserLocationMarkerClick;
   onGeolocationButtonSuccessRef.current = onGeolocationButtonSuccess;
   onListingMarkerClickRef.current = onListingMarkerClick;
+  listingMarkerClickNavigatesOnlyRef.current = listingMarkerClickNavigatesOnly;
   onViewportStableRef.current = onViewportStable;
 
   const lastEmittedRef = useRef<MapCenter | null>(null);
+  const lastRecenterTickAppliedRef = useRef(0);
+  const prevEffForRecenterResetRef = useRef<{ lat: number; lng: number } | null>(null);
+  const prevRecenterTickRef = useRef(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewportStableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settlementPlacemarksRef = useRef<unknown[]>([]);
@@ -208,6 +253,7 @@ export function YandexMapPicker({
     previewTitle: string;
     previewType: string;
     previewCity: string;
+    previewPrice?: string;
   } | null>(null);
 
   /** Step 1 / 7: delayed close after leaving marker and popup. */
@@ -252,7 +298,7 @@ export function YandexMapPicker({
         return;
       }
       setHoveredListingId(null);
-    }, 2000);
+    }, LISTING_POPUP_LEAVE_DELAY_MS);
   };
 
   /** Map init registers `click` once — always call latest close via ref (Step 5). */
@@ -280,7 +326,6 @@ export function YandexMapPicker({
       y = Math.max(14, Math.min(rect.height - 14, y));
       setActiveListingPreviewPos({ x, y });
       if (process.env.NODE_ENV === "development") {
-        // eslint-disable-next-line no-console
         console.log("[map-listing-popup]", { markerId: cur.id, popupPos: { x, y } });
       }
     } catch {
@@ -306,6 +351,7 @@ export function YandexMapPicker({
       previewTitle: lm.previewTitle,
       previewType: lm.previewType,
       previewCity: lm.previewCity,
+      previewPrice: lm.previewPrice,
     };
     if (mapReady) updateActivePreviewPosition();
   }, [displayListingMarker, mapReady, updateActivePreviewPosition]);
@@ -370,8 +416,6 @@ export function YandexMapPicker({
               try {
                 const c = map.getCenter() as number[] | undefined;
                 if (!c || c.length < 2) return;
-                // eslint-disable-next-line no-console
-                console.log("[MAP GET CENTER]", c);
                 emitIfMoved({ lat: c[0]!, lng: c[1]! });
               } catch {
                 /* noop */
@@ -490,15 +534,81 @@ export function YandexMapPicker({
     }
     try {
       m.setCenter?.(centerArr);
-      const after = m.getCenter?.() as number[] | undefined;
-      // eslint-disable-next-line no-console
-      if (after && after.length >= 2) console.log("[MAP GET CENTER]", after, "(after prop sync)");
     } catch {
       /* noop */
     }
     /* eslint-enable @typescript-eslint/no-explicit-any */
     lastEmittedRef.current = { lat: effLat, lng: effLng };
   }, [effLat, effLng, mapReady]);
+
+  /** When the controlled `center` prop moves to a new place (new city etc.), align recenter bookkeeping so stale ticks don't fire. */
+  useLayoutEffect(() => {
+    const prev = prevEffForRecenterResetRef.current;
+    if (!prev || prev.lat !== effLat || prev.lng !== effLng) {
+      prevEffForRecenterResetRef.current = { lat: effLat, lng: effLng };
+      lastRecenterTickAppliedRef.current = recenterTick;
+    }
+  }, [effLat, effLng, recenterTick]);
+
+  /** Parent may reset {@link recenterTick} to 0 when the anchor NP changes — allow the next bump to animate again. */
+  useLayoutEffect(() => {
+    const prev = prevRecenterTickRef.current;
+    prevRecenterTickRef.current = recenterTick;
+    if (prev !== 0 && recenterTick === 0) {
+      lastRecenterTickAppliedRef.current = 0;
+    }
+  }, [recenterTick]);
+
+  /** Parent-driven «вернуться к НП»: pan map to {@link recenterTarget} without remounting. */
+  useLayoutEffect(() => {
+    const inst = mapInstRef.current;
+    if (!inst?.map || !mapReady) return;
+    const tick = recenterTick;
+    if (tick === 0 || tick === lastRecenterTickAppliedRef.current) return;
+
+    lastRecenterTickAppliedRef.current = tick;
+
+    const t =
+      recenterTarget && Number.isFinite(recenterTarget.lat + recenterTarget.lng) ?
+        recenterTarget
+      : { lat: effLat, lng: effLng };
+
+    try {
+      const m = inst.map as {
+        getZoom?: () => number;
+        setCenter?: (c: number[], z?: number, opts?: { duration?: number }) => void;
+      };
+      const zoomNow = typeof m.getZoom === "function" ? Number(m.getZoom()) : Number(zoom ?? 11);
+      const zUse = Number.isFinite(zoomNow) ? zoomNow : Number(zoom ?? 11);
+      m.setCenter?.([t.lat, t.lng], zUse, { duration: 300 });
+    } catch {
+      /* noop */
+    }
+
+    lastEmittedRef.current = t;
+    try {
+      onCenterChangeRef.current?.(t);
+    } catch {
+      /* noop */
+    }
+  }, [recenterTick, recenterTarget?.lat, recenterTarget?.lng, mapReady, effLat, effLng, zoom]);
+
+  /** Apply parent `zoom` when it changes (map is created once; initial zoom only reflected on first paint). Never fits bounds to the search circle — center sync stays separate above. */
+  useLayoutEffect(() => {
+    const inst = mapInstRef.current;
+    if (!inst?.map || !mapReady) return;
+    const z = zoom ?? 11;
+    if (!Number.isFinite(z)) return;
+
+    try {
+      const m = inst.map as { getZoom?: () => number; setZoom?: (zoom: number, opts?: { duration?: number }) => void };
+      const cur = typeof m.getZoom === "function" ? Number(m.getZoom()) : NaN;
+      if (Number.isFinite(cur) && Math.abs(cur - z) < 0.05) return;
+      m.setZoom?.(z, { duration: 250 });
+    } catch {
+      /* noop */
+    }
+  }, [zoom, mapReady]);
 
   const settlementMarkersJson = useMemo(
     () => JSON.stringify(settlementMarkers),
@@ -514,7 +624,7 @@ export function YandexMapPicker({
       Placemark?: new (
         geometry: number[],
         properties: Record<string, string>,
-        options: Record<string, string>,
+        options: Record<string, string | number | boolean | number[]>,
       ) => {
         events: { add: (ev: string, fn: (e: unknown) => void) => void };
       };
@@ -533,9 +643,6 @@ export function YandexMapPicker({
 
     for (const sm of settlementMarkers) {
       if (!Number.isFinite(sm.lat + sm.lng)) continue;
-      // eslint-disable-next-line no-console
-      console.log("[MARKER COORDS]", sm.name, sm.lat, sm.lng);
-      /* eslint-disable @typescript-eslint/no-explicit-any */
       const pm = new ymaps.Placemark(
         [sm.lat, sm.lng],
         {
@@ -543,7 +650,15 @@ export function YandexMapPicker({
           iconCaption: sm.name.length > 24 ? `${sm.name.slice(0, 22)}…` : sm.name,
         },
         {
-          preset: sm.isSelected ? "islands#redCircleDotIcon" : "islands#blueCircleDotIcon",
+          iconLayout: "default#image",
+          iconImageHref: settlementMapDotHref(sm.isSelected ? "#b91c1c" : "#1d4ed8"),
+          iconImageSize: [SETTLEMENT_MAP_DOT_PX, SETTLEMENT_MAP_DOT_PX],
+          iconImageOffset: [-SETTLEMENT_MAP_DOT_PX / 2, -SETTLEMENT_MAP_DOT_PX / 2],
+          hasBalloon: false,
+          hasHint: true,
+          openBalloonOnClick: false,
+          zIndex: sm.isSelected ? 1300 : 440,
+          cursor: "pointer",
         },
       );
       pm.events.add("click", (e: unknown) => {
@@ -554,7 +669,6 @@ export function YandexMapPicker({
         }
         onSettlementMarkerClickRef.current?.(sm);
       });
-      /* eslint-enable @typescript-eslint/no-explicit-any */
       try {
         map.geoObjects?.add?.(pm);
         settlementPlacemarksRef.current.push(pm);
@@ -597,7 +711,6 @@ export function YandexMapPicker({
 
     for (const lm of listingMarkers) {
       if (!Number.isFinite(lm.lat + lm.lng)) continue;
-      /* eslint-disable @typescript-eslint/no-explicit-any */
       const pm = new ymaps.Placemark(
         [lm.lat, lm.lng],
         {},
@@ -607,7 +720,7 @@ export function YandexMapPicker({
             : lm.isHovered
               ? "islands#orangeCircleDotIcon"
               : "islands#blueCircleDotIcon",
-          zIndex: lm.isSelected ? 700 : lm.isHovered ? 650 : 500,
+          zIndex: lm.isSelected ? 780 : lm.isHovered ? 750 : 720,
           hasBalloon: false,
           hasHint: false,
           openBalloonOnClick: false,
@@ -632,6 +745,10 @@ export function YandexMapPicker({
         } catch {
           /* noop */
         }
+        if (listingMarkerClickNavigatesOnlyRef.current) {
+          onListingMarkerClickRef.current?.(lm.id);
+          return;
+        }
         clearCloseTimer();
         markerHoveredRef.current = true;
         popupHoveredRef.current = false;
@@ -639,7 +756,6 @@ export function YandexMapPicker({
         setHoveredListingId(lm.id);
         onListingMarkerClickRef.current?.(lm.id);
       });
-      /* eslint-enable @typescript-eslint/no-explicit-any */
       try {
         map.geoObjects?.add?.(pm);
         listingPlacemarksRef.current.push(pm);
@@ -690,7 +806,6 @@ export function YandexMapPicker({
     }
 
     const at: MapCenter = { lat: userLocation.lat, lng: userLocation.lng };
-    /* eslint-disable @typescript-eslint/no-explicit-any */
     const pm = new ymaps.Placemark(
       [at.lat, at.lng],
       {
@@ -709,7 +824,6 @@ export function YandexMapPicker({
       }
       onUserLocationMarkerClickRef.current?.(at);
     });
-    /* eslint-enable @typescript-eslint/no-explicit-any */
     try {
       map.geoObjects?.add?.(pm);
       userLocationPlacemarkRef.current = pm;
@@ -748,7 +862,6 @@ export function YandexMapPicker({
       },
       (err) => {
         setGeoLoading(false);
-        // eslint-disable-next-line no-console
         console.error("Geolocation error", err);
         const code = (err as { code?: unknown })?.code;
         if (code === 1) {
@@ -771,15 +884,33 @@ export function YandexMapPicker({
     "relative isolate w-full overflow-hidden rounded-2xl border border-black/10 bg-black/[0.04]" +
     (className.trim() ? ` ${className.trim()}` : " min-h-[280px] h-[min(420px,52vh)] sm:h-[420px]");
 
+  /** Inner hole radius for mask ≈ half of ring (diameter {@link SEARCH_OVERLAY_DIAMETER_CQMIN}). */
+  const SEARCH_OVERLAY_DIAMETER_CQMIN = 94;
+  const SEARCH_OVERLAY_INNER_RADIUS_CQMIN = SEARCH_OVERLAY_DIAMETER_CQMIN / 2;
+
+  /** Fixed viewport overlay: cqmin ties circle to map container smallest side ({@link SEARCH_OVERLAY_DIAMETER_CQMIN}% thereof ≈ 0.94 × min(side)). */
+  const viewportMaskStyle: CSSProperties = {
+    WebkitMaskImage: `radial-gradient(circle at 50% 50%, transparent 0, transparent calc(${SEARCH_OVERLAY_INNER_RADIUS_CQMIN}cqmin - 6px), #000 calc(${SEARCH_OVERLAY_INNER_RADIUS_CQMIN}cqmin + 14px))`,
+    maskImage: `radial-gradient(circle at 50% 50%, transparent 0, transparent calc(${SEARCH_OVERLAY_INNER_RADIUS_CQMIN}cqmin - 6px), #000 calc(${SEARCH_OVERLAY_INNER_RADIUS_CQMIN}cqmin + 14px))`,
+  };
+
+  const shellContainerStyle: CSSProperties = { containerType: "size" };
+
   return (
-    <div className={shell}>
+    <div className={shell} style={shellContainerStyle}>
       <div ref={holderRef} className="absolute inset-0 z-0" />
-      {showViewportCircle ?
-        <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden rounded-2xl">
+      {viewportSearchOverlay ?
+        <div className="pointer-events-none absolute inset-0 z-[12] overflow-hidden rounded-2xl" aria-hidden>
           <div
-            className="absolute left-1/2 top-1/2 h-[min(85vw,420px)] w-[min(85vw,420px)] max-h-[85%] max-w-[85%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent shadow-[0_0_0_9999px_rgba(0,0,0,0.42)] sm:h-[420px] sm:w-[420px] sm:max-h-none sm:max-w-none"
-            style={{ border: "3px solid #ff5a2f" }}
-            aria-hidden
+            className="absolute inset-0 bg-slate-950/48 backdrop-blur-[3px]"
+            style={viewportMaskStyle}
+          />
+          <div
+            className="absolute left-1/2 top-1/2 aspect-square max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 rounded-full border border-[rgba(37,99,235,0.55)]"
+            style={{
+              width: `${SEARCH_OVERLAY_DIAMETER_CQMIN}cqmin`,
+              height: `${SEARCH_OVERLAY_DIAMETER_CQMIN}cqmin`,
+            }}
           />
         </div>
       : null}
@@ -842,6 +973,11 @@ export function YandexMapPicker({
                 <div className="truncate text-[13px] font-bold leading-tight text-black/90">
                   {displayListingMarker.previewTitle.trim() || "Объявление"}
                 </div>
+                {displayListingMarker.previewPrice?.trim() ?
+                  <div className="mt-0.5 truncate text-xs font-semibold tabular-nums text-black/85">
+                    {displayListingMarker.previewPrice.trim()}
+                  </div>
+                : null}
                 {displayListingMarker.previewType.trim() ?
                   <div className="mt-1 truncate text-xs leading-snug text-black/60">{displayListingMarker.previewType}</div>
                 : null}

@@ -14,8 +14,13 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { Listing, ProductListing, ServiceListing, TaskListing } from "./lib/listings";
-import { dedupeListingsById, generateEditToken, isPublicStatus, useListingsStore } from "./lib/listings";
-import { listingDealStatusBadgeRu } from "./lib/listingCardMeta";
+import {
+  dedupeListingsById,
+  generateEditToken,
+  isPublicStatus,
+  useListingsStore,
+} from "./lib/listings";
+import { extractListingPhotos, listingDealStatusBadgeRu } from "./lib/listingCardMeta";
 import { moderateListing } from "./lib/moderation";
 import {
   getDirectoryItemBySlug,
@@ -23,7 +28,7 @@ import {
   normalizeQuery,
   russianCities,
 } from "./lib/directory";
-import { computeHomeCategoryCounts, resolveHomeGridCategorySlug } from "./lib/homeCategoryCounts";
+import { computeHomeCategoryCounts } from "./lib/homeCategoryCounts";
 import { haystackNormalizedMatchesListingSearch, matchesListingQuery } from "./lib/search";
 import { categoryToSlug, productCategories, serviceCategories, taskCategories } from "./lib/categories";
 import { CityCombobox } from "./components/CityCombobox";
@@ -35,15 +40,19 @@ import { uploadFiles } from "./lib/uploadClient";
 import { isValidPhone, PHONE_VALIDATION_MESSAGE } from "./lib/identity";
 import { isUserVerified } from "./lib/users";
 import { useCompactListingEnrichment } from "./lib/useCompactListingEnrichment";
-import { LocationModal } from "./components/modals/LocationModal";
+import { LocationModal, type LocationModalValue } from "./components/modals/LocationModal";
 import { resolveRussiaCityRegionDisplay } from "./lib/locationDisplay";
 import {
-  homeLocationV2FieldLabel,
-  homeLocationV2FromModalPayload,
-  incomingFieldsFromHomeLocationV2,
-  listingMatchesHomeLocationV2,
-  useHomeLocationV2,
-} from "./lib/homeLocationV2";
+  DEFAULT_BROWSE_LOCATION_SCOPE,
+  type BrowseLocationScope,
+} from "./lib/browseLocationScope";
+import { incomingModalFieldsToScope } from "./lib/locationModalSearchScope";
+import {
+  homepageLocationLabelFromScope,
+  listingMatchesSearchScope,
+  modalCurrentSelectionPartsFromScope,
+  normalizeSearchScope,
+} from "./lib/searchScopeLocation";
 import {
   LOCATION_MESSAGES,
   type SelectedLocation,
@@ -59,7 +68,6 @@ type HomeListingPublishExtras = {
 import { resolveRussiaCityFromName } from "./lib/resolveRussiaCityFromStatic";
 import { getCurrentUserId, refreshAuthFromServer } from "./lib/auth";
 import { AuthContinueModal } from "./components/AuthContinueModal";
-
 export default function Home() {
   return (
     <Suspense
@@ -79,6 +87,41 @@ type ProductKind = "Продам" | "Куплю";
 
 const EMPTY_SEARCH_RESULTS: Listing[] = [];
 
+type HomeGridColumnHeading = "Задачи" | "Услуги" | "Товары";
+
+function isHomeGridColumnHeading(s: string): s is HomeGridColumnHeading {
+  return s === "Задачи" || s === "Услуги" || s === "Товары";
+}
+
+function isHomeSectionWithColumnHeading(section: {
+  heading: string;
+  links: { label: string; slug: string }[];
+}): section is { heading: HomeGridColumnHeading; links: { label: string; slug: string }[] } {
+  return isHomeGridColumnHeading(section.heading);
+}
+
+function homeListingColumnHeading(l: Listing): HomeGridColumnHeading {
+  if (l.type === "task") return "Задачи";
+  if (l.type === "service") return "Услуги";
+  return "Товары";
+}
+
+/** Toolbar line from current session browse `SearchScopeLocation` (country, multi-part labels, optional ± km for point radius). */
+function homepageToolbarBrowseStatusLine(scope: BrowseLocationScope): string {
+  const s = normalizeSearchScope(scope);
+  if (s.type === "country") return homepageLocationLabelFromScope(s);
+  const parts = modalCurrentSelectionPartsFromScope(s);
+  const primary = parts.join(", ").trim() || homepageLocationLabelFromScope(s);
+  const rk =
+    typeof s.radiusKm === "number" && Number.isFinite(s.radiusKm) && s.radiusKm > 0 ?
+      Math.round(s.radiusKm)
+    : 0;
+  if (rk > 0 && s.type !== "point") {
+    return `${primary} ± ${rk} км`;
+  }
+  return primary;
+}
+
 function HaliwaliLanding() {
   const [taskFormOpen, setTaskFormOpen] = useState(false);
   const [offerFormOpen, setOfferFormOpen] = useState(false);
@@ -89,18 +132,50 @@ function HaliwaliLanding() {
   const [homeAuthOpen, setHomeAuthOpen] = useState(false);
   const pendingHomeSubmitRef = useRef<null | (() => void)>(null);
 
-  const { location: homeLocV2, setLocation: setHomeLocV2 } = useHomeLocationV2();
+  /** Session-only per-column browse filters — never hydrated from localStorage. */
+  const [homeBrowseScopeTasks, setHomeBrowseScopeTasks] =
+    useState<BrowseLocationScope>(DEFAULT_BROWSE_LOCATION_SCOPE);
+  const [homeBrowseScopeServices, setHomeBrowseScopeServices] =
+    useState<BrowseLocationScope>(DEFAULT_BROWSE_LOCATION_SCOPE);
+  const [homeBrowseScopeProducts, setHomeBrowseScopeProducts] =
+    useState<BrowseLocationScope>(DEFAULT_BROWSE_LOCATION_SCOPE);
+
+  const [locationSyncTasks, setLocationSyncTasks] = useState(false);
+  const [locationSyncServices, setLocationSyncServices] = useState(false);
+  const [locationSyncProducts, setLocationSyncProducts] = useState(false);
+
   const searchParams = useSearchParams();
   const directorySearch = searchParams.get("q") ?? "";
   const [locationModalOpen, setLocationModalOpen] = useState(false);
+  const [locationModalInitialScope, setLocationModalInitialScope] = useState<BrowseLocationScope | null>(null);
+  const [activeLocationColumn, setActiveLocationColumn] = useState<HomeGridColumnHeading | null>(null);
 
-  const locationFieldLabel = useMemo(() => homeLocationV2FieldLabel(homeLocV2), [homeLocV2]);
+  const browseScopeForColumn = useCallback((column: HomeGridColumnHeading): BrowseLocationScope => {
+    if (column === "Задачи") return homeBrowseScopeTasks;
+    if (column === "Услуги") return homeBrowseScopeServices;
+    return homeBrowseScopeProducts;
+  }, [homeBrowseScopeTasks, homeBrowseScopeServices, homeBrowseScopeProducts]);
+
+  /** Snapshot at open time: `scope` only. */
+  const modalValue = useMemo((): LocationModalValue => {
+    const fallbackColumn = activeLocationColumn ?? "Задачи";
+    const base = browseScopeForColumn(fallbackColumn);
+    const scope = normalizeSearchScope(locationModalInitialScope ?? base);
+    return { scope };
+  }, [locationModalInitialScope, activeLocationColumn, browseScopeForColumn]);
+
+  const openHomeLocationModal = useCallback(
+    (column: HomeGridColumnHeading) => {
+      setActiveLocationColumn(column);
+      setLocationModalInitialScope(normalizeSearchScope(browseScopeForColumn(column)));
+      setLocationModalOpen(true);
+    },
+    [browseScopeForColumn],
+  );
 
   const { addListing, loaded, listings } = useListingsStore();
 
   const uniqueListings = useMemo(() => dedupeListingsById(listings), [listings]);
-
-  // city is persisted by setStoredCity when user changes it
 
   const homeCategoryGridFiltered = useMemo(() => {
     return homeCategoryGridSections
@@ -117,11 +192,19 @@ function HaliwaliLanding() {
   }, [directorySearch]);
 
   const categoryCounts = useMemo(() => {
-    const { counts } = computeHomeCategoryCounts(uniqueListings, {
-      listingLocationFilter: (l) => listingMatchesHomeLocationV2(l, homeLocV2),
-    });
-    return counts;
-  }, [uniqueListings, homeLocV2]);
+    const out: Record<string, number> = {};
+    for (const section of homeCategoryGridFiltered) {
+      if (!isHomeGridColumnHeading(section.heading)) continue;
+      const scope = normalizeSearchScope(browseScopeForColumn(section.heading));
+      const { counts: c } = computeHomeCategoryCounts(uniqueListings, {
+        listingLocationFilter: (l) => listingMatchesSearchScope(l, scope),
+      });
+      for (const link of section.links) {
+        out[link.slug] = c[link.slug] ?? 0;
+      }
+    }
+    return out;
+  }, [uniqueListings, homeCategoryGridFiltered, browseScopeForColumn]);
   const categoryCountsLoading = false;
 
   const publishedSearchResults = useMemo(() => {
@@ -129,7 +212,9 @@ function HaliwaliLanding() {
     if (!loaded) return [];
     return uniqueListings
       .filter((l) => isPublicStatus(l.status))
-      .filter((l) => listingMatchesHomeLocationV2(l, homeLocV2))
+      .filter((l) =>
+        listingMatchesSearchScope(l, normalizeSearchScope(browseScopeForColumn(homeListingColumnHeading(l)))),
+      )
       .filter((l) => matchesListingQuery(l, directorySearch))
       .sort((a, b) => {
         const av = isUserVerified(a.ownerId) ? 1 : 0;
@@ -138,7 +223,7 @@ function HaliwaliLanding() {
         return b.createdAt - a.createdAt;
       })
       .slice(0, 30);
-  }, [directorySearch, uniqueListings, loaded, homeLocV2]);
+  }, [directorySearch, uniqueListings, loaded, browseScopeForColumn]);
 
   const { viewCounts, publicByUserId } = useCompactListingEnrichment(publishedSearchResults);
 
@@ -388,14 +473,14 @@ function HaliwaliLanding() {
 
   return (
     <div className="min-h-full min-w-0 max-w-full bg-black/[0.03] text-black">
-      <header className="min-w-0 max-w-full w-full px-3 py-4 sm:px-6">
-        <div className="flex min-w-0 max-w-full w-full flex-col space-y-3">
-          <div className="mt-6 flex w-full justify-center">
-            <div className="w-full min-w-0 max-w-full px-1 text-center sm:px-4">
+      <header className="min-w-0 max-w-full w-full px-3 pb-4 pt-3 sm:px-6 sm:pb-5 sm:pt-4">
+        <div className="flex min-w-0 max-w-full w-full flex-col">
+          <div className="mt-2 flex w-full justify-center pt-2 sm:mt-4 sm:pt-2">
+            <div className="w-full min-w-0 max-w-full px-1 text-center sm:max-w-[1200px] sm:px-4">
               <p className="text-lg font-semibold leading-tight break-words text-gray-800 md:text-xl">
                 Размещайте задачи, продавайте товары и находите клиентов по всей России без посредников
               </p>
-              <p className="mt-1 text-sm leading-tight text-gray-500">
+              <p className="mx-auto mt-4 max-w-[46rem] text-sm leading-snug text-gray-500">
                 Выберите категорию, чтобы посмотреть объявления или создать своё
               </p>
             </div>
@@ -403,7 +488,7 @@ function HaliwaliLanding() {
         </div>
       </header>
 
-      <main className="mx-auto w-full min-w-0 max-w-full max-w-[1200px] px-4 pb-16 sm:px-6">
+      <main className="mx-auto w-full min-w-0 max-w-full max-w-[1200px] px-4 pb-16 pt-2 sm:px-6 sm:pt-3">
           {normalizeQuery(directorySearch) ? (
             <section className="mb-4">
               <div className="rounded-3xl border border-black/10 bg-white p-5">
@@ -436,46 +521,41 @@ function HaliwaliLanding() {
             </section>
           ) : null}
 
-          <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-            <div className="min-w-0 w-full flex-1 sm:flex-initial sm:min-w-0">
-              <button
-                type="button"
-                className="flex h-10 min-h-10 min-w-0 max-w-full w-full cursor-pointer items-center gap-2 overflow-hidden rounded-2xl border border-black/10 bg-white px-4 text-left text-sm outline-none hover:bg-black/[0.02] focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)]"
-                onClick={() => setLocationModalOpen(true)}
-                aria-label="Выбрать локацию"
-              >
-                <span className="shrink-0 text-[16px] leading-none text-black/45" aria-hidden>
-                  📍
-                </span>
-                <span
-                  className={
-                    homeLocV2.kind !== "country"
-                      ? "block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-black/85"
-                      : "block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-black/70"
-                  }
-                >
-                  {locationFieldLabel}
-                </span>
-              </button>
-            </div>
+          <div className="mb-6 flex min-w-0 w-full justify-center sm:mb-8 sm:justify-end">
             <Link
               href="/map"
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-2xl border border-black/10 bg-white px-4 text-xs font-medium text-gray-800 hover:bg-black/[0.03]"
+              className="flex h-9 w-full max-w-[min(100%,20rem)] shrink-0 items-center justify-center rounded-xl border border-black/11 bg-white px-4 text-center text-[13px] font-medium leading-tight text-black/82 transition-colors hover:border-black/15 hover:bg-zinc-50 sm:w-auto sm:max-w-none sm:px-3.5"
+              scroll={false}
             >
-              На карте
+              Объявления на карте
             </Link>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            {homeCategoryGridFiltered.map((section) => (
-              <HomeCategorySectionCard
-                key={section.heading}
-                heading={section.heading}
-                links={section.links}
-                counts={categoryCounts}
-                countsLoading={categoryCountsLoading}
-              />
-            ))}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            {homeCategoryGridFiltered.filter(isHomeSectionWithColumnHeading).map((section) => {
+              const col = section.heading;
+              const locationSyncToAll =
+                col === "Задачи" ? locationSyncTasks
+                : col === "Услуги" ? locationSyncServices
+                : locationSyncProducts;
+              const setLocationSyncToAll =
+                col === "Задачи" ? setLocationSyncTasks
+                : col === "Услуги" ? setLocationSyncServices
+                : setLocationSyncProducts;
+              return (
+                <HomeCategorySectionCard
+                  key={section.heading}
+                  heading={col}
+                  links={section.links}
+                  counts={categoryCounts}
+                  countsLoading={categoryCountsLoading}
+                  browseLocationLabel={homepageToolbarBrowseStatusLine(browseScopeForColumn(col))}
+                  onBrowseLocationClick={() => openHomeLocationModal(col)}
+                  locationSyncToAll={locationSyncToAll}
+                  onLocationSyncToAllChange={setLocationSyncToAll}
+                />
+              );
+            })}
           </div>
         </main>
 
@@ -519,13 +599,35 @@ function HaliwaliLanding() {
       />
       {locationModalOpen ?
         <LocationModal
+          key={`browse-scope-${activeLocationColumn ?? "none"}-${modalValue.scope!.type}-${modalValue.scope!.label}`}
           open
           cities={russianCities}
-          onClose={() => setLocationModalOpen(false)}
-          value={incomingFieldsFromHomeLocationV2(homeLocV2)}
-          onChange={(next) => {
-            setHomeLocV2(homeLocationV2FromModalPayload(next));
+          onClose={() => {
             setLocationModalOpen(false);
+            setActiveLocationColumn(null);
+          }}
+          value={modalValue}
+          onChange={(next) => {
+            const newScope = normalizeSearchScope(incomingModalFieldsToScope(next));
+            const col = activeLocationColumn ?? "Задачи";
+            const applyToAll =
+              col === "Задачи" ? locationSyncTasks
+              : col === "Услуги" ? locationSyncServices
+              : locationSyncProducts;
+            if (applyToAll) {
+              setHomeBrowseScopeTasks(newScope);
+              setHomeBrowseScopeServices(newScope);
+              setHomeBrowseScopeProducts(newScope);
+            } else if (col === "Задачи") {
+              setHomeBrowseScopeTasks(newScope);
+            } else if (col === "Услуги") {
+              setHomeBrowseScopeServices(newScope);
+            } else {
+              setHomeBrowseScopeProducts(newScope);
+            }
+            setLocationModalInitialScope(newScope);
+            setLocationModalOpen(false);
+            setActiveLocationColumn(null);
           }}
         />
       : null}
@@ -538,11 +640,19 @@ function HomeCategorySectionCard({
   links,
   counts,
   countsLoading,
+  browseLocationLabel,
+  onBrowseLocationClick,
+  locationSyncToAll,
+  onLocationSyncToAllChange,
 }: {
-  heading: string;
+  heading: HomeGridColumnHeading;
   links: { label: string; slug: string }[];
   counts: Record<string, number> | null;
   countsLoading: boolean;
+  browseLocationLabel: string;
+  onBrowseLocationClick: () => void;
+  locationSyncToAll: boolean;
+  onLocationSyncToAllChange: (next: boolean) => void;
 }) {
   const headingHref =
     heading === "Задачи" ? "/tasks"
@@ -558,11 +668,11 @@ function HomeCategorySectionCard({
 
   return (
     <div className="flex h-full flex-col rounded-2xl border border-black/10 bg-white px-5 py-[18px]">
-      <div className="border-b border-black/10 pb-2.5">
+      <div>
         {headingHref ?
           <Link
             href={headingHref}
-            className="inline-block cursor-pointer text-[20px] font-semibold tracking-tight text-gray-900 hover:underline hover:decoration-black/30"
+            className="inline-block max-w-full cursor-pointer text-[20px] font-semibold tracking-tight text-gray-900 hover:underline hover:decoration-black/30"
           >
             {heading}
           </Link>
@@ -571,7 +681,34 @@ function HomeCategorySectionCard({
           <div className="mt-0.5 text-[13px] leading-tight text-gray-500">{headingHelper}</div>
         : null}
       </div>
-      <nav className="mt-3 flex flex-col gap-1.5" aria-label={heading}>
+
+      <div className="mt-2 border-t border-black/10 py-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          <button
+            type="button"
+            onClick={onBrowseLocationClick}
+            className="inline-flex max-w-[min(100%,15rem)] min-w-0 shrink-0 items-center gap-1 rounded-full border border-black/10 bg-zinc-50/85 px-2 py-1 text-left text-[13px] font-normal leading-tight text-black/82 outline-none transition-colors hover:border-black/13 hover:bg-zinc-100/70 focus-visible:ring-2 focus-visible:ring-black/10 sm:max-w-[13.5rem]"
+            aria-label={`Место поиска: ${browseLocationLabel}. Нажмите, чтобы изменить`}
+          >
+            <span className="shrink-0 text-[13px] leading-none" aria-hidden>
+              📍
+            </span>
+            <span className="min-w-0 truncate">{browseLocationLabel}</span>
+          </button>
+          <label className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-[12px] font-normal leading-none text-black/62">
+            <input
+              type="checkbox"
+              checked={locationSyncToAll}
+              onChange={(e) => onLocationSyncToAllChange(e.target.checked)}
+              className="h-3.5 w-3.5 shrink-0 rounded border-black/17 text-zinc-700 accent-zinc-600 focus:ring-1 focus:ring-black/12"
+              aria-label="Применять выбранное место ко всем колонкам при сохранении"
+            />
+            <span>Для всех</span>
+          </label>
+        </div>
+      </div>
+
+      <nav className="mt-0 border-t border-black/10 pt-3 flex flex-col gap-1.5" aria-label={heading}>
         {links.map((link, idx) => (
           <Link
             key={`${heading}-${link.slug}-${idx}`}
@@ -750,7 +887,7 @@ function ListingDetailsModal({
 
   if (!listing) return null;
 
-  const images = (listing.photos ?? []).slice(0, 10);
+  const images = extractListingPhotos(listing).slice(0, 10);
   const safeIdx = Math.min(activeIdx, Math.max(0, images.length - 1));
   const main = images[safeIdx];
 

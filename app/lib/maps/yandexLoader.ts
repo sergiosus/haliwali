@@ -10,7 +10,8 @@ export function getYandexMapsApiKey(): string {
 export type YmapsNamespace = any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const SCRIPT_SELECTOR = 'script[data-haliwali-yandex-maps-api="2.1"]';
+/** Bumped so older minimal-bundle `<script>` tags are not reused (they lack `ymaps.Circle`). */
+const SCRIPT_SELECTOR = 'script[data-haliwali-yandex-maps-api="2.1"][data-haliwali-yandex-bundle="full"]';
 
 let loadInflight: Promise<YmapsNamespace> | null = null;
 
@@ -79,8 +80,10 @@ export function loadYandexMaps(): Promise<YmapsNamespace> {
 
     const script = document.createElement("script");
     script.setAttribute("data-haliwali-yandex-maps-api", "2.1");
+    script.setAttribute("data-haliwali-yandex-bundle", "full");
     script.async = true;
-    script.src = `https://api-maps.yandex.ru/2.1/?apikey=${encodeURIComponent(key)}&lang=ru_RU`;
+    /* `package.full` includes `ymaps.Circle` (not present in the default minimal bundle). */
+    script.src = `https://api-maps.yandex.ru/2.1/?apikey=${encodeURIComponent(key)}&lang=ru_RU&load=package.full`;
     script.onload = () => finish();
     script.onerror = () => {
       loadInflight = null;

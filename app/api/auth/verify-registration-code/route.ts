@@ -4,7 +4,7 @@
  * `/api/auth/request-registration-code` only.
  */
 import { NextResponse } from "next/server";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { normalizeEmail, normalizePhone } from "../../../lib/identity";
@@ -119,8 +119,4 @@ export async function POST(req: Request) {
   const res = NextResponse.json({ ok: true, user: toUserPublicDTO(user) });
   await setUserSessionCookie(res, token, maxAgeSec);
   return res;
-}
-
-function sha256(input: string) {
-  return createHash("sha256").update(input).digest("hex");
 }

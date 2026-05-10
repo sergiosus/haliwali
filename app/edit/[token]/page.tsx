@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useParams } from "next/navigation";
 import type { Listing } from "../../lib/listings";
 import { useListingsStore } from "../../lib/listings";
@@ -12,6 +12,22 @@ import { ListingLocationSection } from "../../components/ListingLocationSection"
 import { isValidPhone, PHONE_VALIDATION_MESSAGE } from "../../lib/identity";
 import { resolveRussiaCityRegionDisplay } from "../../lib/locationDisplay";
 import { LOCATION_MESSAGES, type SelectedLocation } from "../../lib/selectedLocation";
+import { isUploadFail, uploadFiles } from "../../lib/uploadClient";
+
+/** Saved gallery URL vs local file queued for upload (preview via `objectUrl` only — never persisted). */
+type EditPhotoSlot =
+  | { kind: "saved"; url: string }
+  | { kind: "pending"; file: File; objectUrl: string };
+
+function photosDirty(slots: EditPhotoSlot[], baselinePhotos: string[]): boolean {
+  if (slots.some((s) => s.kind === "pending")) return true;
+  const urls = slots.filter((s): s is { kind: "saved"; url: string } => s.kind === "saved").map((s) => s.url);
+  if (urls.length !== baselinePhotos.length) return true;
+  for (let i = 0; i < urls.length; i++) {
+    if (urls[i] !== baselinePhotos[i]) return true;
+  }
+  return false;
+}
 export default function EditPage() {
   const params = useParams<{ token: string }>();
   const token = params?.token ?? "";
@@ -133,8 +149,20 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
   });
   const [locationMsg, setLocationMsg] = useState<string | null>(null);
   const [phone, setPhone] = useState(listing.phone ?? "");
-  const [photos, setPhotos] = useState<string[]>(listing.photos ?? []);
+  const [photoSlots, setPhotoSlots] = useState<EditPhotoSlot[]>(() =>
+    (listing.photos ?? []).map((url) => ({ kind: "saved" as const, url })),
+  );
   const [baseline, setBaseline] = useState<FormBaseline>(() => snapshotFromListing(listing));
+
+  const photoSlotsRef = useRef(photoSlots);
+  photoSlotsRef.current = photoSlots;
+  useEffect(() => {
+    return () => {
+      for (const s of photoSlotsRef.current) {
+        if (s.kind === "pending") URL.revokeObjectURL(s.objectUrl);
+      }
+    };
+  }, []);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -151,10 +179,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
   const wholeRussia = !selectedLocation;
 
   const isDirty = useMemo(() => {
-    if (photos.length !== baseline.photos.length) return true;
-    for (let i = 0; i < photos.length; i++) {
-      if (photos[i] !== baseline.photos[i]) return true;
-    }
+    if (photosDirty(photoSlots, baseline.photos)) return true;
     return (
       title.trim() !== baseline.title ||
       description.trim() !== baseline.description ||
@@ -165,7 +190,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
       (selectedLocation?.longitude ?? undefined) !== baseline.longitude ||
       phone.trim() !== baseline.phone
     );
-  }, [title, description, categoryName, address, selectedLocation, phone, photos, baseline]);
+  }, [title, description, categoryName, address, selectedLocation, phone, photoSlots, baseline]);
 
   useEffect(() => {
     if (!saveSuccess) return;
@@ -226,6 +251,26 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                 try {
                   await new Promise((r) => window.setTimeout(r, 0));
 
+                  const existingUrls = photoSlots.filter((s) => s.kind === "saved").map((s) => s.url);
+                  const pendingSlots = photoSlots.filter((s) => s.kind === "pending");
+                  let uploadedUrls: string[] = [];
+                  if (pendingSlots.length > 0) {
+                    try {
+                      uploadedUrls = await uploadFiles(pendingSlots.map((p) => p.file));
+                    } catch (uploadErr) {
+                      console.error("[edit listing] photo upload failed", uploadErr);
+                      if (isUploadFail(uploadErr)) {
+                        console.error("[edit listing] upload detail", {
+                          status: uploadErr.status,
+                          serverError: uploadErr.serverError,
+                          message: uploadErr.message,
+                        });
+                      }
+                      throw uploadErr;
+                    }
+                  }
+                  const finalPhotos = [...existingUrls, ...uploadedUrls].slice(0, 10);
+
                   const locCityRaw = (selectedLocation?.city ?? "").trim();
                   const locMerged = wholeRussia
                     ? { city: "", region: "Вся Россия", displayName: "Вся Россия" }
@@ -271,7 +316,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                     latitude: hasGeo ? lat : undefined,
                     longitude: hasGeo ? lng : undefined,
                     phone: phone.trim(),
-                    photos,
+                    photos: finalPhotos,
                     status: nextStatus,
                     moderationReason: moderation.moderationReason ?? "",
                     location: wholeRussia
@@ -288,9 +333,15 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                   } as Listing;
 
                   await Promise.resolve(onSave(next));
+
+                  for (const s of photoSlots) {
+                    if (s.kind === "pending") URL.revokeObjectURL(s.objectUrl);
+                  }
+                  setPhotoSlots((next.photos ?? []).map((url) => ({ kind: "saved" as const, url })));
                   setBaseline(snapshotFromListing(next));
                   setSaveSuccess(true);
-                } catch {
+                } catch (err) {
+                  console.error("[edit listing] save failed", err);
                   setSaveError(true);
                 } finally {
                   setIsSaving(false);
@@ -403,10 +454,10 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
 
               <Field label="Фото (до 10)" labelAsGroup>
                 <EditPhotos
-                  photos={photos}
-                  setPhotos={(next) => {
+                  photoSlots={photoSlots}
+                  setPhotoSlots={(next) => {
                     setSaveError(false);
-                    setPhotos(next);
+                    setPhotoSlots(next);
                   }}
                 />
               </Field>
@@ -519,11 +570,11 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
 }
 
 function EditPhotos({
-  photos,
-  setPhotos,
+  photoSlots,
+  setPhotoSlots,
 }: {
-  photos: string[];
-  setPhotos: (next: string[]) => void;
+  photoSlots: EditPhotoSlot[];
+  setPhotoSlots: Dispatch<SetStateAction<EditPhotoSlot[]>>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -543,13 +594,20 @@ function EditPhotos({
           if (files.length === 0) return;
           setError(null);
 
-          const remaining = Math.max(0, 10 - photos.length);
+          const remaining = Math.max(0, 10 - photoSlots.length);
           const nextFiles = files.slice(0, remaining);
           if (files.length > remaining) setError("Максимум 10 фото");
 
           try {
-            const dataUrls = await Promise.all(nextFiles.map(convertImageToJpegDataUrl));
-            setPhotos([...photos, ...dataUrls]);
+            const prepared = await Promise.all(nextFiles.map(prepareUploadableJpegFile));
+            setPhotoSlots((prev) => [
+              ...prev,
+              ...prepared.map((p) => ({
+                kind: "pending" as const,
+                file: p.file,
+                objectUrl: p.objectUrl,
+              })),
+            ]);
           } catch (err) {
             const msg = err instanceof Error ? err.message : "";
             setError(msg || "Неподдерживаемый формат изображения");
@@ -568,45 +626,65 @@ function EditPhotos({
         </button>
         <div className="grid gap-0.5 text-sm text-black/55">
           <span>Можно добавить до 10 фото</span>
-          <span className="text-xs text-black/50">{photos.length} из 10 фото</span>
+          <span className="text-xs text-black/50">{photoSlots.length} из 10 фото</span>
         </div>
       </div>
 
-      {photos.length === 0 ? <p className="text-sm text-black/45">Фото не выбраны</p> : null}
+      {photoSlots.length === 0 ? <p className="text-sm text-black/45">Фото не выбраны</p> : null}
 
       {error ? <div className="text-sm text-red-600">{error}</div> : null}
 
-      {photos.length > 0 ? (
+      {photoSlots.length > 0 ? (
         <div className="flex flex-wrap gap-3">
-          {photos.map((src, idx) => (
-            <div
-              key={`${idx}-${src.slice(0, 40)}`}
-              className="group relative h-24 w-24 overflow-hidden rounded-2xl border border-black/10 bg-black/[0.04]"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={src}
-                alt=""
-                className="h-full w-full object-cover transition duration-150 ease-out group-hover:brightness-[0.88]"
-              />
-              <button
-                type="button"
-                aria-label="Удалить это фото"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setPhotos(photos.filter((_, i) => i !== idx));
-                }}
-                className="absolute right-1 top-1 z-10 grid h-8 w-8 cursor-pointer place-items-center rounded-full bg-white/95 text-[18px] leading-none text-black shadow-md ring-1 ring-black/10 transition-opacity duration-150 hover:bg-white hover:brightness-105 sm:opacity-85 sm:group-hover:opacity-100"
+          {photoSlots.map((slot, idx) => {
+            const src = slot.kind === "saved" ? slot.url : slot.objectUrl;
+            const key = slot.kind === "saved" ? `s-${slot.url}` : `p-${slot.objectUrl}`;
+            return (
+              <div
+                key={key}
+                className="group relative h-24 w-24 overflow-hidden rounded-2xl border border-black/10 bg-black/[0.04]"
               >
-                ×
-              </button>
-            </div>
-          ))}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt=""
+                  className="h-full w-full object-cover transition duration-150 ease-out group-hover:brightness-[0.88]"
+                />
+                <button
+                  type="button"
+                  aria-label="Удалить это фото"
+                  onClick={(ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    setPhotoSlots((prev) => {
+                      const removed = prev[idx];
+                      if (removed?.kind === "pending") {
+                        URL.revokeObjectURL(removed.objectUrl);
+                      }
+                      return prev.filter((_, i) => i !== idx);
+                    });
+                  }}
+                  className="absolute right-1 top-1 z-10 grid h-8 w-8 cursor-pointer place-items-center rounded-full bg-white/95 text-[18px] leading-none text-black shadow-md ring-1 ring-black/10 transition-opacity duration-150 hover:bg-white hover:brightness-105 sm:opacity-85 sm:group-hover:opacity-100"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>
   );
+}
+
+/** Client-side JPEG under 5MB for `/api/upload` — same pipeline as before, but returns `File` + preview blob URL (not base64 in listing). */
+async function prepareUploadableJpegFile(file: File): Promise<{ file: File; objectUrl: string }> {
+  const dataUrl = await convertImageToJpegDataUrl(file);
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const out = new File([blob], "photo.jpg", { type: "image/jpeg" });
+  const objectUrl = URL.createObjectURL(out);
+  return { file: out, objectUrl };
 }
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB

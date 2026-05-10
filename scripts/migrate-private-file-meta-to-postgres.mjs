@@ -52,7 +52,6 @@ function safeExt(ext) {
 loadEnvIfNeeded();
 const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
 if (!DATABASE_URL) {
-  // eslint-disable-next-line no-console
   console.error("DATABASE_URL missing");
   process.exit(2);
 }
@@ -72,7 +71,6 @@ try {
   try {
     files = await fsp.readdir(META_DIR);
   } catch {
-    // eslint-disable-next-line no-console
     console.log("No meta dir found:", META_DIR);
     process.exit(0);
   }
@@ -127,7 +125,6 @@ try {
     }
   }
 
-  // eslint-disable-next-line no-console
   console.log({ imported, skipped, errors, metaDir: META_DIR });
 } finally {
   await pool.end().catch(() => void 0);

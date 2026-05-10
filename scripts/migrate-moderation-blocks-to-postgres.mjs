@@ -40,7 +40,6 @@ function loadEnvIfNeeded() {
 loadEnvIfNeeded();
 const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
 if (!DATABASE_URL) {
-  // eslint-disable-next-line no-console
   console.error("DATABASE_URL missing");
   process.exit(2);
 }
@@ -55,7 +54,6 @@ let errors = 0;
 
 try {
   if (!fs.existsSync(BLOCKS_PATH)) {
-    // eslint-disable-next-line no-console
     console.log({ imported, skipped, errors, note: "no_json_file", path: BLOCKS_PATH });
     process.exit(0);
   }
@@ -64,7 +62,6 @@ try {
   try {
     raw = fs.readFileSync(BLOCKS_PATH, "utf8");
   } catch {
-    // eslint-disable-next-line no-console
     console.log({ imported, skipped, errors: errors + 1, note: "read_failed", path: BLOCKS_PATH });
     process.exit(1);
   }
@@ -73,13 +70,11 @@ try {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // eslint-disable-next-line no-console
     console.log({ imported, skipped, errors: errors + 1, note: "bad_json", path: BLOCKS_PATH });
     process.exit(1);
   }
 
   if (!parsed || typeof parsed !== "object") {
-    // eslint-disable-next-line no-console
     console.log({ imported, skipped: skipped + 1, errors, note: "not_object", path: BLOCKS_PATH });
     process.exit(0);
   }
@@ -111,7 +106,6 @@ try {
     }
   }
 
-  // eslint-disable-next-line no-console
   console.log({ imported, skipped, errors, path: BLOCKS_PATH });
 } finally {
   await pool.end().catch(() => void 0);

@@ -4,9 +4,6 @@ import { redirect } from "next/navigation";
 import AdminClient from "./AdminClient";
 import AdminLoginForm from "./AdminLoginForm";
 import {
-  ADMIN_SESSION_COOKIE,
-  ADMIN_SESSION_COOKIE_LEGACY_HALIWALI,
-  ADMIN_SESSION_COOKIE_LEGACY_HOST,
   adminRateLimitOk,
   clearAdminCookie,
   createAdminSession,
@@ -30,11 +27,6 @@ async function login(formData: FormData) {
   }
 
   const jar = await cookies();
-  const hasAdminCookie = Boolean(
-    jar.get(ADMIN_SESSION_COOKIE)?.value?.trim() ||
-      jar.get(ADMIN_SESSION_COOKIE_LEGACY_HALIWALI)?.value?.trim() ||
-      jar.get(ADMIN_SESSION_COOKIE_LEGACY_HOST)?.value?.trim(),
-  );
 
   const password = String(formData.get("password") ?? "");
 

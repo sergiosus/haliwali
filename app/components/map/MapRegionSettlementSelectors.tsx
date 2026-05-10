@@ -161,10 +161,6 @@ export function MapRegionSettlementSelectors({
       `${subjSlug ? `&region=${encodeURIComponent(subjSlug)}` : ""}` +
       `${district ? `&district=${encodeURIComponent(district)}` : ""}`;
 
-    if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line no-console
-      console.log("[/map] cities request", url);
-    }
     void fetch(
       url,
       { cache: "no-store" },
@@ -175,9 +171,8 @@ export function MapRegionSettlementSelectors({
         const ok = Boolean(d && typeof d === "object" && (d as { ok?: unknown }).ok === true);
         const arr = d && typeof d === "object" ? (d as { cities?: unknown }).cities : null;
         if (!ok) {
-          if (process.env.NODE_ENV !== "production") {
-            // eslint-disable-next-line no-console
-            console.error("[/map] /api/cities returned ok:false", d);
+          if (process.env.NODE_ENV === "development") {
+            console.error("[/map] /api/cities ok:false");
           }
           setSearchSettlementsError("Города временно недоступны");
           setSearchResults([]);
@@ -185,9 +180,8 @@ export function MapRegionSettlementSelectors({
           return;
         }
         if (!Array.isArray(arr)) {
-          if (process.env.NODE_ENV !== "production") {
-            // eslint-disable-next-line no-console
-            console.error("[/map] /api/cities failed", d);
+          if (process.env.NODE_ENV === "development") {
+            console.error("[/map] /api/cities bad payload", { hint: "cities_not_array" });
           }
           setSearchSettlementsError("Города временно недоступны");
           setSearchResults([]);
@@ -204,19 +198,17 @@ export function MapRegionSettlementSelectors({
           }))
           .filter((x) => x.name && x.region && Number.isFinite(x.lat + x.lng) && isAllowedSettlementName(x.name))
           .map((x) => ({ name: `${x.region}, ${x.name}`, lat: x.lat, lng: x.lng }));
-        if (process.env.NODE_ENV !== "production") {
-          // eslint-disable-next-line no-console
-          console.log("[/map] cities response", { q, got: rows.length });
-        }
         searchCacheRef.current.set(key, rows);
         setSearchResults(rows);
         setSearchSettlementsLoading(false);
       })
       .catch((e) => {
         if (cancelled) return;
-        if (process.env.NODE_ENV !== "production") {
-          // eslint-disable-next-line no-console
-          console.error("[/map] /api/cities failed", e);
+        if (process.env.NODE_ENV === "development") {
+          console.error("[/map] /api/cities fetch error", {
+            name: e instanceof Error ? e.name : "unknown",
+            message: e instanceof Error ? e.message : String(e),
+          });
         }
         setSearchSettlementsError("Города временно недоступны");
         setSearchResults([]);
@@ -226,7 +218,6 @@ export function MapRegionSettlementSelectors({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSettlementQuery, districtSelected, subjectSlugValue]);
 
   const subjects = useMemo(() => {

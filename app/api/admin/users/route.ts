@@ -35,7 +35,7 @@ export async function GET() {
   if (deny) return deny;
 
   const db = await readUsersDb(USERS_PATH);
-  let usersList = normalizeUsersList(db);
+  const usersList = normalizeUsersList(db);
   usersList.sort((a, b) => b.createdAt - a.createdAt);
 
   const listings = await listBootstrap(null, true);

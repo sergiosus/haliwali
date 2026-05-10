@@ -46,7 +46,7 @@ function LoginPageInner() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotBusy, setForgotBusy] = useState(false);
-  const [forgotSent, setForgotSent] = useState(false);
+  const [, setForgotSent] = useState(false);
 
   const [regValue, setRegValue] = useState("");
   const [regPassword, setRegPassword] = useState("");
@@ -565,24 +565,31 @@ function LoginPageInner() {
                     {loginError ? <div className="text-sm text-red-700">{loginError}</div> : null}
 
                     {loginCodeStep === "request" ? (
-                      <button
-                        type="submit"
-                        disabled={
-                          loading ||
-                          !loginId.trim() ||
-                          (loginId.trim().includes("@")
-                            ? !isValidEmail(loginId.trim().toLowerCase())
-                            : !normalizePhone(loginId.trim()) || !isValidPhone(loginId.trim()))
-                        }
-                        className={[
-                          "mt-1 inline-flex h-12 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold text-white opacity-100",
-                          "bg-[#ff5a00] shadow-[0_6px_14px_rgba(255,90,0,0.25)] transition-all active:scale-[0.99]",
-                          "hover:bg-[#e94f00]",
-                          "disabled:cursor-not-allowed disabled:bg-[#ffb38a] disabled:opacity-[0.55]",
-                        ].join(" ")}
-                      >
-                        {loading ? "Отправка…" : "Получить код"}
-                      </button>
+                      <>
+                        <button
+                          type="submit"
+                          disabled={
+                            loading ||
+                            !loginId.trim() ||
+                            (loginId.trim().includes("@")
+                              ? !isValidEmail(loginId.trim().toLowerCase())
+                              : !normalizePhone(loginId.trim()) || !isValidPhone(loginId.trim()))
+                          }
+                          className={[
+                            "mt-1 inline-flex h-12 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold text-white opacity-100",
+                            "bg-[#ff5a00] shadow-[0_6px_14px_rgba(255,90,0,0.25)] transition-all active:scale-[0.99]",
+                            "hover:bg-[#e94f00]",
+                            "disabled:cursor-not-allowed disabled:bg-[#ffb38a] disabled:opacity-[0.55]",
+                          ].join(" ")}
+                        >
+                          {loading ? "Отправка…" : "Получить код"}
+                        </button>
+                        {loginId.trim().includes("@") ? (
+                          <p className="mt-2 text-xs leading-snug text-black/55">
+                            Код подтверждения может попасть в папку «Спам»
+                          </p>
+                        ) : null}
+                      </>
                     ) : (
                       <button
                         type="submit"
@@ -858,18 +865,23 @@ function LoginPageInner() {
                   ) : null}
 
                   {regStep === "form" ? (
-                    <button
-                      type="submit"
-                      disabled={registerDisabled}
-                      className={[
-                        "mt-1 inline-flex h-12 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold text-white opacity-100",
-                        "bg-[#ff5a00] shadow-[0_6px_14px_rgba(255,90,0,0.25)] transition-all active:scale-[0.99]",
-                        "hover:bg-[#e94f00]",
-                        "disabled:cursor-not-allowed disabled:bg-[#ffb38a] disabled:opacity-[0.55]",
-                      ].join(" ")}
-                    >
-                      {loading ? "Отправка…" : "Зарегистрироваться"}
-                    </button>
+                    <>
+                      <button
+                        type="submit"
+                        disabled={registerDisabled}
+                        className={[
+                          "mt-1 inline-flex h-12 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold text-white opacity-100",
+                          "bg-[#ff5a00] shadow-[0_6px_14px_rgba(255,90,0,0.25)] transition-all active:scale-[0.99]",
+                          "hover:bg-[#e94f00]",
+                          "disabled:cursor-not-allowed disabled:bg-[#ffb38a] disabled:opacity-[0.55]",
+                        ].join(" ")}
+                      >
+                        {loading ? "Отправка…" : "Зарегистрироваться"}
+                      </button>
+                      <p className="mt-2 text-xs leading-snug text-black/55">
+                        Код подтверждения может попасть в папку «Спам»
+                      </p>
+                    </>
                   ) : (
                     <>
                       <button

@@ -5,7 +5,7 @@ import { isFederalRussiaSettlementName } from "../lib/locationDisplay";
 import type { SelectedLocation } from "../lib/selectedLocation";
 import { LocationModal, type LocationModalChangePayload } from "./modals/LocationModal";
 
-/** «Выбрано: Москва» / «Выбрано: Ижевск, Удмуртская Республика». */
+/** «Выбрано: Москва» / «Выбрано: Город, регион». */
 export function listingLocationChosenCaption(sl: SelectedLocation | null): string {
   if (!sl?.city?.trim()) return "";
   const city = sl.city.trim();

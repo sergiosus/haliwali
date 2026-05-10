@@ -19,14 +19,6 @@ export type SettlementRecord = {
   readonly lng: number;
 };
 
-function keepSettlementRow(s: SettlementRecord): boolean {
-  return (
-    isValidSettlementName(s.name) &&
-    !isBogusSettlementName(s.name) &&
-    !shouldSuppressNearIzhevskReference(s.name, s.lat, s.lng)
-  );
-}
-
 /** Clean dataset: name rules + Ижевск halo (drops legacy «Иж» garbage in JSON). */
 export const ALL_SETTLEMENTS = Object.freeze(
   [] as readonly SettlementRecord[],

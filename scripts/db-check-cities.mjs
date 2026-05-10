@@ -36,7 +36,6 @@ function loadEnvIfNeeded() {
 loadEnvIfNeeded();
 const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
 if (!DATABASE_URL) {
-  // eslint-disable-next-line no-console
   console.error("DATABASE_URL missing");
   process.exit(2);
 }
@@ -58,7 +57,6 @@ try {
     "select name, subject_slug, settlement_type, normalized_name from location_settlements where normalized_name like 'иж%' order by normalized_name, subject_slug, name limit 30",
   );
 
-  // eslint-disable-next-line no-console
   console.log({
     tables: reg.rows?.[0],
     counts: counts.rows?.[0],

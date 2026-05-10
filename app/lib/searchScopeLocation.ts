@@ -1,5 +1,6 @@
 import { calculateDistanceKm, isFiniteLatLng } from "@/lib/shared/geo";
 import type { Listing } from "./listingModel";
+import { findStaticRussiaCityCoords } from "./staticRussiaCities";
 import {
   isFederalDistrictLabel,
   federalDistrictSubjectsLc,
@@ -51,30 +52,52 @@ export function nearestAllowedRadiusKm(km: number): number {
   return best;
 }
 
+/** Old raw-GPS wording — must never be user-facing canonical place title or persisted label. */
+export function isDeprecatedGpsUserFacingLabel(text: string | undefined): boolean {
+  const lc = `${text ?? ""}`.trim().toLowerCase().replace(/\s+/g, " ");
+  return lc === "моё местоположение" || lc === "мое местоположение";
+}
+
+/** If `primary` is the deprecated phrase, return `neutralFallback`; else return trimmed `primary` (or `neutralFallback` when empty). */
+export function replaceDeprecatedGpsUserLabelWithNeutral(
+  primary: string | undefined,
+  neutralFallback: string,
+): string {
+  const trimmed = `${primary ?? ""}`.trim();
+  if (!trimmed) return neutralFallback;
+  if (isDeprecatedGpsUserFacingLabel(trimmed)) return neutralFallback;
+  return trimmed;
+}
+
 export function homepageLocationLabelFromScope(scope: SearchScopeLocation): string {
   const s = scope ?? DEFAULT_SEARCH_SCOPE;
   if (s.type === "country") return "Вся Россия";
-  if (s.type === "point") return (s.label || "Точка на карте").trim() || "Точка на карте";
-  return (s.label || "").trim() || "Вся Россия";
+  if (s.type === "point")
+    return replaceDeprecatedGpsUserLabelWithNeutral(s.label || undefined, "Точка на карте");
+  const raw = (s.label || "").trim();
+  if (!raw) return "Вся Россия";
+  return replaceDeprecatedGpsUserLabelWithNeutral(raw, "Точка на карте");
 }
 
 export function modalCurrentSelectionPartsFromScope(scope: SearchScopeLocation): string[] {
   const s = scope ?? DEFAULT_SEARCH_SCOPE;
   if (s.type === "country") return ["Вся Россия"];
   if (s.type === "point") {
-    const base = (s.label || "Точка на карте").trim() || "Точка на карте";
+    const base = replaceDeprecatedGpsUserLabelWithNeutral(s.label || undefined, "Точка на карте");
     const r = typeof s.radiusKm === "number" && s.radiusKm > 0 ? s.radiusKm : 0;
     return r > 0 ? [`${base} · ${r} км`] : [base];
   }
   if (s.type === "district" && (s.parentName || s.region)) {
     const pr = (s.parentName || s.region || "").trim();
-    return pr ? [s.label.trim(), pr] : [s.label.trim()];
+    const head = replaceDeprecatedGpsUserLabelWithNeutral(s.label.trim(), "Точка на карте");
+    return pr ? [head, pr] : [head];
   }
   if ((s.type === "city" || s.type === "settlement") && (s.region || s.parentName)) {
     const pr = (s.region || s.parentName || "").trim();
-    return pr ? [s.label.trim(), pr] : [s.label.trim()];
+    const head = replaceDeprecatedGpsUserLabelWithNeutral(s.label.trim(), "Точка на карте");
+    return pr ? [head, pr] : [head];
   }
-  return [(s.label || "").trim() || "Вся Россия"];
+  return [replaceDeprecatedGpsUserLabelWithNeutral((s.label || "").trim(), "Вся Россия")];
 }
 
 export type LegacyLocationSnapshot = {
@@ -113,7 +136,7 @@ export function searchScopeFromLegacySnapshot(snap: LegacyLocationSnapshot): Sea
   if (pointLike) {
     return {
       type: "point",
-      label: displayName || "Точка на карте",
+      label: replaceDeprecatedGpsUserLabelWithNeutral(displayName || undefined, "Точка на карте"),
       lat: typeof lat === "number" && Number.isFinite(lat) ? lat : undefined,
       lng: typeof lng === "number" && Number.isFinite(lng) ? lng : undefined,
       radiusKm: nearestAllowedRadiusKm(radiusKm),
@@ -124,7 +147,10 @@ export function searchScopeFromLegacySnapshot(snap: LegacyLocationSnapshot): Sea
   if (pk === "district" || district) {
     return {
       type: "district",
-      label: district || displayName || region,
+      label: replaceDeprecatedGpsUserLabelWithNeutral(
+        (district || displayName || region).trim(),
+        "Точка на карте",
+      ),
       region: region || undefined,
       parentName: region || undefined,
     };
@@ -139,10 +165,10 @@ export function searchScopeFromLegacySnapshot(snap: LegacyLocationSnapshot): Sea
   }
 
   if (city) {
-    const lab = displayName || city;
+    const citySafe = replaceDeprecatedGpsUserLabelWithNeutral(city, "Точка на карте");
     return {
       type: "city",
-      label: city,
+      label: citySafe,
       region: region || undefined,
       parentName: region || undefined,
       lat: typeof lat === "number" && Number.isFinite(lat) ? lat : undefined,
@@ -163,7 +189,7 @@ export function normalizeSearchScope(raw: SearchScopeLocation): SearchScopeLocat
       const r = nearestAllowedRadiusKm(r0);
       return {
         type: "point",
-        label: label || "Точка на карте",
+        label: replaceDeprecatedGpsUserLabelWithNeutral(label || undefined, "Точка на карте"),
         lat: raw.lat,
         lng: raw.lng,
         radiusKm: r || nearestAllowedRadiusKm(10),
@@ -175,12 +201,16 @@ export function normalizeSearchScope(raw: SearchScopeLocation): SearchScopeLocat
       const rk = typeof raw.radiusKm === "number" && Number.isFinite(raw.radiusKm) && raw.radiusKm > 0 ? raw.radiusKm : undefined;
       const base: SearchScopeLocation = {
         ...raw,
-        label: label || "Вся Россия",
+        label:
+          label ?
+            replaceDeprecatedGpsUserLabelWithNeutral(label, "Точка на карте")
+          : "Вся Россия",
         region: `${raw.region ?? ""}`.trim() || undefined,
         parentName: `${raw.parentName ?? ""}`.trim() || undefined,
       };
       if (rk === undefined) {
-        const { radiusKm: _, ...rest } = base;
+        const rest = { ...base };
+        delete rest.radiusKm;
         return rest;
       }
       return { ...base, radiusKm: Math.round(rk) };
@@ -218,7 +248,7 @@ export function legacyFieldsFromSearchScope(scope: SearchScopeLocation): {
       city: "",
       region: (s.region || "").trim(),
       district: "",
-      displayName: s.label || "Точка на карте",
+      displayName: replaceDeprecatedGpsUserLabelWithNeutral(s.label || undefined, "Точка на карте"),
       pickKind: "point",
       radiusKm: nearestAllowedRadiusKm(s.radiusKm ?? 0),
       lat: s.lat,
@@ -254,7 +284,7 @@ export function legacyFieldsFromSearchScope(scope: SearchScopeLocation): {
     };
   }
 
-  const resolvedCity = (s.label || "").trim();
+  const resolvedCity = replaceDeprecatedGpsUserLabelWithNeutral((s.label || "").trim(), "Точка на карте");
   const resolvedRegion = (s.region || s.parentName || "").trim();
   const rk =
     typeof s.radiusKm === "number" && Number.isFinite(s.radiusKm) && s.radiusKm > 0 ? Math.round(s.radiusKm) : 0;
@@ -280,11 +310,47 @@ function inferListingAdministrativeRegionForScope(listing: Listing): string {
   return canon?.region.trim() ?? "";
 }
 
-/** Latitude/longitude for map markers (`listing` fields first, then `location` snapshot). */
+/** Parse lat/lng from API/JSON (numbers or numeric strings — pg/json sometimes yields strings). */
+function parseStoredLatLngPair(latRaw: unknown, lngRaw: unknown): { lat: number; lng: number } | null {
+  const num = (v: unknown): number | null => {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      const t = v.trim().replace(",", ".");
+      if (!t) return null;
+      const n = Number(t);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  };
+  const lat = num(latRaw);
+  const lng = num(lngRaw);
+  if (lat == null || lng == null) return null;
+  if (!Number.isFinite(lat + lng)) return null;
+  return { lat, lng };
+}
+
+/**
+ * Stored listing coordinates (`latitude`/`longitude`, then `location`), with string coercion.
+ * Used for scope radius checks and exact map pins.
+ */
 export function listingCoordinatesForMap(listing: Listing): { lat: number; lng: number } | null {
-  const lat = listing.latitude ?? listing.location?.lat;
-  const lng = listing.longitude ?? listing.location?.lng;
-  return isFiniteLatLng(lat, lng) ? { lat: lat!, lng: lng! } : null;
+  const latRaw = listing.latitude ?? listing.location?.lat;
+  const lngRaw = listing.longitude ?? listing.location?.lng;
+  return parseStoredLatLngPair(latRaw, lngRaw);
+}
+
+/**
+ * Placemark geometry for `/map`: exact coordinates first, then static city corpus center (`city` + inferred region).
+ * Fallback keeps sidebar and map aligned for city-only postings; {@link listingMatchesSearchScope} still uses only stored coords + city/region logic.
+ */
+export function listingMarkerPlacemarkCoordinates(listing: Listing): { lat: number; lng: number } | null {
+  const precise = listingCoordinatesForMap(listing);
+  if (precise) return precise;
+  const city = typeof listing.city === "string" ? listing.city.trim() : "";
+  if (!city) return null;
+  const region = inferListingAdministrativeRegionForScope(listing);
+  const fromStatic = findStaticRussiaCityCoords(city, region);
+  return fromStatic;
 }
 
 function listingCoords(listing: Listing): { lat: number; lng: number } | null {

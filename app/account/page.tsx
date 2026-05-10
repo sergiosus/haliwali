@@ -504,7 +504,12 @@ function AccountPageInner() {
   useEffect(() => {
     if (!isDebugAuthClient()) return;
     if (auth.status !== "ready") return;
-    console.log("[auth] profile user", { hasUser: Boolean(auth.userId), userId: auth.userId ?? undefined });
+    const uid = (auth.userId ?? "").trim();
+    console.log("[auth] profile", {
+      hasUser: Boolean(uid),
+      userIdLen: uid.length,
+      userIdPrefix: uid.length > 10 ? `${uid.slice(0, 6)}…` : uid || undefined,
+    });
   }, [auth.status, auth.userId]);
 
   const allMine = useMemo(() => {
@@ -658,18 +663,21 @@ function AccountPageInner() {
   }, [auth.status, auth.userId, me]);
 
   useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
-    if (!me?.ok) return;
-    console.log("[AUTH CURRENT USER]", me.user);
-    console.log(
-      "[CABINET DISPLAY]",
-      getSiteIdentityLabel({
-        name: me.user.name,
-        displayName: me.user.displayName,
-        email: me.user.email,
-      }),
-    );
-    console.log("[PROFILE FORM USER]", me.user);
+    if (!isDebugAuthClient() || !me?.ok) return;
+    const uid = (me.user.userId ?? "").trim();
+    const label = getSiteIdentityLabel({
+      name: me.user.name,
+      displayName: me.user.displayName,
+      email: me.user.email,
+    });
+    console.log("[account] me.summary", {
+      userIdPrefix: uid.length > 10 ? `${uid.slice(0, 6)}…` : uid || undefined,
+      hasEmail: Boolean(me.user.email?.trim()),
+      hasPhone: Boolean(me.user.phone?.trim()),
+      hasName: Boolean(me.user.name?.trim()),
+      hasDisplayName: Boolean(me.user.displayName?.trim()),
+      labelLen: label.length,
+    });
   }, [me]);
 
   useEffect(() => {

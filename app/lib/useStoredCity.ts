@@ -69,6 +69,11 @@ function subscribe(callback: () => void) {
   };
 }
 
+/** Same subscription as hooks that read scope/city (`emit` + `storage`) — use to invalidate caches that derive from legacy keys. */
+export function subscribeStoredLocationMutations(callback: () => void) {
+  return subscribe(callback);
+}
+
 function getSnapshot() {
   if (typeof window === "undefined") return EMPTY_CITY;
   return localStorage.getItem(CITY_KEY) ?? EMPTY_CITY;
@@ -483,6 +488,21 @@ export function readClientSearchScope(): SearchScopeLocation {
   const fromJson = parseSearchScopeJson(localStorage.getItem(CITY_SEARCH_SCOPE_KEY));
   if (fromJson) return normalizeSearchScope(fromJson);
   return searchScopeFromLegacySnapshot(readLegacyLocationSnapshotFromStorage());
+}
+
+/** `haliwali_search_scope_v1` JSON only (no flat-key fallback) — for browse canonical read priority. */
+export function readStoredSearchScopeV1JsonOrNull(): SearchScopeLocation | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(CITY_SEARCH_SCOPE_KEY);
+  if (!raw?.trim()) return null;
+  const fromJson = parseSearchScopeJson(raw);
+  return fromJson ? normalizeSearchScope(fromJson) : null;
+}
+
+/** Reconstruct scope from `haliwali_city*` only (used when JSON blob is absent). */
+export function readStoredScopeFromLegacyFlatKeysOnly(): SearchScopeLocation {
+  if (typeof window === "undefined") return DEFAULT_SEARCH_SCOPE;
+  return normalizeSearchScope(searchScopeFromLegacySnapshot(readLegacyLocationSnapshotFromStorage()));
 }
 
 export function setStoredSearchScope(next: SearchScopeLocation) {

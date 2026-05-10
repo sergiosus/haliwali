@@ -9,29 +9,6 @@ import {
 import { buildSearchVariants } from "@/app/lib/utils/keyboardLayout";
 import { getPool, usesPostgres } from "@/app/lib/pgPool";
 
-function isAllowedSettlementName(name: string): boolean {
-  const t = name.trim();
-  if (!t) return false;
-  if (!isValidDetectedSettlement(t)) return false;
-  if (looksLikeDistrictAdministrativeLabel(t)) return false;
-  if (looksLikeRuralAutoSettlement(t)) return false;
-  return true;
-}
-
-function subjectSlugToCanonical(): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const subjects of Object.values(SUBJECTS_BY_DISTRICT)) {
-    for (const s of subjects) {
-      const canon = canonicalRussiaRegionLabel(s).trim();
-      if (!canon) continue;
-      const slug = slugify(canon);
-      if (!slug) continue;
-      if (!m.has(slug)) m.set(slug, canon);
-    }
-  }
-  return m;
-}
-
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -135,14 +112,12 @@ export async function GET(req: Request) {
         return Response.json({ ok: true, cities: r.rows });
     } catch (e) {
       if (process.env.NODE_ENV !== "production") {
-        // eslint-disable-next-line no-console
         console.error("[api/cities] DB error", e);
       }
       return Response.json({ ok: false, cities: [], error: "cities_unavailable" });
     }
   } catch (e) {
     if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line no-console
       console.error("[api/cities] handler error", e);
     }
     return Response.json({ ok: false, cities: [], error: "cities_unavailable" });

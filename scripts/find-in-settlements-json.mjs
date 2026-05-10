@@ -16,6 +16,5 @@ for (const r of arr) {
   if (out.length >= 20) break;
 }
 
-// eslint-disable-next-line no-console
 console.log({ target, matches: out.length, sample: out });
 

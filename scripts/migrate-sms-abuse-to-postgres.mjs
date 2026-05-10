@@ -67,7 +67,6 @@ function sha256(input) {
 loadEnvIfNeeded();
 const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
 if (!DATABASE_URL) {
-  // eslint-disable-next-line no-console
   console.error("DATABASE_URL missing");
   process.exit(2);
 }
@@ -256,7 +255,6 @@ try {
   await pool.end().catch(() => undefined);
 }
 
-// eslint-disable-next-line no-console
 console.log(
   JSON.stringify(
     {

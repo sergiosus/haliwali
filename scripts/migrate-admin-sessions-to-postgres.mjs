@@ -44,7 +44,6 @@ const RATE_MAX = 8;
 loadEnvIfNeeded();
 const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
 if (!DATABASE_URL) {
-  // eslint-disable-next-line no-console
   console.error("DATABASE_URL missing");
   process.exit(2);
 }
@@ -149,7 +148,6 @@ try {
     }
   }
 
-  // eslint-disable-next-line no-console
   console.log({
     sessions: { imported: importedSessions, skipped: skippedSessions, errors: sessionErrors },
     rateLimits: { imported: importedRates, skipped: skippedRates, errors: rateErrors },

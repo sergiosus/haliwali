@@ -6,7 +6,6 @@
  * `/api/send-code` + `/api/verify-code` (those are login-only).
  */
 import { NextResponse } from "next/server";
-import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import bcrypt from "bcryptjs";
@@ -190,8 +189,4 @@ export async function POST(req: Request) {
   };
 
   return NextResponse.json(payload);
-}
-
-function sha256(input: string) {
-  return createHash("sha256").update(input).digest("hex");
 }

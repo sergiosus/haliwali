@@ -13,6 +13,7 @@ import {
   DEFAULT_SEARCH_SCOPE,
   homepageLocationLabelFromScope,
   listingCoordinatesForMap,
+  listingMarkerPlacemarkCoordinates,
   listingMatchesSearchScope,
   normalizeSearchScope,
   type SearchScopeLocation,
@@ -281,19 +282,44 @@ export default function MapBrowsePage() {
       previewImage?: string;
     }[] = [];
     for (const l of baseFiltered) {
-      const c = listingCoordinatesForMap(l);
-      if (!c) continue;
-      const firstPhoto = extractListingPhotos(l)[0]?.trim();
-      out.push({
-        id: l.id,
-        lat: c.lat,
-        lng: c.lng,
-        isSelected: selectedId === l.id,
-        previewTitle: ((l.title ?? "").trim() || "Объявление").slice(0, 120),
-        previewType: typeFilterRu(l.type),
-        previewCity: listingCardLocationLine(l),
-        ...(firstPhoto ? { previewImage: firstPhoto } : {}),
-      });
+      const c = listingMarkerPlacemarkCoordinates(l);
+      if (c) {
+        const firstPhoto = extractListingPhotos(l)[0]?.trim();
+        out.push({
+          id: l.id,
+          lat: c.lat,
+          lng: c.lng,
+          isSelected: selectedId === l.id,
+          previewTitle: ((l.title ?? "").trim() || "Объявление").slice(0, 120),
+          previewType: typeFilterRu(l.type),
+          previewCity: listingCardLocationLine(l),
+          ...(firstPhoto ? { previewImage: firstPhoto } : {}),
+        });
+        continue;
+      }
+
+      /** TEMPORARY: remove after marker pipeline debugging. */
+      if (process.env.NODE_ENV === "development") {
+        const rawLat = l.latitude ?? l.location?.lat;
+        const rawLng = l.longitude ?? l.location?.lng;
+        const hasLatRaw =
+          rawLat !== undefined && rawLat !== null && String(rawLat).trim() !== "";
+        const hasLngRaw =
+          rawLng !== undefined && rawLng !== null && String(rawLng).trim() !== "";
+        const precise = listingCoordinatesForMap(l);
+        const city = (l.city ?? "").trim();
+        let reason: string;
+        if (!precise && (hasLatRaw || hasLngRaw)) reason = "coordinates_invalid_or_incomplete";
+        else if (!city) reason = "no_city_for_static_fallback";
+        else reason = "city_not_in_static_catalog";
+        console.log("[MAP_MARKER_SKIPPED]", {
+          id: l.id,
+          reason,
+          lat: rawLat ?? null,
+          lng: rawLng ?? null,
+          status: l.status,
+        });
+      }
     }
     return out;
   }, [baseFiltered, selectedId]);
@@ -499,7 +525,7 @@ export default function MapBrowsePage() {
             </div>
 
             <div className="min-w-0 break-words text-xs text-black/50">
-              Локация: {scopeLabel}. Без координат объявление только в списке, не на карте.
+              Локация: {scopeLabel}. На карте — по координатам или центру города из справочника; иначе только в списке.
             </div>
           </div>
 
@@ -518,7 +544,7 @@ export default function MapBrowsePage() {
                   const metaExtras = (
                     <div className="mt-0.5 text-xs text-black/50">
                       {typeFilterRu(l.type)}
-                      {listingCoordinatesForMap(l) ? null : (
+                      {listingMarkerPlacemarkCoordinates(l) ? null : (
                         <span className="ml-1 rounded bg-black/[0.06] px-1 text-[11px]">нет точки на карте</span>
                       )}
                     </div>
@@ -573,7 +599,6 @@ export default function MapBrowsePage() {
             center={mapView.center}
             zoom={mapView.zoom}
             className="h-full w-full overflow-hidden rounded-none border-0"
-            showViewportCircle={false}
             showGeolocationButton
             settlementMarkers={[]}
             listingMarkers={listingMarkers}

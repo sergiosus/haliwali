@@ -58,6 +58,35 @@ export function findNearestMajorRussiaCity(lat: number, lng: number, maxKm: numb
   return best;
 }
 
+/** Largest-city centers get a wider “metro” cap for GPS label preference (nearby Москва SPB commuter belt). */
+const GPS_PREF_MAJOR_RADIUS_KM_DEFAULT = 28;
+const GPS_PREF_MAJOR_RADIUS_KM_MEGA = 42;
+
+function majorCityGpsPreferenceRadiusKm(cityName: string): number {
+  const k = cityName.trim().toLowerCase();
+  if (k === "москва" || k === "санкт-петербург") return GPS_PREF_MAJOR_RADIUS_KM_MEGA;
+  return GPS_PREF_MAJOR_RADIUS_KM_DEFAULT;
+}
+
+/**
+ * Nearest seeded major whose center lies within that city’s urban preference radius of `lat`,`lng`.
+ * Used to prefer a seeded regional capital over a closer micro‑settlement when both sit in the same agglomeration,
+ * without replacing another seeded hub (see {@link getCanonicalMajorCityProfile} guards in snapping).
+ */
+export function findNearestCanonicalMajorForGpsLabelPreference(lat: number, lng: number): NearestMajorCityMatch | null {
+  const from = { lat, lng };
+  let best: NearestMajorCityMatch | null = null;
+  for (const c of CANONICAL_MAJOR_RUSSIA_CITIES) {
+    const distanceKm = haversineKm(from, { lat: c.lat, lng: c.lng });
+    const cap = majorCityGpsPreferenceRadiusKm(c.name);
+    if (distanceKm > cap) continue;
+    if (!best || distanceKm < best.distanceKm) {
+      best = { ...c, distanceKm };
+    }
+  }
+  return best;
+}
+
 /** Center coordinates for seeded major cities. */
 export function getMajorCityCoordsByName(name: string): { lat: number; lng: number } | null {
   const p = getCanonicalMajorCityProfile(name);

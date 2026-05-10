@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FEDERAL_DISTRICT_MARKERS, isFederalDistrictLabel } from "../../lib/russiaAdministrativeAreas";
 import {
@@ -12,9 +13,11 @@ import {
   type SearchScopeLocation,
   legacyFieldsFromSearchScope,
   normalizeSearchScope,
+  replaceDeprecatedGpsUserLabelWithNeutral,
 } from "../../lib/searchScopeLocation";
-import { YandexMapPicker } from "../maps/YandexMapPicker";
 import type { MapCenter, MapSettlementMarker } from "../maps/YandexMapPicker";
+
+const YandexMapPickerLazy = dynamic(() => import("./LocationModalYandexEmbed"), { ssr: false });
 import { getYandexMapsApiKey } from "../../lib/maps/yandexLoader";
 import {
   filterGlobalRussiaCitiesByQuery,
@@ -29,6 +32,7 @@ import {
   looksLikeRuralAutoSettlement,
 } from "../../lib/russiaPlaceLabelHeuristics";
 import { buildSearchVariants, matchesSearchVariantsInText } from "../../lib/utils/keyboardLayout";
+import { GEO_SNAP_TO_SETTLEMENT_MAX_KM, snapNearestSettlementWithinKm } from "../../lib/nearbySettlementSnap";
 
 type LatLng = { readonly lat: number; readonly lng: number };
 
@@ -82,7 +86,7 @@ type PickableSettlement = {
   lng: number;
 };
 
-/** Sole geographic radius for search, nearby API, markers, and selection (Haversine from {@link currentCircleCenter}). */
+/** Sole geographic radius for search, nearby API, markers, and selection (Haversine from settlement anchor center). */
 export const CIRCLE_RADIUS_KM = 100;
 
 /** @deprecated Use {@link CIRCLE_RADIUS_KM} */
@@ -187,6 +191,31 @@ async function pickBestSettlementForGps(at: LatLng): Promise<PickableSettlement 
   return null;
 }
 
+function pickableFromSnapped(s: { name: string; region: string; lat: number; lng: number }): PickableSettlement {
+  return {
+    name: s.name.trim(),
+    region: (s.region ?? "").trim(),
+    lat: s.lat,
+    lng: s.lng,
+  };
+}
+
+function settlementRowMatchesChosenCity(
+  row: PickableSettlement | CircleSettlementRow,
+  chosen: SearchScopeLocation | null,
+): boolean {
+  if (
+    !chosen ||
+    (chosen.type !== "city" && chosen.type !== "settlement")
+  )
+    return false;
+  const n = (chosen.label ?? "").trim().toLowerCase();
+  const reg = (chosen.region ?? chosen.parentName ?? "").trim().toLowerCase();
+  const rn = (row.name ?? "").trim().toLowerCase();
+  const rr = ("region" in row ? row.region ?? "" : "").trim().toLowerCase();
+  return Boolean(n && rn === n && reg && rr === reg);
+}
+
 function isInsideCircle(lat: number, lng: number, center: MapCenter | null, radiusKm: number): boolean {
   if (!center || !Number.isFinite(center.lat + center.lng + lat + lng)) return false;
   return haversineDistanceKm(center, { lat, lng }) <= radiusKm + 1e-9;
@@ -202,7 +231,7 @@ function isInsideRussiaGeolocationBounds(lat: number, lng: number): boolean {
   return lat >= 41 && lat <= 82 && lng >= 19 && lng <= 190;
 }
 
-/** km — if persisted coords disagree with static city center by more than this, prefer static (fixes stale Ижевск vs Завьялово labels). */
+/** km — if persisted coords disagree with static city center by more than this, prefer static (avoids wrong labels). */
 const STATIC_COORD_RECONCILE_KM = 5;
 
 type ModalSelectedLocation = {
@@ -247,12 +276,81 @@ function reconcileCoordsWithStatic(
   return null;
 }
 
+/**
+ * True only when the incoming value is genuinely «Вся Россия».
+ * `incomingModalFieldsToScope` can keep `type: "country"` while `lat`/`lng` + city persist — that must frame as city zoom, not Russia-wide.
+ */
+function incomingIsWholeRussia(v: IncomingLocationModalFields | null | undefined): boolean {
+  const pk = `${v?.pickKind ?? ""}`.trim();
+  if (pk === "whole") return true;
+  const city = `${v?.city ?? ""}`.trim();
+  const region = `${v?.region ?? ""}`.trim();
+  const dn = `${v?.displayName ?? ""}`.trim();
+  if (dn === "Вся Россия" && !city && !region) return true;
+
+  const incoming = incomingModalFieldsToScope(v);
+  const raw = rawCoordsFromIncoming(v);
+  if (incoming.type === "country") {
+    const placeText = city || region || `${incoming.label ?? ""}`.trim();
+    if (raw && (placeText || (dn && dn !== "Вся Россия"))) return false;
+    return true;
+  }
+  return false;
+}
+
+function rawCoordsFromIncoming(v: IncomingLocationModalFields | null | undefined): MapCenter | null {
+  const la = typeof v?.lat === "number" && Number.isFinite(v.lat) ? v.lat : undefined;
+  const lo = typeof v?.lng === "number" && Number.isFinite(v.lng) ? v.lng : undefined;
+  if (la === undefined || lo === undefined) return null;
+  return { lat: la, lng: lo };
+}
+
+function staticMapAnchorForRegionLikeScope(incoming: SearchScopeLocation): MapCenter | null {
+  if (
+    incoming.type !== "region" &&
+    incoming.type !== "federal_district" &&
+    incoming.type !== "district"
+  ) {
+    return null;
+  }
+  const label = `${incoming.label ?? ""}`.trim();
+  const region = `${incoming.region ?? ""}`.trim();
+  if (!label) return null;
+  const c = findStaticRussiaCityCoords(label, region) ?? findStaticRussiaCityCoords(label, "");
+  if (c && Number.isFinite(c.lat + c.lng)) return { lat: c.lat, lng: c.lng };
+  return null;
+}
+
 /** Single source for label + coordinates shown in the input and on the map (reconciles stale lat/lng vs city label). */
 function buildSelectedLocation(
   raw: IncomingLocationModalFields | null | undefined,
 ): ModalSelectedLocation | null {
   const incoming = incomingModalFieldsToScope(raw);
-  if (incoming.type === "country") return null;
+  if (incoming.type === "country") {
+    if (incomingIsWholeRussia(raw)) return null;
+    const city = `${raw?.city ?? ""}`.trim();
+    const region = `${raw?.region ?? ""}`.trim();
+    const label = city || region || `${incoming.label ?? ""}`.trim() || `${raw?.displayName ?? ""}`.trim();
+    const synthetic = normalizeSearchScope({
+      type: city ? "city" : region ? "region" : "city",
+      label: label || "Локация",
+      region: region || undefined,
+      parentName: region || undefined,
+      ...(() => {
+        const c = rawCoordsFromIncoming(raw);
+        return c ? { lat: c.lat, lng: c.lng } : {};
+      })(),
+    });
+    const coords = reconcileCoordsWithStatic(synthetic, raw);
+    if (!coords || !label) return null;
+    return {
+      label,
+      lat: coords.lat,
+      lng: coords.lng,
+      region: region || undefined,
+      type: synthetic.type,
+    };
+  }
 
   const label = (incoming.label ?? "").trim();
   const region = (incoming.region ?? incoming.parentName ?? "").trim();
@@ -293,11 +391,16 @@ function suggestionMatchesWholeRussia(raw: string): boolean {
 function buildChangePayload(scope: SearchScopeLocation): LocationModalChangePayload {
   const norm = normalizeSearchScope(scope);
   const L = legacyFieldsFromSearchScope(norm);
+  const displayFallback =
+    norm.type === "country" ? "Вся Россия"
+    : norm.type === "point" ? "Точка на карте"
+    : L.displayName.trim() || "Точка на карте";
+  const displayName = replaceDeprecatedGpsUserLabelWithNeutral(L.displayName, displayFallback);
   return {
     scope: norm,
     city: L.city,
     region: L.region,
-    displayName: L.displayName,
+    displayName,
     radiusKm: L.radiusKm,
     lat: L.lat,
     lng: L.lng,
@@ -391,9 +494,11 @@ function inferScopeFromQuery(qRaw: string, apiCities: SettlementRecord[]): Searc
 
 function labelForScopeDraft(s: SearchScopeLocation): string {
   if (s.type === "country") return "Вся Россия";
-  if (s.type === "federal_district" || s.type === "region") return (s.label || s.region || "").trim();
-  if (s.type === "district") return (s.label || "").trim();
-  const city = (s.label || "").trim();
+  if (s.type === "federal_district" || s.type === "region")
+    return replaceDeprecatedGpsUserLabelWithNeutral((s.label || s.region || "").trim(), "Точка на карте");
+  if (s.type === "district")
+    return replaceDeprecatedGpsUserLabelWithNeutral((s.label || "").trim(), "Точка на карте");
+  const city = replaceDeprecatedGpsUserLabelWithNeutral((s.label || "").trim(), "Точка на карте");
   const reg = (s.region || s.parentName || "").trim();
   if (reg) return `${city}, ${reg}`;
   return city;
@@ -410,6 +515,8 @@ export function LocationModal({
   variant: _variant = "browse",
   listingSubMode: _listingSubMode = "full",
   autoDetectOnOpen = false,
+  /** Homepage: no map / no Yandex scripts — search, list, apply only. */
+  hideMapPreview = false,
 }: {
   open: boolean;
   value: LocationModalValue | null | undefined;
@@ -420,10 +527,11 @@ export function LocationModal({
   listingSubMode?: "full" | "mapOnly";
   /** Home location entry: request GPS once when opening «Вся Россия» — suggests a city without applying until user confirms with «Выбрать». */
   autoDetectOnOpen?: boolean;
+  hideMapPreview?: boolean;
 }) {
   const [draftQuery, setDraftQuery] = useState("");
   const [chosenScope, setChosenScope] = useState<SearchScopeLocation | null>(null);
-  /** Map circle center (updates on drag / click). */
+  /** Geographic radius anchor (selected NP coords only — never updated by map pan / click). */
   const [currentCircleCenter, setCurrentCircleCenter] = useState<MapCenter | null>(null);
   /** First city/settlement pick from list; fixed until next list pick (not map drag). */
   const [originalSelectedCenter, setOriginalSelectedCenter] = useState<MapCenter | null>(null);
@@ -434,27 +542,153 @@ export function LocationModal({
   const geoCancelledRef = useRef(false);
   /** User edited / picked location — do not apply late GPS suggestion. */
   const blockHomeAutoGeoRef = useRef(false);
+  /** Current map center under the Craigslist viewport overlay; used on «Выбрать эту область». Seeded from props, then `onCenterChange` from the map. */
+  const viewportMapCenterForApplyRef = useRef<MapCenter | null>(null);
+  /** Live geographic center (`map.getCenter`) for UI distance from {@link originalSelectedCenter}. */
+  const [liveViewportMapCenter, setLiveViewportMapCenter] = useState<MapCenter | null>(null);
+  /** Bump so {@link YandexMapPicker} animates back to {@link originalSelectedCenter}. */
+  const [mapRecenterTick, setMapRecenterTick] = useState(0);
   const hasKey = Boolean(getYandexMapsApiKey());
 
   const [geoAutoHint, setGeoAutoHint] = useState<string | null>(null);
+  /** Shown when opening on «Вся Россия», geolocation failed/denied, and user has not switched to manual pick yet. */
+  const [wholeRussiaGeoHint, setWholeRussiaGeoHint] = useState<string | null>(null);
+  /** Browser GPS fix for map (distinct from circle center after pan). */
+  const [userLocation, setUserLocation] = useState<MapCenter | null>(null);
 
   const valueSig = useMemo(() => JSON.stringify(value ?? null), [value]);
 
-  const selectedLocation = useMemo(() => buildSelectedLocation(value), [valueSig, value]);
+  const selectedLocation = useMemo(() => buildSelectedLocation(value), [valueSig]);
 
   const selectedCenter = useMemo((): MapCenter | null => {
     if (!selectedLocation || !Number.isFinite(selectedLocation.lat + selectedLocation.lng)) return null;
     return { lat: selectedLocation.lat, lng: selectedLocation.lng };
   }, [selectedLocation]);
 
-  /** Browser GPS fix for map (distinct from circle center after pan). */
-  const [userLocation, setUserLocation] = useState<MapCenter | null>(null);
+  const applySelectedLocation = useCallback(
+    (normalizedScope: SearchScopeLocation, meta: { source: "init" | "search_suggestion" | "map_pick" | "nearby_json" | "geo_marker" }) => {
+      const t = normalizedScope.type;
+      if (
+        t !== "city" &&
+        t !== "settlement" &&
+        t !== "point" &&
+        t !== "region" &&
+        t !== "federal_district" &&
+        t !== "district"
+      ) {
+        return;
+      }
+      const la = normalizedScope.lat;
+      const lo = normalizedScope.lng;
+      if (typeof la !== "number" || typeof lo !== "number" || !Number.isFinite(la + lo)) return;
+
+      blockHomeAutoGeoRef.current = true;
+      const norm = normalizeSearchScope({ ...normalizedScope, lat: la, lng: lo });
+      const c = { lat: norm.lat!, lng: norm.lng! };
+
+      setChosenScope(norm);
+      setDraftQuery(labelForScopeDraft(norm));
+      setOriginalSelectedCenter(c);
+      setCurrentCircleCenter(c);
+      setActiveTab(hideMapPreview ? "nearby" : "map");
+      setSuggestionsDismissed(true);
+      setGeoAutoHint(null);
+      setWholeRussiaGeoHint(null);
+      inputRef.current?.blur();
+    },
+    [hideMapPreview],
+  );
+
+  /** «Вся Россия» browse: browser geolocation once per open → same radius/nearby/apply flow as picking coordinates (`point`). */
+  useEffect(() => {
+    if (!open) {
+      setWholeRussiaGeoHint(null);
+      return;
+    }
+
+    const incoming = incomingModalFieldsToScope(value);
+    if (incoming.type !== "country" || !incomingIsWholeRussia(value)) {
+      setWholeRussiaGeoHint(null);
+      return;
+    }
+    if (rawCoordsFromIncoming(value)) {
+      setWholeRussiaGeoHint(null);
+      return;
+    }
+
+    setWholeRussiaGeoHint(null);
+
+    let cancelled = false;
+
+    const fail = () => {
+      if (cancelled || blockHomeAutoGeoRef.current) return;
+      setWholeRussiaGeoHint("Разрешите геолокацию или выберите город вручную");
+    };
+
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      fail();
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (cancelled || blockHomeAutoGeoRef.current) return;
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        if (!Number.isFinite(lat + lng)) {
+          fail();
+          return;
+        }
+        if (!isInsideRussiaGeolocationBounds(lat, lng)) {
+          fail();
+          return;
+        }
+        setWholeRussiaGeoHint(null);
+        setUserLocation({ lat, lng });
+        void snapNearestSettlementWithinKm({ lat, lng }, GEO_SNAP_TO_SETTLEMENT_MAX_KM).then((pick) => {
+          if (cancelled || blockHomeAutoGeoRef.current) return;
+          if (pick) {
+            const p = pickableFromSnapped(pick);
+            applySelectedLocation(
+              normalizeSearchScope({
+                type: "city",
+                label: p.name,
+                region: p.region,
+                parentName: p.region,
+                lat: p.lat,
+                lng: p.lng,
+              }),
+              { source: "search_suggestion" },
+            );
+          } else {
+            applySelectedLocation(
+              normalizeSearchScope({
+                type: "point",
+                label: "Точка на карте",
+                lat,
+                lng,
+                radiusKm: CIRCLE_RADIUS_KM,
+              }),
+              { source: "geo_marker" },
+            );
+          }
+        });
+      },
+      fail,
+      { enableHighAccuracy: false, timeout: 12_000, maximumAge: 120_000 },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, valueSig, applySelectedLocation]);
 
   useEffect(() => {
     if (!open) {
       geoCancelledRef.current = false;
       blockHomeAutoGeoRef.current = false;
       setGeoAutoHint(null);
+      setWholeRussiaGeoHint(null);
       setUserLocation(null);
       setCurrentCircleCenter(null);
       setOriginalSelectedCenter(null);
@@ -470,43 +704,76 @@ export function LocationModal({
   useLayoutEffect(() => {
     if (!open) return;
 
+    setActiveTab(hideMapPreview ? "nearby" : "map");
+
+    if (incomingIsWholeRussia(value)) {
+      setChosenScope(searchScopeWholeRussia());
+      setDraftQuery("");
+      setCurrentCircleCenter(null);
+      setOriginalSelectedCenter(null);
+      setSuggestionsDismissed(false);
+      inputRef.current?.focus();
+      return;
+    }
+
     const incoming = incomingModalFieldsToScope(value);
     const sel = buildSelectedLocation(value);
     const syncCenter: MapCenter | null =
       sel && Number.isFinite(sel.lat + sel.lng) ? { lat: sel.lat, lng: sel.lng } : null;
 
-    // eslint-disable-next-line no-console
-    console.log("[INPUT LOCATION SOURCE]", sel);
-    // eslint-disable-next-line no-console
-    console.log("[SELECTED LOCATION]", sel);
-    // eslint-disable-next-line no-console
-    console.log("[SELECTED CENTER]", syncCenter);
-
-    setActiveTab("map");
-
-    if (incoming.type === "country") {
-      setChosenScope(searchScopeWholeRussia());
-      setDraftQuery("");
-      // Whole Russia: no radius circle (only for actual city/area picks)
-      setCurrentCircleCenter(null);
-      setOriginalSelectedCenter(null);
-      inputRef.current?.focus();
-      return;
-    }
-
     if (sel && syncCenter) {
-      setChosenScope(
+      applySelectedLocation(
         normalizeSearchScope({
           ...incoming,
           lat: syncCenter.lat,
           lng: syncCenter.lng,
         }),
+        { source: "init" },
       );
-      setDraftQuery(labelForScopeDraft(incoming));
-      setCurrentCircleCenter(syncCenter);
-      setOriginalSelectedCenter(syncCenter);
-      inputRef.current?.focus();
       return;
+    }
+
+    const raw = rawCoordsFromIncoming(value);
+    if (raw) {
+      applySelectedLocation(normalizeSearchScope({ ...incoming, lat: raw.lat, lng: raw.lng }), { source: "init" });
+      return;
+    }
+
+    const staticA = staticMapAnchorForRegionLikeScope(incoming);
+    if (staticA) {
+      applySelectedLocation(normalizeSearchScope({ ...incoming, lat: staticA.lat, lng: staticA.lng }), {
+        source: "init",
+      });
+      return;
+    }
+
+    const coordsFromReconcile = reconcileCoordsWithStatic(incoming, value);
+    if (
+      coordsFromReconcile &&
+      (incoming.type === "city" || incoming.type === "settlement" || incoming.type === "point")
+    ) {
+      applySelectedLocation(
+        normalizeSearchScope({
+          ...incoming,
+          lat: coordsFromReconcile.lat,
+          lng: coordsFromReconcile.lng,
+        }),
+        { source: "init" },
+      );
+      return;
+    }
+
+    if (incoming.type === "city" || incoming.type === "settlement") {
+      const label = (incoming.label ?? "").trim();
+      const region = (incoming.region ?? incoming.parentName ?? "").trim();
+      const sta = findStaticRussiaCityCoords(label, region) ?? findStaticRussiaCityCoords(label, "");
+      if (sta && Number.isFinite(sta.lat + sta.lng)) {
+        applySelectedLocation(
+          normalizeSearchScope({ ...incoming, lat: sta.lat, lng: sta.lng }),
+          { source: "init" },
+        );
+        return;
+      }
     }
 
     setChosenScope(
@@ -517,8 +784,9 @@ export function LocationModal({
     setDraftQuery(labelForScopeDraft(incoming));
     setCurrentCircleCenter(null);
     setOriginalSelectedCenter(null);
+    setSuggestionsDismissed(false);
     inputRef.current?.focus();
-  }, [open, valueSig]);
+  }, [open, valueSig, hideMapPreview, applySelectedLocation]);
 
   /** Single source: Haversine from `currentCircleCenter`, ≤ {@link CIRCLE_RADIUS_KM}, deduped for display. */
   const [circleItems, setCircleItems] = useState<CircleSettlementRow[]>([]);
@@ -554,6 +822,12 @@ export function LocationModal({
 
   const settlementsInsideCircle = circleItems;
   const nearestFromClean = circleNearest;
+
+  /** Hide the active city row from the «рядом» list so it is not a duplicate of the current selection. */
+  const nearbyListRows = useMemo(
+    () => settlementsInsideCircle.filter((row) => !settlementRowMatchesChosenCity(row, chosenScope)),
+    [settlementsInsideCircle, chosenScope],
+  );
 
   const qTrim = draftQuery.trim();
 
@@ -594,25 +868,19 @@ export function LocationModal({
       const name = (s.name ?? "").trim();
       const reg = (s.region ?? "").trim();
       if (!name || !Number.isFinite(s.lat + s.lng)) return;
-      const scope = normalizeSearchScope({
-        type: "city",
-        label: name,
-        region: reg,
-        parentName: reg,
-        lat: s.lat,
-        lng: s.lng,
-      });
-      setChosenScope(scope);
-      setDraftQuery(reg ? `${name}, ${reg}` : name);
-      const c = { lat: s.lat, lng: s.lng };
-      setOriginalSelectedCenter(c);
-      setCurrentCircleCenter(c);
-      setActiveTab("map");
-      setSuggestionsDismissed(true);
-      setGeoAutoHint(null);
-      inputRef.current?.blur();
+      applySelectedLocation(
+        normalizeSearchScope({
+          type: "city",
+          label: name,
+          region: reg,
+          parentName: reg,
+          lat: s.lat,
+          lng: s.lng,
+        }),
+        { source: "search_suggestion" },
+      );
     },
-    [],
+    [applySelectedLocation],
   );
 
   /** Home location button (`autoDetectOnOpen`): GPS once → nearest clean city-like row via static settlements (no external geocoder). */
@@ -777,8 +1045,7 @@ export function LocationModal({
   }, [qTrim, suggestionsDismissed, apiCityRows]);
 
   /**
-   * Map geographic center: live drag/click (`currentCircleCenter`) wins; otherwise reconciled `selectedCenter`;
-   * «Вся Россия» → whole Russia view (zoomed out), not Moscow.
+   * Map initial / prop-sync center: radius anchor coords or persisted selection; «Вся Россия» → whole Russia view.
    */
   const effectiveCircleCenter: MapCenter | null = useMemo(() => {
     if (!open) return null;
@@ -788,11 +1055,23 @@ export function LocationModal({
     ) {
       return currentCircleCenter;
     }
-    if (selectedCenter) return selectedCenter;
+    if (selectedCenter && Number.isFinite(selectedCenter.lat + selectedCenter.lng)) return selectedCenter;
+    const rawParent = rawCoordsFromIncoming(value);
+    if (rawParent) return rawParent;
     const incoming = incomingModalFieldsToScope(value);
-    if (incoming.type === "country") return RUSSIA_WIDE_CENTER;
+    if (incomingIsWholeRussia(value)) return RUSSIA_WIDE_CENTER;
+    const staticA = staticMapAnchorForRegionLikeScope(incoming);
+    if (staticA) return staticA;
     return null;
-  }, [open, valueSig, value, currentCircleCenter?.lat, currentCircleCenter?.lng, selectedCenter?.lat, selectedCenter?.lng]);
+  }, [
+    open,
+    valueSig,
+    value,
+    currentCircleCenter?.lat,
+    currentCircleCenter?.lng,
+    selectedCenter?.lat,
+    selectedCenter?.lng,
+  ]);
 
   const distanceAnchor: MapCenter | null = useMemo(() => {
     if (!open) return null;
@@ -808,52 +1087,58 @@ export function LocationModal({
     return null;
   }, [open, valueSig, value, originalSelectedCenter?.lat, originalSelectedCenter?.lng, selectedCenter?.lat, selectedCenter?.lng]);
 
-  /** Remount map when persisted selection coordinates change (opens on Завьялово vs Ижевск). */
-  const mapRemountKey = useMemo(
-    () => `${selectedCenter?.lat ?? "none"}-${selectedCenter?.lng ?? "none"}`,
-    [selectedCenter?.lat, selectedCenter?.lng],
-  );
+  /** Remount map when parent `value` changes so initial center/zoom match the real passed-in location. */
+  const mapRemountKey = useMemo(() => valueSig, [valueSig]);
 
   const incomingType = useMemo(() => incomingModalFieldsToScope(value).type, [valueSig, value]);
 
-  const mapZoom = incomingType === "country" ? RUSSIA_WIDE_ZOOM : 11;
+  /** Whole-Russia framing only while the map is actually anchored on {@link RUSSIA_WIDE_CENTER} (viewport matches «Вся Россия» placeholder). Once the user picks a city/NP inside the modal while `value` may still say country until apply, zoom must jump to normal city scale or the circle is invisible at zoom 4. */
+  const isRussiaWideMapCenter = useMemo(() => {
+    if (!effectiveCircleCenter || !Number.isFinite(effectiveCircleCenter.lat + effectiveCircleCenter.lng)) {
+      return false;
+    }
+    return (
+      Math.abs(effectiveCircleCenter.lat - RUSSIA_WIDE_CENTER.lat) < 1 &&
+      Math.abs(effectiveCircleCenter.lng - RUSSIA_WIDE_CENTER.lng) < 2
+    );
+  }, [effectiveCircleCenter?.lat, effectiveCircleCenter?.lng]);
+
+  const mapZoom = isRussiaWideMapCenter ? RUSSIA_WIDE_ZOOM : 11;
 
   useEffect(() => {
-    if (!open || !currentCircleCenter || !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)) {
+    if (!open) {
+      viewportMapCenterForApplyRef.current = null;
+      setLiveViewportMapCenter(null);
       return;
     }
-    let src: "geo" | "selected" | "last" | "fallback" = "fallback";
-    if (
-      userLocation &&
-      haversineDistanceKm(userLocation, currentCircleCenter) * 1000 < 80
-    ) {
-      src = "geo";
-    } else if (
-      selectedCenter &&
-      haversineDistanceKm(selectedCenter, currentCircleCenter) * 1000 < 80
-    ) {
-      src = "selected";
-    } else {
-      src = "last";
+    if (effectiveCircleCenter && Number.isFinite(effectiveCircleCenter.lat + effectiveCircleCenter.lng)) {
+      viewportMapCenterForApplyRef.current = effectiveCircleCenter;
+      setLiveViewportMapCenter(effectiveCircleCenter);
     }
-    // eslint-disable-next-line no-console
-    console.log("[CENTER SOURCE]", src);
-    // eslint-disable-next-line no-console
-    console.log("[CURRENT CIRCLE CENTER]", currentCircleCenter);
-    // eslint-disable-next-line no-console
-    console.log("[INSIDE CIRCLE COUNT]", settlementsInsideCircle.length);
-  }, [open, currentCircleCenter, userLocation, selectedCenter, settlementsInsideCircle.length]);
+  }, [open, effectiveCircleCenter?.lat, effectiveCircleCenter?.lng]);
 
-  /** ± distance = originalSelectedCenter → currentCircleCenter (Task 8). Name when moved: nearest inside circle only. */
+  useEffect(() => {
+    setMapRecenterTick(0);
+  }, [effectiveCircleCenter?.lat, effectiveCircleCenter?.lng]);
+
+  /**
+   * One line under map: «City ± …» — distance from original selected NP to live `map.getCenter()`
+   * (meters if &lt; 1 km, else km with one decimal under 10 km).
+   */
   const mapBottomLabel = useMemo(() => {
-    if (
-      !distanceAnchor ||
-      !currentCircleCenter ||
-      !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)
-    ) {
-      return "";
-    }
-    const anchor = distanceAnchor;
+    if (!open) return "";
+    const anchor =
+      originalSelectedCenter && Number.isFinite(originalSelectedCenter.lat + originalSelectedCenter.lng) ?
+        originalSelectedCenter
+      : distanceAnchor && Number.isFinite(distanceAnchor.lat + distanceAnchor.lng) ?
+        distanceAnchor
+      : null;
+    const live =
+      liveViewportMapCenter && Number.isFinite(liveViewportMapCenter.lat + liveViewportMapCenter.lng) ?
+        liveViewportMapCenter
+      : null;
+    if (!anchor || !live) return "";
+
     const nearestLabel = (nearestFromClean?.name ?? "").trim();
     const persistedPickLabel = (selectedLocation?.label ?? "").trim();
     const chosenLabel =
@@ -863,37 +1148,79 @@ export function LocationModal({
         chosenScope.type === "point") ?
         (chosenScope.label ?? "").trim()
       : "";
-    const deltaKm = Math.round(
-      calculateDistanceKm(
-        anchor.lat,
-        anchor.lng,
-        currentCircleCenter.lat,
-        currentCircleCenter.lng,
-      ),
-    );
+
+    const dKm = calculateDistanceKm(anchor.lat, anchor.lng, live.lat, live.lng);
+    if (!Number.isFinite(dKm)) return "";
+    const meters = dKm * 1000;
+
     const labelBase =
-      deltaKm === 0 && (chosenLabel || persistedPickLabel) ?
+      meters < 5 && (chosenLabel || persistedPickLabel) ?
         (chosenLabel || persistedPickLabel)
       : nearestLabel || chosenLabel || persistedPickLabel || "Локация";
-    return `${labelBase} ± ${deltaKm} км`;
-  }, [nearestFromClean, chosenScope, distanceAnchor, currentCircleCenter?.lat, currentCircleCenter?.lng, selectedLocation?.label]);
 
-  const handleMapCenterChange = useCallback((center: MapCenter) => {
-    setCurrentCircleCenter((prev) => {
-      if (
-        prev &&
-        Math.abs(prev.lat - center.lat) < 1e-8 &&
-        Math.abs(prev.lng - center.lng) < 1e-8
-      ) {
-        return prev;
-      }
-      return center;
-    });
-  }, []);
+    let distPart: string;
+    if (meters < 5) {
+      distPart = "0 км";
+    } else if (meters < 1000) {
+      distPart = `${Math.round(meters)} м`;
+    } else {
+      distPart =
+        dKm < 10 ?
+          dKm.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " км"
+        : `${Math.round(dKm).toLocaleString("ru-RU")} км`;
+    }
+    return `${labelBase} ± ${distPart}`;
+  }, [
+    open,
+    originalSelectedCenter?.lat,
+    originalSelectedCenter?.lng,
+    distanceAnchor?.lat,
+    distanceAnchor?.lng,
+    liveViewportMapCenter?.lat,
+    liveViewportMapCenter?.lng,
+    nearestFromClean,
+    chosenScope,
+    selectedLocation?.label,
+  ]);
 
-  const handleMapClick = useCallback((center: MapCenter) => {
-    setCurrentCircleCenter(center);
-  }, []);
+  /** Short NP name for «Вернуться к …» (same sources as {@link mapBottomLabel} headline). */
+  const npNameForReturnButton = useMemo(() => {
+    const nearestLabel = (nearestFromClean?.name ?? "").trim();
+    const persistedPickLabel = (selectedLocation?.label ?? "").trim();
+    const chosenLabel =
+      chosenScope &&
+      (chosenScope.type === "city" ||
+        chosenScope.type === "settlement" ||
+        chosenScope.type === "point") ?
+        (chosenScope.label ?? "").trim()
+      : "";
+    return chosenLabel || persistedPickLabel || nearestLabel || "";
+  }, [nearestFromClean?.name, chosenScope, selectedLocation?.label]);
+
+  const showReturnToNpButton = useMemo(() => {
+    if (
+      !open ||
+      !originalSelectedCenter ||
+      !liveViewportMapCenter ||
+      !Number.isFinite(originalSelectedCenter.lat + originalSelectedCenter.lng) ||
+      !Number.isFinite(liveViewportMapCenter.lat + liveViewportMapCenter.lng)
+    ) {
+      return false;
+    }
+    const km = calculateDistanceKm(
+      originalSelectedCenter.lat,
+      originalSelectedCenter.lng,
+      liveViewportMapCenter.lat,
+      liveViewportMapCenter.lng,
+    );
+    return Number.isFinite(km) && km * 1000 >= 35;
+  }, [
+    open,
+    originalSelectedCenter?.lat,
+    originalSelectedCenter?.lng,
+    liveViewportMapCenter?.lat,
+    liveViewportMapCenter?.lng,
+  ]);
 
   const handleGeolocationButtonForUserMarker = useCallback((c: MapCenter) => {
     blockHomeAutoGeoRef.current = true;
@@ -904,54 +1231,55 @@ export function LocationModal({
   }, []);
 
   /** GPS marker click: nearest clean settlement (works even if circle center was panned away). */
-  const handleUserLocationMarkerClick = useCallback((at: MapCenter) => {
-    blockHomeAutoGeoRef.current = true;
-    void fetchNearbyApi(at, CIRCLE_RADIUS_KM, 500).then(({ nearest, items }) => {
-      const pick = (nearest && isAcceptableGeoSettlementPick(nearest))
-        ? nearest
-        : (items.find((x) => isAcceptableGeoSettlementPick(x)) ?? null);
-      if (!pick) return;
-      const reg = `${pick.region ?? ""}`.trim();
-      const scope = normalizeSearchScope({
-        type: "city",
-        label: pick.name.trim(),
-        region: reg,
-        parentName: reg,
-        lat: pick.lat,
-        lng: pick.lng,
+  const handleUserLocationMarkerClick = useCallback(
+    (at: MapCenter) => {
+      blockHomeAutoGeoRef.current = true;
+      void fetchNearbyApi(at, CIRCLE_RADIUS_KM, 500).then(({ nearest, items }) => {
+        const pick =
+          nearest && isAcceptableGeoSettlementPick(nearest) ?
+            nearest
+          : (items.find((x) => isAcceptableGeoSettlementPick(x)) ?? null);
+        if (!pick) return;
+        const reg = `${pick.region ?? ""}`.trim();
+        applySelectedLocation(
+          normalizeSearchScope({
+            type: "city",
+            label: pick.name.trim(),
+            region: reg,
+            parentName: reg,
+            lat: pick.lat,
+            lng: pick.lng,
+          }),
+          { source: "geo_marker" },
+        );
       });
-      setChosenScope(scope);
-      setDraftQuery(labelForScopeDraft(scope));
-      const c = { lat: pick.lat, lng: pick.lng };
-      setOriginalSelectedCenter(c);
-      setCurrentCircleCenter(c);
-      setActiveTab("map");
-    });
-  }, []);
+    },
+    [applySelectedLocation],
+  );
 
-  /** Single entry point for choosing a НП by coordinates: updates input, anchors, map center, keeps modal open. */
-  const selectSettlement = useCallback((settlement: PickableSettlement) => {
-    blockHomeAutoGeoRef.current = true;
-    if (!currentCircleCenter || !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)) return;
-    if (!isInsideCircle(settlement.lat, settlement.lng, currentCircleCenter, CIRCLE_RADIUS_KM)) return;
-    const reg = (settlement.region ?? "").trim();
-    const scope = normalizeSearchScope({
-      type: "city",
-      label: settlement.name.trim(),
-      region: reg,
-      parentName: reg,
-      lat: settlement.lat,
-      lng: settlement.lng,
-    });
-    setChosenScope(scope);
-    setDraftQuery(labelForScopeDraft(scope));
-    const c = { lat: settlement.lat, lng: settlement.lng };
-    setOriginalSelectedCenter(c);
-    setCurrentCircleCenter(c);
-    setActiveTab("map");
-  }, [currentCircleCenter?.lat, currentCircleCenter?.lng]);
+  /** Single entry point for choosing a НП by coordinates (map marker / circle list): containment vs current circle anchor. */
+  const selectSettlement = useCallback(
+    (settlement: PickableSettlement) => {
+      if (!currentCircleCenter || !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)) return;
+      if (!isInsideCircle(settlement.lat, settlement.lng, currentCircleCenter, CIRCLE_RADIUS_KM)) return;
+      const reg = (settlement.region ?? "").trim();
+      applySelectedLocation(
+        normalizeSearchScope({
+          type: "city",
+          label: settlement.name.trim(),
+          region: reg,
+          parentName: reg,
+          lat: settlement.lat,
+          lng: settlement.lng,
+        }),
+        { source: "map_pick" },
+      );
+    },
+    [applySelectedLocation, currentCircleCenter?.lat, currentCircleCenter?.lng],
+  );
 
   const settlementMarkersForMap = useMemo((): MapSettlementMarker[] => {
+    if (hideMapPreview) return [];
     if (!open) return [];
     if (!currentCircleCenter || !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)) return [];
 
@@ -961,7 +1289,9 @@ export function LocationModal({
     const out: MapSettlementMarker[] = [];
     const hasChosenCoords =
       chosenScope &&
-      (chosenScope.type === "city" || chosenScope.type === "settlement") &&
+      (chosenScope.type === "city" ||
+        chosenScope.type === "settlement" ||
+        chosenScope.type === "point") &&
       typeof chosenScope.lat === "number" &&
       Number.isFinite(chosenScope.lat) &&
       typeof chosenScope.lng === "number" &&
@@ -998,13 +1328,14 @@ export function LocationModal({
     }
 
     return out;
-  }, [open, chosenScope, settlementsInsideCircle, currentCircleCenter?.lat, currentCircleCenter?.lng]);
-
-  useEffect(() => {
-    if (!open) return;
-    // eslint-disable-next-line no-console
-    console.log("[MARKERS RENDERED COUNT]", settlementMarkersForMap.length);
-  }, [open, settlementMarkersForMap.length]);
+  }, [
+    open,
+    chosenScope,
+    settlementsInsideCircle,
+    currentCircleCenter?.lat,
+    currentCircleCenter?.lng,
+    hideMapPreview,
+  ]);
 
   const handleSettlementMarkerClick = useCallback(
     (m: MapSettlementMarker) => {
@@ -1021,6 +1352,7 @@ export function LocationModal({
   function pickWholeRussia() {
     blockHomeAutoGeoRef.current = true;
     geoCancelledRef.current = true;
+    setWholeRussiaGeoHint(null);
     setUserLocation(null);
     const scope = searchScopeWholeRussia();
     setChosenScope(scope);
@@ -1039,12 +1371,7 @@ export function LocationModal({
       typeof scope.lng === "number" &&
       Number.isFinite(scope.lng)
     ) {
-      selectSettlement({
-        name: (scope.label ?? "").trim(),
-        region: (scope.region ?? scope.parentName ?? "").trim(),
-        lat: scope.lat,
-        lng: scope.lng,
-      });
+      applySelectedLocation(normalizeSearchScope(scope), { source: "search_suggestion" });
       return;
     }
 
@@ -1055,41 +1382,72 @@ export function LocationModal({
   }
 
   function applyNearbyJsonPick(row: CircleSettlementRow) {
-    selectSettlement({
-      name: row.name.trim(),
-      region: (row.region ?? "").trim(),
-      lat: row.lat,
-      lng: row.lng,
-    });
+    applySelectedLocation(
+      normalizeSearchScope({
+        type: "city",
+        label: row.name.trim(),
+        region: (row.region ?? "").trim(),
+        parentName: (row.region ?? "").trim(),
+        lat: row.lat,
+        lng: row.lng,
+      }),
+      { source: "nearby_json" },
+    );
   }
 
   function applySelection() {
     const scope = chosenScope ?? inferScopeFromQuery(draftQuery, apiCityRows);
     if (!scope) return;
 
+    const coordsFromViewportPick: MapCenter | null =
+      viewportMapCenterForApplyRef.current &&
+      Number.isFinite(viewportMapCenterForApplyRef.current.lat + viewportMapCenterForApplyRef.current.lng) ?
+        viewportMapCenterForApplyRef.current
+      : null;
+
+    const staticCircleAnchor: MapCenter | null =
+      currentCircleCenter && Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng) ?
+        currentCircleCenter
+      : null;
+
+    const containmentAnchor: MapCenter | null = coordsFromViewportPick ?? staticCircleAnchor;
+
     if (
-      currentCircleCenter &&
-      Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng) &&
+      containmentAnchor &&
+      Number.isFinite(containmentAnchor.lat + containmentAnchor.lng) &&
       (scope.type === "city" || scope.type === "settlement") &&
       typeof scope.lat === "number" &&
       Number.isFinite(scope.lat) &&
       typeof scope.lng === "number" &&
       Number.isFinite(scope.lng)
     ) {
-      if (!isInsideCircle(scope.lat, scope.lng, currentCircleCenter, CIRCLE_RADIUS_KM)) return;
+      if (!isInsideCircle(scope.lat, scope.lng, containmentAnchor, CIRCLE_RADIUS_KM)) return;
     }
 
     const incoming = incomingModalFieldsToScope(value);
 
-    const fromDragOrSession: MapCenter | null =
-      currentCircleCenter && Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng) ?
-        currentCircleCenter
+    const scopeCoords: MapCenter | null =
+      (scope.type === "city" || scope.type === "settlement" || scope.type === "point") &&
+      typeof scope.lat === "number" &&
+      Number.isFinite(scope.lat) &&
+      typeof scope.lng === "number" &&
+      Number.isFinite(scope.lng) ?
+        { lat: scope.lat, lng: scope.lng }
       : null;
 
-    const mapCenter: MapCenter | null =
-      fromDragOrSession ?? selectedCenter ?? (effectiveCircleCenter && Number.isFinite(effectiveCircleCenter.lat + effectiveCircleCenter.lng) ? effectiveCircleCenter : null) ?? (incoming.type === "country" ? DEFAULT_MAP_CENTER : null);
+    const anchorCenter: MapCenter | null = coordsFromViewportPick ?? staticCircleAnchor;
 
-    if (!mapCenter || !Number.isFinite(mapCenter.lat + mapCenter.lng)) {
+    const coordsForPayload: MapCenter | null =
+      coordsFromViewportPick ??
+      scopeCoords ??
+      staticCircleAnchor ??
+      (selectedCenter && Number.isFinite(selectedCenter.lat + selectedCenter.lng) ? selectedCenter : null) ??
+      (effectiveCircleCenter && Number.isFinite(effectiveCircleCenter.lat + effectiveCircleCenter.lng) ?
+        effectiveCircleCenter
+      : null) ??
+      (incoming.type === "country" ? DEFAULT_MAP_CENTER : null);
+
+    if (!coordsForPayload || !Number.isFinite(coordsForPayload.lat + coordsForPayload.lng)) {
       onChange(buildChangePayload(scope));
       onClose();
       return;
@@ -1097,21 +1455,23 @@ export function LocationModal({
 
     if (
       incoming.type !== "country" &&
-      currentCircleCenter &&
-      Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng) &&
-      !isInsideCircle(mapCenter.lat, mapCenter.lng, currentCircleCenter, CIRCLE_RADIUS_KM)
+      anchorCenter &&
+      Number.isFinite(anchorCenter.lat + anchorCenter.lng) &&
+      !isInsideCircle(coordsForPayload.lat, coordsForPayload.lng, anchorCenter, CIRCLE_RADIUS_KM)
     ) {
       return;
     }
 
     const withMap =
-      (chosenScope?.type === "city" || chosenScope?.type === "settlement") &&
-      Number.isFinite(mapCenter.lat) &&
-      Number.isFinite(mapCenter.lng) ?
+      (chosenScope?.type === "city" ||
+        chosenScope?.type === "settlement" ||
+        chosenScope?.type === "point") &&
+      Number.isFinite(coordsForPayload.lat) &&
+      Number.isFinite(coordsForPayload.lng) ?
         normalizeSearchScope({
           ...scope,
-          lat: mapCenter.lat,
-          lng: mapCenter.lng,
+          lat: coordsForPayload.lat,
+          lng: coordsForPayload.lng,
         })
       : scope;
 
@@ -1120,6 +1480,39 @@ export function LocationModal({
   }
 
   if (!open) return null;
+
+  const noCircleAnchorYet =
+    !currentCircleCenter || !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng);
+
+  const nearbyScrollListPanel = (
+    <div className="min-h-[260px] rounded-xl border border-black/[0.08] bg-black/[0.02] p-1.5 sm:min-h-[300px]">
+      {nearbyListRows.length > 0 ?
+        <ul className="max-h-[min(360px,48vh)] overflow-y-auto sm:max-h-[360px]">
+          {nearbyListRows.map((row) => {
+            const reg = (row.region ?? "").trim();
+            const line =
+              reg ?
+                `${row.name}, ${reg}, ${formatDistanceKm(row.distanceKm)}`
+              : `${row.name}, ${formatDistanceKm(row.distanceKm)}`;
+            return (
+              <li key={`${row.name}:${row.lat}:${row.lng}`}>
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer rounded-lg px-2.5 py-2 text-left hover:bg-white"
+                  onClick={() => applyNearbyJsonPick(row)}
+                >
+                  <span className="text-sm font-medium text-black/90">{line}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      : <p className="px-3 py-6 text-center text-sm text-black/55">
+          В этом круге населённые пункты не найдены
+        </p>
+      }
+    </div>
+  );
 
   return (
     <div
@@ -1131,8 +1524,8 @@ export function LocationModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[85vh] w-[min(92vw,700px)] max-w-[min(92vw,700px)] flex-col overflow-hidden rounded-2xl border border-black/10 bg-white shadow-xl">
-        <div className="flex shrink-0 items-start justify-between gap-2 px-4 pb-1.5 pt-3 sm:px-4">
+      <div className="flex max-h-[90vh] w-[min(96vw,600px)] max-w-[min(96vw,600px)] flex-col overflow-hidden rounded-2xl border border-black/10 bg-white shadow-xl">
+        <div className="flex shrink-0 items-start justify-between gap-2 px-4 pb-2 pt-3 sm:px-5 sm:pb-2.5 sm:pt-3.5">
           <div id="loc-modal-title" className="text-[15px] font-semibold tracking-tight text-black/90">
             Локация
           </div>
@@ -1146,7 +1539,7 @@ export function LocationModal({
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-3 pt-0 sm:px-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-0 sm:px-5">
           <div className="relative flex shrink-0 flex-col gap-1.5">
             <div className="flex min-w-0 items-stretch gap-2">
               <input
@@ -1207,9 +1600,32 @@ export function LocationModal({
                 </div>
             : null}
             {geoAutoHint ? <div className="text-xs text-black/55">{geoAutoHint}</div> : null}
+            {wholeRussiaGeoHint ?
+              <div className="flex flex-col gap-1.5 rounded-lg border border-black/10 bg-black/[0.03] px-3 py-2">
+                <p className="text-xs leading-snug text-black/70">{wholeRussiaGeoHint}</p>
+                <button
+                  type="button"
+                  className="self-start text-xs font-semibold text-orange-700/95 underline-offset-2 hover:underline"
+                  onClick={() => inputRef.current?.focus()}
+                >
+                  Выбрать город вручную
+                </button>
+              </div>
+            : null}
           </div>
 
-          {!hasKey ?
+          {hideMapPreview ?
+            <div className="mt-1 flex min-h-0 flex-1 flex-col gap-0">
+              <div className="shrink-0 border-b border-black/10 pb-1.5 pt-0">
+                <span className="text-sm font-semibold text-black">Населённые пункты рядом</span>
+              </div>
+              {noCircleAnchorYet ?
+                <div className="mt-1 min-h-[200px] rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-6 text-center text-sm text-black/55">
+                  Выберите город или населённый пункт в поле выше или нажмите «Вся Россия».
+                </div>
+              : nearbyScrollListPanel}
+            </div>
+          : !hasKey ?
             <div className="mt-1 rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-2.5 text-center text-sm text-black/55">
               Карта временно недоступна (нет API ключа)
             </div>
@@ -1242,55 +1658,52 @@ export function LocationModal({
                 {activeTab === "map" ?
                   effectiveCircleCenter ?
                     <div className="flex flex-col gap-0">
-                      <YandexMapPicker
+                      <YandexMapPickerLazy
                         key={mapRemountKey}
                         center={effectiveCircleCenter}
                         zoom={mapZoom}
-                        className="min-h-[280px] h-[min(420px,52vh)] sm:h-[420px]"
-                        onCenterChange={handleMapCenterChange}
-                        onMapClick={handleMapClick}
+                        className="aspect-square w-full min-h-[288px] max-h-[min(46vh,92vw)] sm:min-h-[320px] sm:max-h-[min(42vh,560px)]"
                         settlementMarkers={settlementMarkersForMap}
                         onSettlementMarkerClick={handleSettlementMarkerClick}
                         userLocation={userLocation}
                         onUserLocationMarkerClick={handleUserLocationMarkerClick}
                         onGeolocationButtonSuccess={handleGeolocationButtonForUserMarker}
-                        showViewportCircle={incomingType !== "country"}
+                        viewportSearchOverlay
+                        onCenterChange={(c) => {
+                          viewportMapCenterForApplyRef.current = c;
+                          setLiveViewportMapCenter(c);
+                        }}
+                        recenterTick={mapRecenterTick}
+                        recenterTarget={originalSelectedCenter}
                       />
-                      {mapBottomLabel ?
-                        <p className="text-center text-sm font-medium text-black/70">{mapBottomLabel}</p>
+                      {mapBottomLabel || showReturnToNpButton ?
+                        <div className="mt-1.5 space-y-1 text-center">
+                          {mapBottomLabel ?
+                            <p className="text-sm font-medium text-black/70">{mapBottomLabel}</p>
+                          : null}
+                          {showReturnToNpButton && originalSelectedCenter ?
+                            <button
+                              type="button"
+                              className="mx-auto block text-xs font-medium text-blue-700/90 underline-offset-2 hover:underline"
+                              onClick={() => {
+                                if (!Number.isFinite(originalSelectedCenter.lat + originalSelectedCenter.lng)) return;
+                                viewportMapCenterForApplyRef.current = originalSelectedCenter;
+                                setLiveViewportMapCenter(originalSelectedCenter);
+                                setMapRecenterTick((n) => n + 1);
+                              }}
+                            >
+                              {npNameForReturnButton ?
+                                `Вернуться к ${npNameForReturnButton}`
+                              : "Вернуться к выбранному НП"}
+                            </button>
+                          : null}
+                        </div>
                       : null}
                     </div>
-                  : <div className="min-h-[280px] rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-6 text-center text-sm text-black/55 sm:h-[420px]">
+                  : <div className="flex aspect-square w-full min-h-[288px] max-h-[min(46vh,92vw)] items-center justify-center rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-6 text-center text-sm text-black/55 sm:min-h-[320px] sm:max-h-[min(42vh,560px)]">
                       Нет координат для карты — выберите населённый пункт в списке.
                     </div>
-                : <div className="min-h-[260px] rounded-xl border border-black/[0.08] bg-black/[0.02] p-1.5 sm:min-h-[300px]">
-                    {settlementsInsideCircle.length > 0 ?
-                      <ul className="max-h-[min(420px,52vh)] overflow-y-auto sm:max-h-[420px]">
-                        {settlementsInsideCircle.map((row) => {
-                          const reg = (row.region ?? "").trim();
-                          const line =
-                            reg ?
-                              `${row.name}, ${reg}, ${formatDistanceKm(row.distanceKm)}`
-                            : `${row.name}, ${formatDistanceKm(row.distanceKm)}`;
-                          return (
-                            <li key={`${row.name}:${row.lat}:${row.lng}`}>
-                              <button
-                                type="button"
-                                className="flex w-full cursor-pointer rounded-lg px-2.5 py-2 text-left hover:bg-white"
-                                onClick={() => applyNearbyJsonPick(row)}
-                              >
-                                <span className="text-sm font-medium text-black/90">{line}</span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    : <p className="px-3 py-6 text-center text-sm text-black/55">
-                        В этом круге населённые пункты не найдены
-                      </p>
-                    }
-                  </div>
-                }
+                : nearbyScrollListPanel}
               </div>
           }
 

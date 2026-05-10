@@ -8,10 +8,14 @@ import type {
   ProductListing,
   ServiceListing,
 } from "./listingModel";
+import { publicListingImageSrc } from "./listingCardMeta";
 
 export function parsePhotosJson(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((x): x is string => typeof x === "string");
+  return raw
+    .filter((x): x is string => typeof x === "string")
+    .map((u) => publicListingImageSrc(u))
+    .filter(Boolean);
 }
 
 function asDealStatus(raw: unknown): ListingDealStatus {

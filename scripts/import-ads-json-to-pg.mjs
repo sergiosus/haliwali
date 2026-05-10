@@ -44,12 +44,6 @@ function sqlString(v) {
   return `'${s.replace(/'/g, "''")}'`;
 }
 
-function sqlNullableString(v) {
-  const s = typeof v === "string" ? v : v == null ? "" : String(v);
-  const t = s.trim();
-  return t ? sqlString(t) : "NULL";
-}
-
 function sqlNullableNumber(v) {
   if (typeof v === "number" && Number.isFinite(v)) return String(Math.trunc(v));
   if (typeof v === "string" && v.trim()) {

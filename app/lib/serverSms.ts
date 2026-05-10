@@ -1,6 +1,7 @@
 import { createHash, randomInt } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import nodemailer from "nodemailer";
+import { isDebugAuthServer } from "./debugAuth";
 import { isValidPhone, normalizeEmail, normalizePhone, PHONE_VALIDATION_MESSAGE } from "./identity";
 import { getPool, usesPostgres } from "./pgPool";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
@@ -32,24 +33,6 @@ export function otpGenerate6(): string {
 
 export function otpHash(code: string): string {
   return sha256(code);
-}
-
-function smtpEnvPresence() {
-  const host = (process.env.SMTP_HOST ?? "").trim();
-  const port = (process.env.SMTP_PORT ?? "").trim();
-  const secure = (process.env.SMTP_SECURE ?? "").trim();
-  const userPresent = Boolean((process.env.SMTP_USER ?? "").trim());
-  const passPresent = Boolean((process.env.SMTP_PASSWORD ?? "").trim());
-  const from = (process.env.SMTP_FROM ?? "").trim();
-  return {
-    host,
-    port,
-    secure,
-    userPresent,
-    passPresent,
-    fromPresent: Boolean(from),
-    from: from || undefined,
-  };
 }
 
 function smtpConfigOrThrow() {
@@ -92,13 +75,22 @@ function maskEmailForLogs(email: string): string {
   return `${first}*@${domain}`;
 }
 
+/** Normalized OTP target (already lowercased/formatted) — never log raw phone/email. */
+function maskNormalizedTargetForLogs(type: VerifyType, normalized: string): string {
+  if (type === "email") return maskEmailForLogs(normalized);
+  const digits = (normalized ?? "").replace(/[^\d]/g, "");
+  if (digits.length < 4) return "+****";
+  return `+${digits.slice(0, 1)}****${digits.slice(-4)}`;
+}
+
 export async function sendVerificationCode(opts: {
   valueRaw: string;
   type: VerifyType;
   codesPath: string;
   ratePath: string;
 }) {
-  console.log("[OTP_EMAIL] helper entered");
+  const dbg = isDebugAuthServer();
+  if (dbg) console.log("[OTP_SEND] helper_entered");
   let stage:
     | "normalize"
     | "rate-limit"
@@ -107,16 +99,16 @@ export async function sendVerificationCode(opts: {
     | "create-transporter"
     | "verify-transporter"
     | "send-mail" = "normalize";
-  console.log("[OTP_SEND] send start", { channel: opts.type });
+  if (dbg) console.log("[OTP_SEND] normalize:start", { channel: opts.type });
   const dev = process.env.NODE_ENV !== "production";
   const value = normalizeByType(opts.valueRaw, opts.type);
-  console.log("[OTP_EMAIL] type/value normalized", { type: opts.type, value });
   if (opts.type === "email") {
     if (!value)
       return { ok: false as const, error: "Некорректный email или телефон", status: 400 };
   } else if (!value || !isValidPhone(value)) {
     return { ok: false as const, error: PHONE_VALIDATION_MESSAGE, status: 400 };
   }
+  if (dbg) console.log("[OTP_SEND] normalize:ok", { channel: opts.type, target: maskNormalizedTargetForLogs(opts.type, value) });
 
   const now = Date.now();
   const purpose = `${derivePurpose(opts.codesPath)}:${opts.type}`;
@@ -126,14 +118,14 @@ export async function sendVerificationCode(opts: {
     const rateKey = `${purpose}:${value}`;
     const rateOk = await smsRateLimitOkPg(pool, { key: rateKey, nowMs: now, limit: MAX_SENDS_PER_WINDOW, windowMs: RATE_WINDOW_MS });
     if (!rateOk.ok) {
-      console.log("[OTP_EMAIL] rate-limit deny", { type: opts.type });
+      if (dbg) console.log("[OTP_SEND] rate_limit:blocked", { channel: opts.type });
       return { ok: false as const, error: "Слишком много запросов. Попробуйте позже.", status: 429 };
     }
 
     const last = await findLastActiveCodePg(pool, { purpose, target: value });
     if (last && now - last.createdAtMs < RESEND_COOLDOWN_MS) {
       const left = Math.ceil((RESEND_COOLDOWN_MS - (now - last.createdAtMs)) / 1000);
-      console.log("[OTP_EMAIL] cooldown active", { type: opts.type, leftSec: left });
+      if (dbg) console.log("[OTP_SEND] cooldown:active", { channel: opts.type, leftSec: left });
       return { ok: false as const, error: `Отправить код повторно через ${left} сек`, status: 429, cooldownSec: left };
     }
   } else {
@@ -141,7 +133,7 @@ export async function sendVerificationCode(opts: {
     const rate = await readJson<RateMap>(opts.ratePath, {});
     const recent = (rate[value] ?? []).filter((ts) => now - ts < RATE_WINDOW_MS);
     if (recent.length >= MAX_SENDS_PER_WINDOW) {
-      console.log("[OTP_EMAIL] rate-limit deny", { type: opts.type });
+      if (dbg) console.log("[OTP_SEND] rate_limit:blocked", { channel: opts.type });
       return { ok: false as const, error: "Слишком много запросов. Попробуйте позже.", status: 429 };
     }
 
@@ -151,20 +143,16 @@ export async function sendVerificationCode(opts: {
       .find((r) => r.type === opts.type && r.value === value && !r.consumed && now < r.expiresAt);
     if (last && now - last.createdAt < RESEND_COOLDOWN_MS) {
       const left = Math.ceil((RESEND_COOLDOWN_MS - (now - last.createdAt)) / 1000);
-      console.log("[OTP_EMAIL] cooldown active", { type: opts.type, leftSec: left });
+      if (dbg) console.log("[OTP_SEND] cooldown:active", { channel: opts.type, leftSec: left });
       return { ok: false as const, error: `Отправить код повторно через ${left} сек`, status: 429, cooldownSec: left };
     }
   }
 
-  if (opts.type === "email") console.log("[OTP_EMAIL] code generation start");
+  if (dbg && opts.type === "email") console.log("[OTP_SEND] code:generate:start");
   const code = otpGenerate6();
-  if (opts.type === "email") console.log("[OTP_EMAIL] code generation success");
-  if (opts.type === "email") {
-    console.log("[OTP_EMAIL] email target", { to: maskEmailForLogs(value) });
-    console.log("[OTP_EMAIL] code generated");
-  }
+  if (dbg && opts.type === "email") console.log("[OTP_SEND] code:generate:ok", { target: maskEmailForLogs(value) });
   const ttlMs = opts.type === "phone" ? CODE_TTL_MS_PHONE : CODE_TTL_MS_EMAIL;
-  console.log("[OTP_SEND] before store", { channel: opts.type, usesPostgres: usesPostgres() });
+  if (dbg) console.log("[OTP_SEND] store:before", { channel: opts.type, usesPostgres: usesPostgres() });
   stage = "store-code";
   if (usesPostgres()) {
     const pool = getPool();
@@ -195,23 +183,26 @@ export async function sendVerificationCode(opts: {
     rate[value] = recent;
     await writeJson(opts.ratePath, rate);
   }
-  console.log("[OTP_SEND] after store", { channel: opts.type });
-  if (opts.type === "email") console.log("[OTP_EMAIL] code stored");
+  if (dbg) console.log("[OTP_SEND] store:after", { channel: opts.type });
 
-  console.log("[OTP] send start", { channel: opts.type });
+  if (dbg) console.log("[OTP_SEND] provider:send:start", { channel: opts.type });
   if (opts.type === "phone") {
-    console.log("[OTP] channel=phone");
     const sms = await sendSmsViaProvider(value, `Код подтверждения Haliwali: ${code}`);
     if (!sms.ok) return { ok: false as const, error: sms.error, status: sms.status };
+    if (dbg) console.log("[OTP_SEND] sms:done");
   } else {
-    console.log("[OTP] channel=email");
-    console.log("[OTP_SEND] before email");
-    await sendEmailOtp(value, "Код подтверждения Haliwali", `Ваш код: ${code}`, () => stage, (s) => {
-      stage = s;
-    });
-    console.log("[OTP_SEND] email sent");
+    await sendEmailOtp(
+      value,
+      "Код подтверждения Haliwali",
+      `Ваш код: ${code}`,
+      () => stage,
+      (s) => {
+        stage = s;
+      },
+      dbg,
+    );
+    if (dbg) console.log("[OTP_SEND] smtp:done");
   }
-  if (opts.type === "email") console.log("[OTP_EMAIL] helper success");
   return {
     ok: true as const,
     value,
@@ -228,7 +219,8 @@ export async function verifyVerificationCode(opts: {
   codesPath: string;
   verifiedPath: string;
 }) {
-  console.log("[OTP] verification start", { channel: opts.type });
+  const dbg = isDebugAuthServer();
+  if (dbg) console.log("[OTP] verify:start", { channel: opts.type });
   const value = normalizeByType(opts.valueRaw, opts.type);
   const code = (opts.codeRaw ?? "").trim();
   if (!value || !/^\d{6}$/.test(code)) return { ok: false as const, error: "Неверный код", status: 400 };
@@ -243,13 +235,13 @@ export async function verifyVerificationCode(opts: {
     if (rec.attempts >= MAX_ATTEMPTS) return { ok: false as const, error: "Неверный код", status: 429 };
     if (otpHash(code) !== rec.codeHash) {
       await incrementAttemptsPg(pool, rec.key);
-      console.log("[OTP] verification failed", { channel: opts.type });
+      if (dbg) console.log("[OTP] verify:fail_bad_code", { channel: opts.type });
       return { ok: false as const, error: "Неверный код", status: 400 };
     }
     await consumeCodePg(pool, rec.key);
     // Keep side-effect parity (verified markers) without filesystem writes in PG mode.
     await logVerifiedEventPg(pool, { type: opts.type, value, nowMs: now, verifiedPath: opts.verifiedPath, purpose });
-    console.log("[OTP] verification ok", { channel: opts.type });
+    if (dbg) console.log("[OTP] verify:ok", { channel: opts.type });
     return { ok: true as const, value };
   }
 
@@ -268,7 +260,7 @@ export async function verifyVerificationCode(opts: {
     rec.attempts += 1;
     records[idx] = rec;
     await writeJson(opts.codesPath, records);
-    console.log("[OTP] verification failed", { channel: opts.type });
+    if (dbg) console.log("[OTP] verify:fail_bad_code", { channel: opts.type });
     return { ok: false as const, error: "Неверный код", status: 400 };
   }
 
@@ -278,7 +270,7 @@ export async function verifyVerificationCode(opts: {
   const verified = await readJson<VerifiedMap>(opts.verifiedPath, {});
   verified[value] = { type: opts.type, verifiedAt: now };
   await writeJson(opts.verifiedPath, verified);
-  console.log("[OTP] verification ok", { channel: opts.type });
+  if (dbg) console.log("[OTP] verify:ok", { channel: opts.type });
   return { ok: true as const, value };
 }
 
@@ -321,28 +313,13 @@ async function sendSmsViaProvider(phone: string, message: string): Promise<{ ok:
   return { ok: true };
 }
 
-function maskEmail(email: string): string {
-  const t = (email ?? "").trim();
-  const at = t.indexOf("@");
-  if (at < 1) return "***";
-  const local = t.slice(0, at);
-  const domain = t.slice(at + 1);
-  const first = local.slice(0, 1) || "*";
-  return `${first}*@${domain}`;
-}
-
-function maskPhone(phone: string): string {
-  const digits = (phone ?? "").replace(/[^\d]/g, "");
-  if (digits.length < 4) return "+****";
-  return `+${digits.slice(0, 1)}****${digits.slice(-4)}`;
-}
-
 async function sendEmailOtp(
   email: string,
   subject: string,
   text: string,
   getStage: () => string,
   setStage: (s: "smtp-env" | "create-transporter" | "verify-transporter" | "send-mail") => void,
+  dbg: boolean,
 ) {
   let stage = getStage();
   try {
@@ -365,7 +342,7 @@ async function sendEmailOtp(
               throw new Error("SMTP_SECURE is invalid");
             })();
 
-    console.log("[OTP_EMAIL] smtp config host=%s port=%s secure=%s", host, String(port), String(secure));
+    if (dbg) console.log("[OTP_EMAIL] smtp:config", { host, port: String(port), secure: String(secure) });
 
     if (!host || !Number.isFinite(port) || port <= 0 || !userPresent || !passPresent || !from) {
       throw new Error("SMTP_ENV_MISSING");
@@ -373,21 +350,19 @@ async function sendEmailOtp(
 
     setStage("create-transporter");
     stage = "create-transporter";
-    console.log("[OTP_EMAIL] preparing smtp");
+    if (dbg) console.log("[OTP_EMAIL] smtp:transporter:create");
     const cfg = smtpConfigOrThrow();
-    console.log("[OTP_EMAIL] creating transporter");
     const transporter = nodemailer.createTransport(cfg); // createTransport required
-    console.log("[OTP_EMAIL] creating transporter success");
 
     setStage("verify-transporter");
     stage = "verify-transporter";
-    console.log("[OTP_EMAIL] verify start");
+    if (dbg) console.log("[OTP_EMAIL] smtp:verify:start");
     await transporter.verify();
-    console.log("[OTP_EMAIL] verify ok");
+    if (dbg) console.log("[OTP_EMAIL] smtp:verify:ok");
 
     setStage("send-mail");
     stage = "send-mail";
-    console.log("[OTP_EMAIL] sendMail start to=%s", maskEmailForLogs(email));
+    if (dbg) console.log("[OTP_EMAIL] smtp:sendMail:start", { to: maskEmailForLogs(email) });
     const info = await transporter.sendMail({
       from: smtpFromField(),
       to: email,
@@ -403,24 +378,28 @@ async function sendEmailOtp(
       throw new Error("SMTP did not accept OTP email");
     }
 
-    console.log(
-      "[OTP_EMAIL] sendMail ok accepted=%o rejected=%o response=%s messageId=%s",
-      accepted,
-      rejected,
-      response,
-      messageId,
-    );
+    if (dbg) {
+      console.log("[OTP_EMAIL] smtp:sendMail:ok", {
+        acceptedCount: accepted.length,
+        rejectedCount: rejected.length,
+        responseLen: response.length,
+        messageIdLen: messageId.length,
+      });
+    }
   } catch (e) {
-    console.error("[OTP_EMAIL] sendMail failed", e);
-    console.error("[OTP_EMAIL] failed", {
+    console.error("[OTP_EMAIL] smtp:error", {
       stage,
       name: e instanceof Error ? e.name : undefined,
       message: e instanceof Error ? e.message : String(e),
-      code: (e as any)?.code,
-      command: (e as any)?.command,
-      response: (e as any)?.response,
-      responseCode: (e as any)?.responseCode,
-      stack: e instanceof Error ? e.stack : undefined,
+      ...(dbg
+        ? {
+            code: (e as { code?: unknown }).code,
+            command: (e as { command?: unknown }).command,
+            response: (e as { response?: unknown }).response,
+            responseCode: (e as { responseCode?: unknown }).responseCode,
+            stack: e instanceof Error ? e.stack : undefined,
+          }
+        : {}),
     });
     throw e;
   }

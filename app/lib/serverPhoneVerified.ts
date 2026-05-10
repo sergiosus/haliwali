@@ -8,6 +8,10 @@ const OWNERS_PATH = path.join(process.cwd(), ".data", "profile-phone-owners.json
 let migratedJsonOwnersToPg = false;
 
 async function readOwnersJson(): Promise<Record<string, string>> {
+  if (process.env.NODE_ENV === "production" && !usesPostgres()) {
+    console.warn("[phone-owners][prod] Postgres disabled; skipping JSON owners store", { path: OWNERS_PATH });
+    return {};
+  }
   assertFileStoreNotUsedInProduction("serverPhoneVerified.readOwnersJson", { path: OWNERS_PATH });
   try {
     const raw = await readFile(OWNERS_PATH, "utf8");

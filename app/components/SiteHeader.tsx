@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getAuthSnapshot, logout as logoutAuth, subscribeAuth, useAuth } from "../lib/auth";
@@ -307,7 +306,7 @@ export function SiteHeader() {
 
   useEffect(() => {
     if (!menuOpen && !accountSwitcherOpen) return;
-    /** Outside close on `click` (bubble): avoids cancelling mobile `click` on menu items before `router.push` runs. */
+    /** Outside close on `click` (bubble); menu panel/trigger `contains` skips so in-panel `<Link>` navigates first. */
     function onDocClick(e: globalThis.MouseEvent) {
       if (!menuOpen) return;
       const t = e.target;
@@ -330,15 +329,6 @@ export function SiteHeader() {
       document.removeEventListener("keydown", onEsc);
     };
   }, [menuOpen, accountSwitcherOpen]);
-
-  const pushFromAccountMenu = useCallback(
-    (href: string) => (e: ReactMouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation();
-      closeAccountMenu();
-      router.push(href);
-    },
-    [router],
-  );
 
   useEffect(() => {
     if (isHome) {
@@ -472,48 +462,60 @@ export function SiteHeader() {
               menuPanelEntered ? "translate-y-0 opacity-100" : "-translate-y-[5px] opacity-0",
             ].join(" ")}
           >
-          <button
-            type="button"
-            onClick={pushFromAccountMenu("/account")}
+          <Link
+            href="/account"
+            onClick={() => {
+              queueMicrotask(() => closeAccountMenu());
+            }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Мои объявления
-          </button>
-          <button
-            type="button"
-            onClick={pushFromAccountMenu("/account?tab=favorites")}
+          </Link>
+          <Link
+            href="/account?tab=favorites"
+            onClick={() => {
+              queueMicrotask(() => closeAccountMenu());
+            }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Избранное
-          </button>
-          <button
-            type="button"
-            onClick={pushFromAccountMenu("/account?tab=messages")}
+          </Link>
+          <Link
+            href="/account?tab=messages"
+            onClick={() => {
+              queueMicrotask(() => closeAccountMenu());
+            }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             {chatUnreadTotal > 0 ? `Сообщения (${chatUnreadTotal})` : "Сообщения"}
-          </button>
-          <button
-            type="button"
-            onClick={pushFromAccountMenu("/account?tab=profile")}
+          </Link>
+          <Link
+            href="/account?tab=profile"
+            onClick={() => {
+              queueMicrotask(() => closeAccountMenu());
+            }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Профиль
-          </button>
-          <button
-            type="button"
-            onClick={pushFromAccountMenu("/support")}
+          </Link>
+          <Link
+            href="/support"
+            onClick={() => {
+              queueMicrotask(() => closeAccountMenu());
+            }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Поддержка
-          </button>
-          <button
-            type="button"
-            onClick={pushFromAccountMenu("/account?tab=settings")}
+          </Link>
+          <Link
+            href="/account?tab=settings"
+            onClick={() => {
+              queueMicrotask(() => closeAccountMenu());
+            }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Настройки
-          </button>
+          </Link>
           <button
             type="button"
             onClick={(e) => {

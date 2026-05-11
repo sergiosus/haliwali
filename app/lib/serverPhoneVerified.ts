@@ -1,18 +1,16 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { getPool, usesPostgres } from "./pgPool";
-import { assertFileStoreNotUsedInProduction } from "./productionGuards";
 
 const OWNERS_PATH = path.join(process.cwd(), ".data", "profile-phone-owners.json");
 
 let migratedJsonOwnersToPg = false;
 
+/** Legacy JSON map (dev / non-Postgres only). Production must never read `.data/profile-phone-owners.json`. */
 async function readOwnersJson(): Promise<Record<string, string>> {
-  if (process.env.NODE_ENV === "production" && !usesPostgres()) {
-    console.warn("[phone-owners][prod] Postgres disabled; skipping JSON owners store", { path: OWNERS_PATH });
+  if (process.env.NODE_ENV === "production") {
     return {};
   }
-  assertFileStoreNotUsedInProduction("serverPhoneVerified.readOwnersJson", { path: OWNERS_PATH });
   try {
     const raw = await readFile(OWNERS_PATH, "utf8");
     const m = JSON.parse(raw) as unknown;

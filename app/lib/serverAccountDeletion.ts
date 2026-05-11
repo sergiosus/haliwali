@@ -13,7 +13,6 @@ import {
   writeUsersDb,
 } from "./serverUsersStore";
 import { pgAnonymizeUser, pgClearDeletionSchedule, pgSetPendingDeletion } from "./serverUsersPg";
-import { assertFileStoreNotUsedInProduction } from "./productionGuards";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const OWNERS_PATH = path.join(DATA_DIR, "profile-phone-owners.json");
@@ -23,11 +22,9 @@ export const ACCOUNT_DELETION_GRACE_MS = 10 * 24 * 60 * 60 * 1000;
 type OwnerMap = Record<string, string>;
 
 async function readOwners(): Promise<OwnerMap> {
-  if (process.env.NODE_ENV === "production" && !usesPostgres()) {
-    console.warn("[phone-owners][prod] Postgres disabled; skipping JSON owners store", { path: OWNERS_PATH });
+  if (process.env.NODE_ENV === "production") {
     return {};
   }
-  assertFileStoreNotUsedInProduction("serverAccountDeletion.readOwners", { path: OWNERS_PATH });
   try {
     const raw = await readFile(OWNERS_PATH, "utf8");
     return JSON.parse(raw) as OwnerMap;
@@ -37,11 +34,9 @@ async function readOwners(): Promise<OwnerMap> {
 }
 
 async function writeOwners(next: OwnerMap): Promise<void> {
-  if (process.env.NODE_ENV === "production" && !usesPostgres()) {
-    console.warn("[phone-owners][prod] Postgres disabled; not writing JSON owners store", { path: OWNERS_PATH });
+  if (process.env.NODE_ENV === "production") {
     return;
   }
-  assertFileStoreNotUsedInProduction("serverAccountDeletion.writeOwners", { path: OWNERS_PATH });
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(OWNERS_PATH, JSON.stringify(next, null, 2), "utf8");
 }

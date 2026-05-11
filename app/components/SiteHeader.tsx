@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getAuthSnapshot, logout as logoutAuth, subscribeAuth, useAuth } from "../lib/auth";
 import { isDebugAuthClient } from "../lib/debugAuth";
@@ -280,12 +289,11 @@ export function SiteHeader() {
 
   useEffect(() => {
     if (!menuOpen && !accountSwitcherOpen) return;
-    /** Outside close: `pointerdown` works for touch + mouse; `mousedown` alone misses many mobile taps. */
-    function onDocPointerDown(e: PointerEvent) {
+    /** Outside close on `click` (bubble): avoids cancelling mobile `click` on menu items before `router.push` runs. */
+    function onDocClick(e: globalThis.MouseEvent) {
       if (!menuOpen) return;
       const t = e.target;
       if (!(t instanceof Node)) return;
-      // Do not treat taps inside trigger/panel as outside (mobile: ensure Link click still runs).
       if (menuPanelRef.current?.contains(t)) return;
       if (menuTriggerRef.current?.contains(t)) return;
       if (menuRef.current?.contains(t)) return;
@@ -297,13 +305,22 @@ export function SiteHeader() {
         setAccountSwitcherOpen(false);
       }
     }
-    document.addEventListener("pointerdown", onDocPointerDown);
+    document.addEventListener("click", onDocClick);
     document.addEventListener("keydown", onEsc);
     return () => {
-      document.removeEventListener("pointerdown", onDocPointerDown);
+      document.removeEventListener("click", onDocClick);
       document.removeEventListener("keydown", onEsc);
     };
   }, [menuOpen, accountSwitcherOpen]);
+
+  const pushFromAccountMenu = useCallback(
+    (href: string) => (e: ReactMouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      closeAccountMenu();
+      router.push(href);
+    },
+    [router],
+  );
 
   useEffect(() => {
     if (isHome) {
@@ -432,56 +449,57 @@ export function SiteHeader() {
             ref={menuPanelRef}
             className={[
               "rounded-xl border border-black/10 bg-white p-2 shadow-lg transition-[opacity,transform] duration-150 ease-out",
-              /* Mobile (`!menuUseHover`): panel enters immediately — always tappable. Desktop hover: block hits only while faded in. */
-              menuUseHover && !menuPanelEntered ? "pointer-events-none" : "pointer-events-auto",
+              /* Mobile: always interactive when open. Desktop hover: block hits only while faded in. */
+              menuOpen && (!menuUseHover || menuPanelEntered) ? "pointer-events-auto" : "pointer-events-none",
               menuPanelEntered ? "translate-y-0 opacity-100" : "-translate-y-[5px] opacity-0",
             ].join(" ")}
           >
-          <Link
-            href="/account"
-            onClick={() => queueMicrotask(() => closeAccountMenu())}
-            className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
-          >
-            Мои объявления
-          </Link>
-          <Link
-            href="/account?tab=favorites"
-            onClick={() => queueMicrotask(() => closeAccountMenu())}
-            className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
-          >
-            Избранное
-          </Link>
-          <Link
-            href="/account?tab=messages"
-            onClick={() => queueMicrotask(() => closeAccountMenu())}
-            className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
-          >
-            {chatUnreadTotal > 0 ? `Сообщения (${chatUnreadTotal})` : "Сообщения"}
-          </Link>
-          <Link
-            href="/account?tab=profile"
-            onClick={() => queueMicrotask(() => closeAccountMenu())}
-            className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
-          >
-            Профиль
-          </Link>
-          <Link
-            href="/support"
-            onClick={() => queueMicrotask(() => closeAccountMenu())}
-            className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
-          >
-            Поддержка
-          </Link>
-          <Link
-            href="/account?tab=settings"
-            onClick={() => queueMicrotask(() => closeAccountMenu())}
-            className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
-          >
-            Настройки
-          </Link>
           <button
             type="button"
-            onClick={() => {
+            onClick={pushFromAccountMenu("/account")}
+            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+          >
+            Мои объявления
+          </button>
+          <button
+            type="button"
+            onClick={pushFromAccountMenu("/account?tab=favorites")}
+            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+          >
+            Избранное
+          </button>
+          <button
+            type="button"
+            onClick={pushFromAccountMenu("/account?tab=messages")}
+            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+          >
+            {chatUnreadTotal > 0 ? `Сообщения (${chatUnreadTotal})` : "Сообщения"}
+          </button>
+          <button
+            type="button"
+            onClick={pushFromAccountMenu("/account?tab=profile")}
+            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+          >
+            Профиль
+          </button>
+          <button
+            type="button"
+            onClick={pushFromAccountMenu("/support")}
+            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+          >
+            Поддержка
+          </button>
+          <button
+            type="button"
+            onClick={pushFromAccountMenu("/account?tab=settings")}
+            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+          >
+            Настройки
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
               closeAccountMenu();
               setAccountSwitcherOpen(true);
             }}
@@ -491,9 +509,9 @@ export function SiteHeader() {
           </button>
           <button
             type="button"
-            onClick={() => {
-              closeAccountMenu();
-              handleLogout();
+            onClick={(e) => {
+              e.stopPropagation();
+              void handleLogout();
             }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >

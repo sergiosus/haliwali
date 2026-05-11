@@ -79,3 +79,13 @@ CREATE TABLE IF NOT EXISTS listings (
 CREATE INDEX IF NOT EXISTS listings_owner_id_idx ON listings (owner_id);
 CREATE INDEX IF NOT EXISTS listings_status_category_slug_idx ON listings (status, category_slug);
 CREATE INDEX IF NOT EXISTS listings_deal_status_idx ON listings (deal_status);
+
+-- Profile phone OTP ownership (production); replaces `.data/profile-phone-owners.json` for Postgres deployments.
+CREATE TABLE IF NOT EXISTS phone_owners (
+  phone TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_phone_owners_phone ON phone_owners(phone);
+CREATE INDEX IF NOT EXISTS idx_phone_owners_user_id ON phone_owners(user_id);

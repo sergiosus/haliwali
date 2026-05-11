@@ -10,7 +10,7 @@ const LISTING_VIEWS_PATH = ".data/listing-views.json";
 const VIEW_DEDUP_PATH = ".data/listing-view-dedup.json";
 const REPORTS_PATH = ".data/reports.jsonl";
 
-const VIEW_DEDUP_MS = 24 * 60 * 60 * 1000;
+const VIEW_DEDUP_MS = 30 * 60 * 1000;
 
 export type ReplyStatRow = { count: number; sumMs: number };
 

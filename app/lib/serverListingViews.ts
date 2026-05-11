@@ -5,9 +5,13 @@ import { normalizeListingId } from "./listingId";
 
 export type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 
-export const LISTING_VIEW_DEDUP_MS = 24 * 60 * 60 * 1000;
+export const LISTING_VIEW_DEDUP_MS = 30 * 60 * 1000;
 const STATS_TIMEZONE = "Europe/Moscow";
 const UNKNOWN_CITY_LABEL = "Неизвестно";
+
+function logListingViewDebug(payload: { listingId: string; incremented: boolean; skipped: boolean; count: number }) {
+  console.log("[LISTING_VIEW]", payload);
+}
 
 export type ListingViewLocationHint = {
   city?: string | null;
@@ -115,7 +119,11 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
   if (!listingId) return { count: 0, incremented: false, skipped: true };
 
   if (input.skipCount) {
-    if (!usesPostgres()) return { count: 0, incremented: false, skipped: true };
+    if (!usesPostgres()) {
+      const { readListingViews } = await import("./serverTrustStore");
+      const counts = await readListingViews();
+      return { count: counts[listingId] ?? 0, incremented: false, skipped: true };
+    }
     const count = await readAggregateCount(listingId);
     return { count, incremented: false, skipped: true };
   }
@@ -135,6 +143,7 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
   if (!usesPostgres()) {
     const { maybeIncrementListingViewDev } = await import("./serverTrustStore");
     const { count, incremented } = await maybeIncrementListingViewDev(listingId, viewerKey);
+    logListingViewDebug({ listingId, incremented, skipped: false, count });
     return { count, incremented, skipped: false };
   }
 
@@ -156,17 +165,6 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
     const incremented = ins.rows.length > 0;
     let count = 0;
     if (incremented) {
-      await insertViewEventPg({
-        listingId,
-        viewerUserId,
-        anonymousViewerId,
-        ownerUserId,
-        city,
-        region,
-        country,
-        ipHash,
-        userAgentHash,
-      });
       const r = await client.query<{ views_count: number }>(
         `INSERT INTO listing_views (listing_id, views_count, updated_at)
          VALUES ($1, 1, now())
@@ -177,10 +175,28 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
         [listingId],
       );
       count = Number(r.rows[0]?.views_count) || 0;
+      try {
+        await client.query("SAVEPOINT listing_view_event");
+        await insertViewEventPg({
+          listingId,
+          viewerUserId,
+          anonymousViewerId,
+          ownerUserId,
+          city,
+          region,
+          country,
+          ipHash,
+          userAgentHash,
+        });
+        await client.query("RELEASE SAVEPOINT listing_view_event");
+      } catch {
+        await client.query("ROLLBACK TO SAVEPOINT listing_view_event");
+      }
     } else {
       count = await readAggregateCount(listingId);
     }
     await client.query("COMMIT");
+    logListingViewDebug({ listingId, incremented, skipped: false, count });
     return { count, incremented, skipped: false };
   } catch (e) {
     await client.query("ROLLBACK");

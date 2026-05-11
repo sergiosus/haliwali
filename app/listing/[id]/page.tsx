@@ -207,7 +207,20 @@ function ListingDetail({
         .catch(() => {});
     } else {
       void recordListingViewOnce(listing.id).then((count) => {
-        if (!cancelled && typeof count === "number") setViewCount(count);
+        if (cancelled) return;
+        if (typeof count === "number") {
+          setViewCount(count);
+          return;
+        }
+        void fetch(`/api/listings/views?ids=${encodeURIComponent(listing.id)}`, { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => {
+            if (cancelled || !d || typeof d !== "object") return;
+            const counts = (d as { counts?: Record<string, number> }).counts;
+            const n = counts?.[listing.id];
+            if (typeof n === "number") setViewCount(n);
+          })
+          .catch(() => {});
       });
     }
     return () => {

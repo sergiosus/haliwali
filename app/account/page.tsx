@@ -196,18 +196,18 @@ function ListingCardInlineMetaRow({
 
 function ListingCardCover({ photos, compact }: { photos?: string[] | null; compact?: boolean }) {
   const src = photos?.map((x) => String(x ?? "").trim()).find(Boolean) ?? "";
-  const box = compact ? "h-[118px] min-h-[100px]" : "h-[148px]";
+  const box = compact ? "min-h-[100px] max-h-[180px] aspect-[4/3]" : "min-h-[132px] max-h-[220px] aspect-[4/3]";
   const placeholderMin = compact ? "min-h-[100px]" : "min-h-[132px]";
   return (
     <div
       className={[
-        "relative w-full shrink-0 overflow-hidden rounded-[11px] bg-zinc-100 md:bg-black/[0.035]",
+        "relative flex w-full shrink-0 items-center justify-center overflow-hidden rounded-[11px] bg-zinc-100 md:bg-black/[0.035]",
         box,
       ].join(" ")}
     >
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" className="h-full w-full object-contain md:object-cover" />
+        <img src={src} alt="" className="max-h-full max-w-full object-contain" />
       ) : (
         <div
           className={[

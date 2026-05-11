@@ -27,6 +27,30 @@ import {
 import { AccountCredentialsModal } from "./AccountCredentialsModal";
 import { AccountSwitcherModal } from "./AccountSwitcherModal";
 
+/** Temporary account-menu tap debug: `localStorage.setItem("debugAccountMenu","1")` or development build. */
+function isAccountMenuDebugOn(): boolean {
+  if (typeof window === "undefined") return false;
+  if (process.env.NODE_ENV === "development") return true;
+  try {
+    return window.localStorage.getItem("debugAccountMenu") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function accountMenuTargetTextSnippet(target: EventTarget | null): string {
+  if (!(target instanceof Element)) return "";
+  const raw = (target.textContent ?? "").replace(/\s+/g, " ").trim();
+  return raw.slice(0, 80);
+}
+
+function accountMenuLogHrefFromTarget(target: EventTarget | null): string | undefined {
+  if (!(target instanceof Element)) return undefined;
+  const a = target.closest("a[href]");
+  const h = a?.getAttribute("href");
+  return typeof h === "string" ? h.slice(0, 200) : undefined;
+}
+
 function SearchIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -190,6 +214,11 @@ export function SiteHeader() {
     }
   }
 
+  useEffect(() => {
+    if (!isAccountMenuDebugOn()) return;
+    console.log("[ACCOUNT_MENU_STATE]", { menuOpen, menuPanelEntered, menuUseHover });
+  }, [menuOpen, menuPanelEntered, menuUseHover]);
+
   function syncHeaderProfile() {
     if (typeof window === "undefined") return;
     const snap = getAuthSnapshot();
@@ -308,8 +337,17 @@ export function SiteHeader() {
     if (!menuOpen && !accountSwitcherOpen) return;
     /** Outside close on `click` (bubble); menu panel/trigger `contains` skips so in-panel `<Link>` navigates first. */
     function onDocClick(e: globalThis.MouseEvent) {
-      if (!menuOpen) return;
       const t = e.target;
+      if (isAccountMenuDebugOn() && t instanceof Node) {
+        console.log("[ACCOUNT_MENU_OUTSIDE_CLICK]", {
+          insidePanel: Boolean(menuPanelRef.current?.contains(t)),
+          insideTrigger: Boolean(menuTriggerRef.current?.contains(t)),
+          insideMenuRoot: Boolean(menuRef.current?.contains(t)),
+          targetTag: t instanceof Element ? t.tagName : "non-element",
+          targetText: t instanceof Element ? accountMenuTargetTextSnippet(t) : "",
+        });
+      }
+      if (!menuOpen) return;
       if (!(t instanceof Node)) return;
       if (menuPanelRef.current?.contains(t)) return;
       if (menuTriggerRef.current?.contains(t)) return;
@@ -455,6 +493,16 @@ export function SiteHeader() {
           <div
             id={`${accountMenuId}-menu`}
             ref={menuPanelRef}
+            onPointerDownCapture={(e) => {
+              if (!isAccountMenuDebugOn()) return;
+              const t = e.target;
+              console.log("[ACCOUNT_MENU_PANEL_POINTER_DOWN]", {
+                targetTag: t instanceof Element ? t.tagName : typeof t,
+                targetText: t instanceof Element ? accountMenuTargetTextSnippet(t) : "",
+                href: accountMenuLogHrefFromTarget(t),
+                pointerType: e.pointerType,
+              });
+            }}
             className={[
               "rounded-xl border border-black/10 bg-white p-2 shadow-lg transition-[opacity,transform] duration-150 ease-out",
               /* Open menu must stay hit-testable; opacity/transform only (no pointer-events gating on menuPanelEntered). */
@@ -464,7 +512,14 @@ export function SiteHeader() {
           >
           <Link
             href="/account"
-            onClick={() => {
+            onClick={(e) => {
+              if (isAccountMenuDebugOn()) {
+                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
+                  label: "Мои объявления",
+                  href: "/account",
+                  defaultPrevented: e.defaultPrevented,
+                });
+              }
               queueMicrotask(() => closeAccountMenu());
             }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
@@ -473,7 +528,14 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=favorites"
-            onClick={() => {
+            onClick={(e) => {
+              if (isAccountMenuDebugOn()) {
+                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
+                  label: "Избранное",
+                  href: "/account?tab=favorites",
+                  defaultPrevented: e.defaultPrevented,
+                });
+              }
               queueMicrotask(() => closeAccountMenu());
             }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
@@ -482,7 +544,14 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=messages"
-            onClick={() => {
+            onClick={(e) => {
+              if (isAccountMenuDebugOn()) {
+                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
+                  label: "Сообщения",
+                  href: "/account?tab=messages",
+                  defaultPrevented: e.defaultPrevented,
+                });
+              }
               queueMicrotask(() => closeAccountMenu());
             }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
@@ -491,7 +560,14 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=profile"
-            onClick={() => {
+            onClick={(e) => {
+              if (isAccountMenuDebugOn()) {
+                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
+                  label: "Профиль",
+                  href: "/account?tab=profile",
+                  defaultPrevented: e.defaultPrevented,
+                });
+              }
               queueMicrotask(() => closeAccountMenu());
             }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
@@ -500,7 +576,14 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/support"
-            onClick={() => {
+            onClick={(e) => {
+              if (isAccountMenuDebugOn()) {
+                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
+                  label: "Поддержка",
+                  href: "/support",
+                  defaultPrevented: e.defaultPrevented,
+                });
+              }
               queueMicrotask(() => closeAccountMenu());
             }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
@@ -509,7 +592,14 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=settings"
-            onClick={() => {
+            onClick={(e) => {
+              if (isAccountMenuDebugOn()) {
+                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
+                  label: "Настройки",
+                  href: "/account?tab=settings",
+                  defaultPrevented: e.defaultPrevented,
+                });
+              }
               queueMicrotask(() => closeAccountMenu());
             }}
             className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
@@ -530,6 +620,7 @@ export function SiteHeader() {
           <button
             type="button"
             onClick={(e) => {
+              if (isAccountMenuDebugOn()) console.log("[ACCOUNT_MENU_LOGOUT_CLICK]");
               e.stopPropagation();
               void handleLogout();
             }}

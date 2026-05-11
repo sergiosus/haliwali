@@ -196,7 +196,7 @@ function ListingCardInlineMetaRow({
 
 function ListingCardCover({ photos, compact }: { photos?: string[] | null; compact?: boolean }) {
   const src = photos?.map((x) => String(x ?? "").trim()).find(Boolean) ?? "";
-  const box = compact ? "min-h-[100px] max-h-[180px] aspect-[4/3]" : "min-h-[132px] max-h-[220px] aspect-[4/3]";
+  const box = compact ? "min-h-[100px] max-h-[180px] w-full" : "min-h-[132px] max-h-[220px] w-full";
   const placeholderMin = compact ? "min-h-[100px]" : "min-h-[132px]";
   return (
     <div

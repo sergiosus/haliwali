@@ -68,7 +68,7 @@ export function CompactListingCard({
   if (dist) metaTailParts.push(dist);
 
   const thumbClass =
-    "relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/10 bg-zinc-100 md:h-20 md:w-20 md:bg-black/[0.04]";
+    "relative flex h-[4.5rem] w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/10 bg-zinc-100 md:h-24 md:w-20 md:bg-black/[0.04]";
   const titleClass =
     "min-w-0 flex-1 truncate text-left text-[15px] font-bold leading-snug tracking-tight text-black md:text-[16px]";
 

@@ -189,12 +189,12 @@ export function MapListingPreviewModal({
                       type="button"
                       onClick={() => setPhotoIdx(i)}
                       className={[
-                        "h-14 w-14 overflow-hidden rounded-lg border bg-white",
+                        "flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border bg-black/[0.03]",
                         i === photoIdx ? "border-[#ff7a00] opacity-100" : "border-black/10 opacity-70 hover:opacity-100",
                       ].join(" ")}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={src} alt="" className="h-full w-full object-cover" />
+                      <img src={src} alt="" className="max-h-full max-w-full object-contain" />
                     </button>
                   ))}
                 </div>

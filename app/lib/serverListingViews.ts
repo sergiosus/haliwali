@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import type { PoolClient } from "pg";
 import type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 import { getPool, usesPostgres } from "./pgPool";
 import { normalizeListingId } from "./listingId";
@@ -7,7 +8,6 @@ export type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 
 export const LISTING_VIEW_DEDUP_MS = 30 * 60 * 1000;
 const STATS_TIMEZONE = "Europe/Moscow";
-const UNKNOWN_CITY_LABEL = "Неизвестно";
 
 function logListingViewDebug(payload: { listingId: string; incremented: boolean; skipped: boolean; count: number }) {
   console.log("[LISTING_VIEW]", payload);
@@ -45,11 +45,6 @@ export function hashListingViewUserAgent(userAgent: string): string {
   return hashSensitiveValue(userAgent);
 }
 
-function normalizeCityLabel(raw: string | null | undefined): string | null {
-  const v = (raw ?? "").trim();
-  return v || null;
-}
-
 function moscowDayStartMs(nowMs: number): number {
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: STATS_TIMEZONE }).format(new Date(nowMs));
   const [y, m, d] = day.split("-").map((x) => Number(x));
@@ -71,42 +66,60 @@ function moscowDayStartMs(nowMs: number): number {
   return utcGuess - ((hh * 3600 + mm * 60 + ss) * 1000);
 }
 
-async function readAggregateCount(listingId: string): Promise<number> {
-  const { rows } = await getPool().query<{ views_count: number }>(
-    `SELECT views_count FROM listing_views WHERE listing_id = $1 LIMIT 1`,
+async function readAggregateCount(listingId: string, client?: PoolClient): Promise<number> {
+  const runner = client ?? getPool();
+  const { rows } = await runner.query<{ views_count: string }>(
+    `SELECT COUNT(*)::text AS views_count
+     FROM listing_view_events
+     WHERE listing_id = $1`,
     [listingId],
   );
   const n = Number(rows[0]?.views_count);
   return Number.isFinite(n) ? n : 0;
 }
 
-async function insertViewEventPg(args: {
-  listingId: string;
-  viewerUserId: string | null;
-  anonymousViewerId: string | null;
-  ownerUserId: string | null;
-  city: string | null;
-  region: string | null;
-  country: string | null;
-  ipHash: string | null;
-  userAgentHash: string | null;
-}): Promise<void> {
-  await getPool().query(
+export async function countListingViewsByIds(ids: string[]): Promise<Record<string, number>> {
+  const clean = ids.map((x) => String(x ?? "").trim()).filter(Boolean);
+  if (clean.length === 0) return {};
+  if (!usesPostgres()) {
+    const { readListingViews } = await import("./serverTrustStore");
+    const db = await readListingViews();
+    const out: Record<string, number> = {};
+    for (const id of clean) out[id] = db[id] ?? 0;
+    return out;
+  }
+  const { rows } = await getPool().query<{ listing_id: string; views_count: string }>(
+    `SELECT listing_id, COUNT(*)::text AS views_count
+     FROM listing_view_events
+     WHERE listing_id = ANY($1::text[])
+     GROUP BY listing_id`,
+    [clean],
+  );
+  const out: Record<string, number> = {};
+  for (const id of clean) out[id] = 0;
+  for (const row of rows) {
+    const id = String(row.listing_id ?? "").trim();
+    if (!id) continue;
+    out[id] = Number(row.views_count) || 0;
+  }
+  return out;
+}
+
+async function insertViewEventPg(
+  client: PoolClient,
+  args: {
+    listingId: string;
+    viewerUserId: string | null;
+    anonymousViewerId: string | null;
+    ipHash: string | null;
+    userAgentHash: string | null;
+  },
+): Promise<void> {
+  await client.query(
     `INSERT INTO listing_view_events
-       (id, listing_id, viewer_user_id, anonymous_viewer_id, owner_user_id, city, region, country, user_agent_hash, ip_hash, viewed_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())`,
-    [
-      randomUUID(),
-      args.listingId,
-      args.viewerUserId,
-      args.anonymousViewerId,
-      args.ownerUserId,
-      args.city,
-      args.region,
-      args.country,
-      args.userAgentHash,
-      args.ipHash,
-    ],
+       (listing_id, viewer_user_id, viewer_fingerprint, ip_hash, user_agent_hash)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [args.listingId, args.viewerUserId, args.anonymousViewerId, args.ipHash, args.userAgentHash],
   );
 }
 
@@ -133,10 +146,6 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
   const viewerKey = viewerUserId ?? anonymousViewerId;
   if (!viewerKey) return { count: 0, incremented: false, skipped: true };
 
-  const ownerUserId = (input.ownerUserId ?? "").trim() || null;
-  const city = normalizeCityLabel(input.location?.city);
-  const region = normalizeCityLabel(input.location?.region);
-  const country = normalizeCityLabel(input.location?.country);
   const ipHash = (input.ipHash ?? "").trim() || null;
   const userAgentHash = (input.userAgentHash ?? "").trim() || null;
 
@@ -163,38 +172,16 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
       [dedupKey, listingId, viewerKey, now, expiresAt],
     );
     const incremented = ins.rows.length > 0;
-    let count = 0;
     if (incremented) {
-      const r = await client.query<{ views_count: number }>(
-        `INSERT INTO listing_views (listing_id, views_count, updated_at)
-         VALUES ($1, 1, now())
-         ON CONFLICT (listing_id) DO UPDATE SET
-           views_count = listing_views.views_count + 1,
-           updated_at = now()
-         RETURNING views_count`,
-        [listingId],
-      );
-      count = Number(r.rows[0]?.views_count) || 0;
-      try {
-        await client.query("SAVEPOINT listing_view_event");
-        await insertViewEventPg({
-          listingId,
-          viewerUserId,
-          anonymousViewerId,
-          ownerUserId,
-          city,
-          region,
-          country,
-          ipHash,
-          userAgentHash,
-        });
-        await client.query("RELEASE SAVEPOINT listing_view_event");
-      } catch {
-        await client.query("ROLLBACK TO SAVEPOINT listing_view_event");
-      }
-    } else {
-      count = await readAggregateCount(listingId);
+      await insertViewEventPg(client, {
+        listingId,
+        viewerUserId,
+        anonymousViewerId,
+        ipHash,
+        userAgentHash,
+      });
     }
+    const count = await readAggregateCount(listingId, client);
     await client.query("COMMIT");
     logListingViewDebug({ listingId, incremented, skipped: false, count });
     return { count, incremented, skipped: false };
@@ -204,11 +191,6 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
   } finally {
     client.release();
   }
-}
-
-function roundShare(part: number, total: number): number {
-  if (total <= 0 || part <= 0) return 0;
-  return Math.round((part / total) * 1000) / 10;
 }
 
 export async function getListingViewStatsForOwner(listingId: string): Promise<ListingViewStatsPayload | null> {
@@ -232,10 +214,10 @@ export async function getListingViewStatsForOwner(listingId: string): Promise<Li
     unique_viewers: string;
   }>(
     `SELECT
-       COUNT(*) FILTER (WHERE viewed_at >= to_timestamp($2 / 1000.0))::text AS today,
-       COUNT(*) FILTER (WHERE viewed_at >= to_timestamp($3 / 1000.0))::text AS last7,
-       COUNT(*) FILTER (WHERE viewed_at >= to_timestamp($4 / 1000.0))::text AS last30,
-       COUNT(DISTINCT COALESCE(viewer_user_id, 'anon:' || anonymous_viewer_id))::text AS unique_viewers
+       COUNT(*) FILTER (WHERE created_at >= to_timestamp($2 / 1000.0))::text AS today,
+       COUNT(*) FILTER (WHERE created_at >= to_timestamp($3 / 1000.0))::text AS last7,
+       COUNT(*) FILTER (WHERE created_at >= to_timestamp($4 / 1000.0))::text AS last30,
+       COUNT(DISTINCT COALESCE(viewer_user_id, 'anon:' || viewer_fingerprint))::text AS unique_viewers
      FROM listing_view_events
      WHERE listing_id = $1`,
     [id, todayStart, last7Start, last30Start],
@@ -246,29 +228,12 @@ export async function getListingViewStatsForOwner(listingId: string): Promise<Li
   const last30Days = Number(w?.last30) || 0;
   const uniqueViewers = Number(w?.unique_viewers) || 0;
 
-  const { rows: cityRows } = await pool.query<{ city: string | null; views: string }>(
-    `SELECT COALESCE(NULLIF(TRIM(city), ''), $2) AS city, COUNT(*)::text AS views
-     FROM listing_view_events
-     WHERE listing_id = $1 AND viewed_at >= to_timestamp($3 / 1000.0)
-     GROUP BY 1
-     ORDER BY COUNT(*) DESC, city ASC
-     LIMIT 12`,
-    [id, UNKNOWN_CITY_LABEL, last30Start],
-  );
-  const cityTotal = cityRows.reduce((sum, row) => sum + (Number(row.views) || 0), 0);
-  const cities = cityRows.map((row) => {
-    const views = Number(row.views) || 0;
-    return {
-      city: (row.city ?? UNKNOWN_CITY_LABEL).trim() || UNKNOWN_CITY_LABEL,
-      views,
-      share: roundShare(views, cityTotal),
-    };
-  });
+  const cities: ListingViewStatsPayload["cities"] = [];
 
   const { rows: dailyRows } = await pool.query<{ day: string; views: string }>(
-    `SELECT to_char((viewed_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day, COUNT(*)::text AS views
+    `SELECT to_char((created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day, COUNT(*)::text AS views
      FROM listing_view_events
-     WHERE listing_id = $1 AND viewed_at >= to_timestamp($3 / 1000.0)
+     WHERE listing_id = $1 AND created_at >= to_timestamp($3 / 1000.0)
      GROUP BY 1
      ORDER BY 1 ASC`,
     [id, STATS_TIMEZONE, dailyStart],

@@ -976,18 +976,18 @@ function ListingDetailsModal({
         <div className="mt-5 grid gap-4">
           <div className="rounded-3xl border border-black/10 bg-white p-3">
             {main ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={main}
-                alt=""
-                className="aspect-[4/3] w-full rounded-2xl object-cover"
+              <div
+                className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-black/[0.03]"
                 role="button"
                 tabIndex={0}
                 onClick={() => setViewerOpen(true)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") setViewerOpen(true);
                 }}
-              />
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={main} alt="" className="max-h-full max-w-full object-contain" />
+              </div>
             ) : (
               <div className="grid aspect-[4/3] w-full place-items-center rounded-2xl bg-black/5 text-sm text-black/50">
                 Нет фото
@@ -1002,14 +1002,14 @@ function ListingDetailsModal({
                     type="button"
                     onClick={() => setActiveIdx(idx)}
                     className={[
-                      "h-16 w-16 overflow-hidden rounded-2xl border bg-white",
+                      "flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border bg-black/[0.03]",
                       idx === safeIdx
                         ? "border-black/40"
                         : "border-black/10 hover:border-black/30",
                     ].join(" ")}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt="" className="h-full w-full object-cover" />
+                    <img src={src} alt="" className="max-h-full max-w-full object-contain" />
                   </button>
                 ))}
               </div>
@@ -1164,12 +1164,12 @@ function FullscreenImageViewer({
                 type="button"
                 onClick={() => setIdx(i)}
                 className={[
-                  "h-14 w-14 overflow-hidden rounded-2xl border",
+                  "flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border bg-white/10",
                   i === idx ? "border-white/70" : "border-white/15 hover:border-white/40",
                 ].join(" ")}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={t} alt="" className="h-full w-full object-cover" />
+                <img src={t} alt="" className="max-h-full max-w-full object-contain" />
               </button>
             ))}
           </div>

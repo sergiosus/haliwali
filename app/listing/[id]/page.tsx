@@ -457,17 +457,18 @@ function ListingDetail({
                 {images.length > 0 ? (
                   <div className="w-full rounded-2xl border border-black/10 bg-white p-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={main}
-                      alt=""
-                      className="h-[240px] w-full rounded-xl bg-black/[0.03] object-contain"
+                    <div
+                      className="flex h-[min(360px,50vh)] min-h-[240px] w-full items-center justify-center rounded-xl bg-black/[0.03]"
                       role="button"
                       tabIndex={0}
                       onClick={() => setViewerOpen(true)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") setViewerOpen(true);
                       }}
-                    />
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={main} alt="" className="max-h-full max-w-full object-contain" />
+                    </div>
                     {images.length > 1 ? (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {images.map((src, i) => {
@@ -478,7 +479,7 @@ function ListingDetail({
                               type="button"
                               onClick={() => setSelectedPhotoIndex(i)}
                               className={[
-                                "h-[72px] w-[72px] overflow-hidden rounded-[12px] border bg-white transition",
+                                "flex h-[72px] w-[72px] items-center justify-center overflow-hidden rounded-[12px] border bg-black/[0.03] transition",
                                 active
                                   ? "border-[color:#ff6a00] shadow-md opacity-100"
                                   : "border-black/10 opacity-65 hover:opacity-100 hover:border-black/30",
@@ -486,7 +487,7 @@ function ListingDetail({
                               aria-label={active ? "Выбрано" : "Выбрать фото"}
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={src} alt="" className="h-full w-full bg-black/[0.03] object-contain" />
+                              <img src={src} alt="" className="max-h-full max-w-full object-contain" />
                             </button>
                           );
                         })}
@@ -725,12 +726,12 @@ function FullscreenImageViewer({
                 type="button"
                 onClick={() => setIdx(i)}
                 className={[
-                  "h-14 w-14 overflow-hidden rounded-2xl border",
+                  "flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border bg-white/10",
                   i === idx ? "border-white/70" : "border-white/15 hover:border-white/40",
                 ].join(" ")}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={t} alt="" className="h-full w-full object-cover" />
+                <img src={t} alt="" className="max-h-full max-w-full object-contain" />
               </button>
             ))}
           </div>

@@ -104,8 +104,10 @@ export function fastReplyEligible(stats: ReplyStatRow | undefined): boolean {
 
 export async function readListingViews(): Promise<ListingViewsDb> {
   if (usesPostgres()) {
-    const { rows } = await getPool().query<{ listing_id: string; views_count: number }>(
-      `SELECT listing_id, views_count FROM listing_views`,
+    const { rows } = await getPool().query<{ listing_id: string; views_count: string }>(
+      `SELECT listing_id, COUNT(*)::text AS views_count
+       FROM listing_view_events
+       GROUP BY listing_id`,
     );
     const out: ListingViewsDb = {};
     for (const r of rows) {
@@ -123,13 +125,15 @@ export async function incrementListingView(listingId: string): Promise<number> {
   const id = (listingId ?? "").trim();
   if (!id) return 0;
   if (usesPostgres()) {
-    const { rows } = await getPool().query<{ views_count: number }>(
-      `INSERT INTO listing_views (listing_id, views_count, updated_at)
-       VALUES ($1, 1, now())
-       ON CONFLICT (listing_id) DO UPDATE SET
-         views_count = listing_views.views_count + 1,
-         updated_at = now()
-       RETURNING views_count`,
+    await getPool().query(
+      `INSERT INTO listing_view_events (listing_id, viewer_user_id, viewer_fingerprint)
+       VALUES ($1, NULL, $2)`,
+      [id, `dev:${id}:${Date.now()}`],
+    );
+    const { rows } = await getPool().query<{ views_count: string }>(
+      `SELECT COUNT(*)::text AS views_count
+       FROM listing_view_events
+       WHERE listing_id = $1`,
       [id],
     );
     const n = Number(rows[0]?.views_count);
@@ -185,20 +189,8 @@ export async function maybeIncrementListingView(listingId: string, viewerKey: st
 
 export async function getListingViewCounts(ids: string[]): Promise<Record<string, number>> {
   if (usesPostgres()) {
-    const clean = ids.map((x) => String(x ?? "").trim()).filter(Boolean);
-    if (clean.length === 0) return {};
-    const { rows } = await getPool().query<{ listing_id: string; views_count: number }>(
-      `SELECT listing_id, views_count FROM listing_views WHERE listing_id = ANY($1::text[])`,
-      [clean],
-    );
-    const out: Record<string, number> = {};
-    for (const id of clean) out[id] = 0;
-    for (const r of rows) {
-      const id = String(r.listing_id ?? "").trim();
-      if (!id) continue;
-      out[id] = Number(r.views_count) || 0;
-    }
-    return out;
+    const { countListingViewsByIds } = await import("./serverListingViews");
+    return countListingViewsByIds(ids);
   }
   const db = await readListingViews();
   const out: Record<string, number> = {};

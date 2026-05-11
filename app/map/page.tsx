@@ -270,10 +270,6 @@ export default function MapBrowsePage() {
     return visibleListings.find((l) => l.id === previewId) ?? null;
   }, [previewId, visibleListings]);
 
-  // Group listings that share the same (or near-same) coordinates so one marker shows a stacked popup with all items.
-  // Threshold: 0.0006° ≈ 65–70m in latitude; good compromise for nearby pins without collapsing whole neighborhoods.
-  const MAP_GROUP_DEG_THRESHOLD = 0.0006;
-
   const listingMarkers = useMemo(() => {
     const out: {
       id: string;
@@ -306,41 +302,6 @@ export default function MapBrowsePage() {
     }
     return out;
   }, [baseFiltered, selectedId]);
-
-  const listingMarkerGroups = useMemo(() => {
-    const groups: Array<{ key: string; members: typeof listingMarkers }> = [];
-    for (const m of listingMarkers) {
-      let found: { key: string; members: typeof listingMarkers } | null = null;
-      // Exact same lat/lng always groups (stable string key).
-      for (const g of groups) {
-        const rep = g.members[0];
-        if (!rep) continue;
-        const exact = rep.lat === m.lat && rep.lng === m.lng;
-        const near =
-          Math.abs(rep.lat - m.lat) <= MAP_GROUP_DEG_THRESHOLD &&
-          Math.abs(rep.lng - m.lng) <= MAP_GROUP_DEG_THRESHOLD;
-        if (exact || near) {
-          found = g;
-          break;
-        }
-      }
-      if (!found) {
-        const key = `${m.lat.toFixed(6)},${m.lng.toFixed(6)}`;
-        found = { key, members: [] };
-        groups.push(found);
-      }
-      found.members.push(m);
-    }
-    if (process.env.NODE_ENV === "development") {
-      const groupCount = groups.length;
-      const listingsCount = listingMarkers.length;
-      const hasMulti = groups.some((g) => g.members.length > 1);
-      if (hasMulti) {
-        console.log("[MAP_GROUPED_POPUP]", { groupCount, listingsCount });
-      }
-    }
-    return groups;
-  }, [listingMarkers]);
 
   useEffect(() => {
     if (!selectedId || !listRef.current) return;
@@ -630,7 +591,6 @@ export default function MapBrowsePage() {
             showGeolocationButton
             settlementMarkers={[]}
             listingMarkers={listingMarkers}
-            listingMarkerGroups={listingMarkerGroups}
             onListingMarkerClick={(id) => {
               setSelectedId(id);
               setPreviewId(id);

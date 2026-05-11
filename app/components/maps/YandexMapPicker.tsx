@@ -114,11 +114,6 @@ type Props = {
   viewportSearchOverlay?: boolean;
   showGeolocationButton?: boolean;
   listingMarkers?: readonly MapListingMarker[];
-  /**
-   * Optional pre-grouped listing markers (e.g. server-side or page-level grouping).
-   * When provided, the map renders exactly one placemark + one stacked popup per group.
-   */
-  listingMarkerGroups?: readonly { key: string; members: readonly MapListingMarker[] }[];
   onListingMarkerClick?: (id: string) => void;
   /**
    * When true: marker click invokes `onListingMarkerClick` but does not “pin” the preview via click
@@ -142,6 +137,8 @@ const VIEWPORT_STABLE_DEBOUNCE_MS = 420;
 const LISTING_POPUP_LEAVE_DELAY_MS = 1600;
 /** After pan/zoom gesture ends, ignore one map `click` close on touch-like UIs (avoids stray close). */
 const MAP_CLICK_CLOSE_GUARD_MS = 180;
+/** After listing placemark click, ignore map `click` close (desktop + touch; placemark often synthesizes map click). */
+const LISTING_PLACEMARK_MAP_CLICK_SUPPRESS_MS = 900;
 /** Embedded / slow networks: avoid indefinite blank map when Yandex never becomes interactive. */
 const YANDEX_MAP_LOAD_TIMEOUT_MS = 35_000;
 
@@ -172,10 +169,11 @@ function getPreferTapListingPopup(): boolean {
 /** Minimum movement (m, approx) before emitting duplicate center. */
 const CENTER_EMIT_MIN_MOVE_M = 35;
 /**
- * Listings within this distance share one map placemark + one stacked popup (avoids hover flipping
- * between overlapping dot icons).
+ * Listings within this distance (haversine, transitive union) share one placemark + one popup.
+ * 100m: between ~80–150m guidance; groups same-building / same-intersection pins without merging whole blocks.
+ * Identical coordinates → 0m → always one group.
  */
-const LISTING_MARKER_GROUP_RADIUS_M = 30;
+const LISTING_MARKER_GROUP_RADIUS_M = 100;
 
 function listingMarkerGroupKey(members: readonly MapListingMarker[]): string {
   return members
@@ -286,7 +284,6 @@ export function YandexMapPicker({
   viewportSearchOverlay = false,
   showGeolocationButton = true,
   listingMarkers = [],
-  listingMarkerGroups,
   onListingMarkerClick,
   onViewportStable,
   listingMarkerClickNavigatesOnly = false,
@@ -368,14 +365,10 @@ export function YandexMapPicker({
 
   const displayGroupKey = hoveredListingGroupKey ?? activeListingGroupKey;
 
-  const listingGroups = useMemo(() => {
-    if (listingMarkerGroups && listingMarkerGroups.length > 0) {
-      return listingMarkerGroups
-        .map((g) => (Array.isArray(g.members) ? g.members.slice() : []))
-        .filter((g) => g.length > 0) as MapListingMarker[][];
-    }
-    return groupListingMarkersByProximity(listingMarkers);
-  }, [listingMarkers, listingMarkerGroups]);
+  const listingGroups = useMemo(
+    () => groupListingMarkersByProximity(listingMarkers),
+    [listingMarkers],
+  );
 
   const displayListingGroup = useMemo(() => {
     if (!displayGroupKey) return null;
@@ -424,19 +417,19 @@ export function YandexMapPicker({
   const closePreviewImmediatelyRef = useRef<() => void>(() => {});
   closePreviewImmediatelyRef.current = closePreviewImmediately;
 
-  const updateActivePreviewPosition = useCallback(() => {
+  const updateActivePreviewPosition = useCallback((): boolean => {
     const inst = mapInstRef.current?.map as any;
     const holder = holderRef.current;
     const cur = activePreviewMarkerRef.current;
-    if (!inst?.converter?.globalToPage || !inst.options?.get || !holder || !cur) return;
+    if (!inst?.converter?.globalToPage || !inst.options?.get || !holder || !cur) return false;
     try {
       const projection = inst.options.get("projection") as { toGlobalPixels?: (geo: number[], z: number) => number[] } | null;
       const zoom = typeof inst.getZoom === "function" ? Number(inst.getZoom()) : NaN;
-      if (!projection?.toGlobalPixels || !Number.isFinite(zoom)) return;
+      if (!projection?.toGlobalPixels || !Number.isFinite(zoom)) return false;
       const globalPixels = projection.toGlobalPixels([cur.lat, cur.lng], zoom);
-      if (!globalPixels || globalPixels.length < 2) return;
+      if (!globalPixels || globalPixels.length < 2) return false;
       const pagePt = inst.converter.globalToPage(globalPixels) as number[] | undefined;
-      if (!pagePt || pagePt.length < 2) return;
+      if (!pagePt || pagePt.length < 2) return false;
       const rect = holder.getBoundingClientRect();
       let x = pagePt[0]! - rect.left;
       let y = pagePt[1]! - rect.top;
@@ -444,12 +437,13 @@ export function YandexMapPicker({
       x = Math.max(14, Math.min(rect.width - 14, x));
       y = Math.max(14, Math.min(rect.height - 14, y));
       setActiveListingPreviewPos({ x, y });
+      return true;
     } catch {
-      /* noop */
+      return false;
     }
   }, []);
 
-  /** Keep preview anchored to the active marker group's representative coordinates. */
+  /** Keep preview anchored to the active marker group's representative coordinates; retry projection after layout. */
   useLayoutEffect(() => {
     const group = displayListingGroup;
     if (!group?.length) return;
@@ -460,7 +454,26 @@ export function YandexMapPicker({
       lat: rep.lat,
       lng: rep.lng,
     };
-    if (mapReady) updateActivePreviewPosition();
+    if (!mapReady) return;
+
+    let cancelled = false;
+    const bump = () => {
+      if (cancelled) return;
+      void updateActivePreviewPosition();
+    };
+    bump();
+    const raf = window.requestAnimationFrame(bump);
+    const t0 = window.setTimeout(bump, 0);
+    const t48 = window.setTimeout(bump, 48);
+    const t160 = window.setTimeout(bump, 160);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(t0);
+      window.clearTimeout(t48);
+      window.clearTimeout(t160);
+    };
   }, [displayListingGroup, mapReady, updateActivePreviewPosition]);
 
   /** Step 7: clear close timer on unmount. */
@@ -873,10 +886,7 @@ export function YandexMapPicker({
     }
   }, [mapReady, settlementMarkersJson]);
 
-  const listingMarkersJson = useMemo(
-    () => JSON.stringify({ listingMarkers, listingMarkerGroups: listingMarkerGroups ?? null }),
-    [listingMarkers, listingMarkerGroups],
-  );
+  const listingMarkersJson = useMemo(() => JSON.stringify(listingMarkers), [listingMarkers]);
 
   useEffect(() => {
     if (!mapReady || !mapInstRef.current) return;
@@ -902,10 +912,16 @@ export function YandexMapPicker({
     }
     listingPlacemarksRef.current = [];
 
-    if (!ymaps?.Placemark || !map.geoObjects?.add || listingMarkers.length === 0) return;
+    if (!ymaps?.Placemark || !map.geoObjects?.add || listingMarkers.length === 0) {
+      if (activeListingGroupKeyRef.current) closePreviewImmediately();
+      return;
+    }
 
-    // If we changed markers, close any existing preview (prevents "stuck" popup).
-    closePreviewImmediately();
+    const activeKey = activeListingGroupKeyRef.current;
+    if (activeKey) {
+      const stillExists = listingGroups.some((g) => listingMarkerGroupKey(g) === activeKey);
+      if (!stillExists) closePreviewImmediately();
+    }
 
     const groups = listingGroups;
 
@@ -950,7 +966,7 @@ export function YandexMapPicker({
         } catch {
           /* noop */
         }
-        listingPlacemarkClickSuppressMapCloseUntilRef.current = Date.now() + 450;
+        listingPlacemarkClickSuppressMapCloseUntilRef.current = Date.now() + LISTING_PLACEMARK_MAP_CLICK_SUPPRESS_MS;
         if (listingMarkerClickNavigatesOnlyRef.current) {
           const first = group[0];
           if (first) onListingMarkerClickRef.current?.(first.id);
@@ -973,7 +989,13 @@ export function YandexMapPicker({
         /* noop */
       }
     }
-  }, [mapReady, listingMarkersJson, preferTapListingPopup]);
+
+    queueMicrotask(() => {
+      window.requestAnimationFrame(() => {
+        void updateActivePreviewPosition();
+      });
+    });
+  }, [mapReady, listingMarkersJson, preferTapListingPopup, listingGroups, updateActivePreviewPosition]);
 
   const userLocationKey = useMemo(
     () =>

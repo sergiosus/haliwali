@@ -130,12 +130,30 @@ export function SiteHeader() {
   useEffect(() => {
     if (!mounted || typeof window === "undefined") return;
     const mq = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const mqCoarse = window.matchMedia("(pointer: coarse)");
     function syncHoverMode() {
+      const touchLike =
+        (typeof navigator !== "undefined" && Number(navigator.maxTouchPoints) > 0) ||
+        (() => {
+          try {
+            return mqCoarse.matches;
+          } catch {
+            return false;
+          }
+        })();
+      if (touchLike) {
+        setMenuUseHover(false);
+        return;
+      }
       setMenuUseHover(mq.matches);
     }
     syncHoverMode();
     mq.addEventListener("change", syncHoverMode);
-    return () => mq.removeEventListener("change", syncHoverMode);
+    mqCoarse.addEventListener("change", syncHoverMode);
+    return () => {
+      mq.removeEventListener("change", syncHoverMode);
+      mqCoarse.removeEventListener("change", syncHoverMode);
+    };
   }, [mounted]);
 
   function clearHoverCloseTimer() {
@@ -449,8 +467,8 @@ export function SiteHeader() {
             ref={menuPanelRef}
             className={[
               "rounded-xl border border-black/10 bg-white p-2 shadow-lg transition-[opacity,transform] duration-150 ease-out",
-              /* Mobile: always interactive when open. Desktop hover: block hits only while faded in. */
-              menuOpen && (!menuUseHover || menuPanelEntered) ? "pointer-events-auto" : "pointer-events-none",
+              /* Open menu must stay hit-testable; opacity/transform only (no pointer-events gating on menuPanelEntered). */
+              "pointer-events-auto",
               menuPanelEntered ? "translate-y-0 opacity-100" : "-translate-y-[5px] opacity-0",
             ].join(" ")}
           >

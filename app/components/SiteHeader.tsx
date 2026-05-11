@@ -489,7 +489,7 @@ export function SiteHeader() {
       </button>
 
       {menuOpen ? (
-        <div className="absolute right-0 top-full z-[80] w-[220px] pt-2">
+        <div className="pointer-events-auto absolute right-0 top-full z-[80] w-[220px] pt-2">
           <div
             id={`${accountMenuId}-menu`}
             ref={menuPanelRef}
@@ -504,9 +504,7 @@ export function SiteHeader() {
               });
             }}
             className={[
-              "rounded-xl border border-black/10 bg-white p-2 shadow-lg transition-[opacity,transform] duration-150 ease-out",
-              /* Open menu must stay hit-testable; opacity/transform only (no pointer-events gating on menuPanelEntered). */
-              "pointer-events-auto",
+              "pointer-events-auto rounded-xl border border-black/10 bg-white p-2 shadow-lg ring-4 ring-red-500/40 transition-[opacity,transform] duration-150 ease-out",
               menuPanelEntered ? "translate-y-0 opacity-100" : "-translate-y-[5px] opacity-0",
             ].join(" ")}
           >

@@ -24,7 +24,9 @@ Copy `.env.production.example` to `.env.production` on the server and fill secre
 **Required for production**
 
 - **`DATABASE_URL`** — PostgreSQL connection string. The app expects this when `NODE_ENV=production`; session and listing APIs depend on it.
-- **`NEXT_PUBLIC_SITE_URL`** — Public site origin (no trailing slash), e.g. `https://haliwali.ru`. Drives metadata, `robots.txt` Sitemap line, and canonical URLs (`app/lib/siteUrl.ts`).
+- **`NEXT_PUBLIC_SITE_URL`** — Public site origin (no trailing slash), **`https://haliwali.ru`** (apex only, not `www`). Drives metadata, `robots.txt` Sitemap line, and canonical URLs (`app/lib/siteUrl.ts`). If set to `https://www.haliwali.ru`, the app still emits apex canonical URLs.
+
+**Canonical host:** serve the site at **`https://haliwali.ru`**. At the reverse proxy, redirect **`https://www.haliwali.ru`** → **`https://haliwali.ru`** (301) for all paths so browsers and crawlers never treat `www` as canonical.
 
 **Strongly recommended**
 

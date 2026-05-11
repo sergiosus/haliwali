@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { siteUrl } from "./siteUrl";
+import { normalizePublicSiteOrigin, siteUrl } from "./siteUrl";
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -17,11 +17,13 @@ function originFromConfiguredUrl(raw: string): string | null {
 /** Origins explicitly trusted for cookie/session-backed mutations (CSRF mitigation via `Origin`). */
 export function allowedMutationOrigins(): Set<string> {
   const s = new Set<string>();
-  for (const o of [
-    originFromConfiguredUrl(process.env.NEXT_PUBLIC_SITE_URL ?? ""),
-    originFromConfiguredUrl(process.env.SITE_URL ?? ""),
-    originFromConfiguredUrl(siteUrl()),
+  for (const raw of [
+    process.env.NEXT_PUBLIC_SITE_URL ?? "",
+    process.env.SITE_URL ?? "",
+    siteUrl(),
   ]) {
+    const configured = normalizePublicSiteOrigin(raw) ?? raw.trim();
+    const o = originFromConfiguredUrl(configured);
     if (o) s.add(o);
   }
   return s;

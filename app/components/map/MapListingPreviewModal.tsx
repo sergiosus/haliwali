@@ -160,7 +160,7 @@ export function MapListingPreviewModal({
   const chatReturn = mapReturnPath;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center px-0 pb-[env(safe-area-inset-bottom)] pt-[max(0.5rem,env(safe-area-inset-top))] sm:items-center sm:p-4 sm:pb-4 sm:pt-4">
+    <div className="fixed inset-0 z-[80] flex items-end justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:items-center sm:px-4 sm:py-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/45"
@@ -172,9 +172,9 @@ export function MapListingPreviewModal({
         role="dialog"
         aria-modal
         aria-labelledby="map-listing-preview-title"
-        className="relative z-10 flex max-h-[min(92dvh,880px)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-black/10 bg-white shadow-2xl sm:max-h-[min(92vh,880px)] sm:rounded-2xl"
+        className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-[min(100%,32rem)] flex-col overflow-hidden rounded-t-2xl border border-black/10 bg-white shadow-2xl sm:max-h-[calc(100dvh-32px)] sm:rounded-2xl"
       >
-        <div className="flex items-center justify-between gap-2 border-b border-black/10 px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/10 px-4 py-3">
           <div className="min-w-0 text-sm font-semibold text-black/50">Объявление</div>
           <div className="flex shrink-0 items-center gap-2">
             <ListingFavoriteButton listingId={listing.id} />
@@ -188,14 +188,14 @@ export function MapListingPreviewModal({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))] pt-4 sm:pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))] pt-4 sm:pb-4">
           {images.length > 0 ?
             <div className="mb-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={images[Math.min(photoIdx, images.length - 1)]}
                 alt=""
-                className="h-auto max-h-64 w-full rounded-xl object-cover"
+                className="mx-auto h-auto max-h-[min(280px,36dvh)] w-full rounded-xl bg-black/[0.03] object-contain sm:max-h-[min(360px,38dvh)]"
               />
               {images.length > 1 ?
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -216,7 +216,7 @@ export function MapListingPreviewModal({
                 </div>
               : null}
             </div>
-          : <div className="mb-4 grid h-40 place-items-center rounded-xl border border-dashed border-black/15 bg-black/[0.03] text-sm text-black/45">
+          : <div className="mb-4 grid h-32 place-items-center rounded-xl border border-dashed border-black/15 bg-black/[0.03] text-sm text-black/45 sm:h-36">
               Нет фото
             </div>
           }

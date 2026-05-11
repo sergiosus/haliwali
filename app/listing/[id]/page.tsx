@@ -417,7 +417,7 @@ function ListingDetail({
                     <img
                       src={main}
                       alt=""
-                      className="h-[240px] w-full rounded-xl object-cover"
+                      className="h-[240px] w-full rounded-xl bg-black/[0.03] object-contain"
                       role="button"
                       tabIndex={0}
                       onClick={() => setViewerOpen(true)}
@@ -443,7 +443,7 @@ function ListingDetail({
                               aria-label={active ? "Выбрано" : "Выбрать фото"}
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={src} alt="" className="h-full w-full object-cover" />
+                              <img src={src} alt="" className="h-full w-full bg-black/[0.03] object-contain" />
                             </button>
                           );
                         })}

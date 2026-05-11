@@ -13,6 +13,9 @@ import {
   useState,
 } from "react";
 import { BackNavButton } from "../components/BackNavButton";
+import { ListingAuthorLine } from "../components/ListingAuthorLine";
+import { ListingStatsModal } from "../components/ListingStatsModal";
+import { ListingTypeBadge } from "../components/ListingTypeBadge";
 import { PasswordChangeModal } from "../components/PasswordChangeModal";
 import type { Listing, ListingStatus } from "../lib/listings";
 import { isListingPubliclyListed, isPublicStatus, normalizeListingLifecycle, useListingsStore } from "../lib/listings";
@@ -136,12 +139,18 @@ function formatDate(ts: number) {
 /** Одна строка меты под бейджами: дата · автор · просмотры [· цена]. */
 function ListingCardInlineMetaRow({
   createdAt,
-  authorLabel,
+  ownerId,
+  currentUserId,
+  publicApi,
+  listing,
   views,
   priceRub,
 }: {
   createdAt: number;
-  authorLabel: string;
+  ownerId?: string | null;
+  currentUserId?: string | null;
+  publicApi?: { identityLabel?: string; name?: string; displayName?: string } | null;
+  listing?: Listing;
   views: number;
   priceRub?: number;
 }) {
@@ -152,9 +161,19 @@ function ListingCardInlineMetaRow({
         {" "}
         ·{" "}
       </span>
-      <span>
-        Автор: <span className="font-medium text-black/78">{authorLabel}</span>
-      </span>
+      <ListingAuthorLine
+        ownerId={ownerId}
+        currentUserId={currentUserId}
+        publicApi={publicApi}
+        storedAuthorName={listing ? optionalListingAuthorNameField(listing) : undefined}
+        debugListingMeta={
+          listing ?
+            { id: listing.id, ownerId: listing.ownerId, authorPublicName: listing.authorPublicName }
+          : null
+        }
+        nameClassName="font-medium text-black/78"
+        linkClassName="font-medium text-orange-600 hover:text-orange-700 hover:underline"
+      />
       <span aria-hidden className="text-black/35">
         {" "}
         ·{" "}
@@ -282,6 +301,7 @@ function AccountPageInner() {
   const [peerPublicLabels, setPeerPublicLabels] = useState<Record<string, string>>({});
   const peerPublicFetchDoneRef = useRef<Set<string>>(new Set());
   const [viewCounts, setViewCounts] = useState<Record<string, number>>({});
+  const [statsModalListing, setStatsModalListing] = useState<{ id: string; title: string } | null>(null);
 
   const refreshMe = useCallback(async (opts?: { bypassCache?: boolean }) => {
     try {
@@ -1090,7 +1110,6 @@ function AccountPageInner() {
                         : "";
                       const favHref = appendReturnUrlQuery(listingPath(l.id, l.title), "/account?tab=favorites");
                       const pub = isPublicStatus(l.status);
-                      const authorMetaLabel = accountListingCardAuthorDisplay(l.ownerId, peerPublicLabels, l);
                       const favViews = viewCounts[l.id] ?? 0;
                       return (
                         <div key={l.id} className={favoritesCardClass}>
@@ -1111,6 +1130,7 @@ function AccountPageInner() {
                           <div className={favoritesBottomSectionClass}>
                             <div className="flex flex-col gap-2 text-[11px]">
                               <div className="flex flex-wrap gap-1.5">
+                                <ListingTypeBadge type={l.type} />
                                 <span
                                   className={[
                                     "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none",
@@ -1131,7 +1151,14 @@ function AccountPageInner() {
                               </div>
                               <ListingCardInlineMetaRow
                                 createdAt={l.createdAt}
-                                authorLabel={authorMetaLabel}
+                                ownerId={l.ownerId}
+                                currentUserId={viewerId}
+                                publicApi={
+                                  ownerId && peerPublicLabels[ownerId] ?
+                                    { identityLabel: peerPublicLabels[ownerId] }
+                                  : null
+                                }
+                                listing={l}
                                 views={favViews}
                                 priceRub={"price" in l ? l.price : undefined}
                               />
@@ -1226,7 +1253,9 @@ function AccountPageInner() {
                                   listing={l}
                                   listingReturnHref="/account"
                                   views={viewCounts[l.id] ?? 0}
+                                  currentUserId={(auth.userId ?? "").trim()}
                                   ownerAuthorByApi={peerPublicLabels}
+                                  onOpenStats={() => setStatsModalListing({ id: l.id, title: l.title })}
                                   onDealStatus={(next) => {
                                     void updateListing(l.id, (prev) => ({ ...prev, dealStatus: next } as Listing)).catch(() => {});
                                   }}
@@ -1260,6 +1289,13 @@ function AccountPageInner() {
           onOpenChange={setPasswordModalOpen}
         />
       ) : null}
+
+      <ListingStatsModal
+        open={Boolean(statsModalListing)}
+        listingId={statsModalListing?.id ?? ""}
+        listingTitle={statsModalListing?.title}
+        onClose={() => setStatsModalListing(null)}
+      />
 
       {accountDeletePhase ? (
         <div
@@ -1642,14 +1678,18 @@ function MyListingCard({
   listing,
   listingReturnHref,
   views,
+  currentUserId,
   ownerAuthorByApi,
+  onOpenStats,
   onDealStatus,
   onDelete,
 }: {
   listing: Listing;
   listingReturnHref: string;
   views: number;
+  currentUserId: string;
   ownerAuthorByApi: Readonly<Record<string, string>>;
+  onOpenStats: () => void;
   onDealStatus: (v: "active" | "in_progress" | "completed") => void;
   onDelete: () => void;
 }) {
@@ -1662,7 +1702,7 @@ function MyListingCard({
       ? (dealStatusValue as "in_progress" | "completed")
       : ("active" as const);
   const dealLabel = ds === "in_progress" ? "В процессе" : ds === "completed" ? "Завершено" : "Активно";
-  const authorMetaLabel = accountListingCardAuthorDisplay(listing.ownerId, ownerAuthorByApi, listing);
+  const ownerId = (listing.ownerId ?? "").trim();
   return (
     <div className={[compactCardClass, ds === "completed" ? "opacity-[0.72]" : ""].join(" ")}>
       <div className="shrink-0 space-y-0.5">
@@ -1682,6 +1722,7 @@ function MyListingCard({
       <div className={listingCardBottomSectionClass}>
         <div className="flex flex-col gap-2 text-[11px]">
           <div className="flex flex-wrap gap-1.5">
+            <ListingTypeBadge type={listing.type} />
             <span
               className={[
                 "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none",
@@ -1700,7 +1741,10 @@ function MyListingCard({
           </div>
           <ListingCardInlineMetaRow
             createdAt={listing.createdAt}
-            authorLabel={authorMetaLabel}
+            ownerId={ownerId}
+            currentUserId={currentUserId}
+            publicApi={ownerId && ownerAuthorByApi[ownerId] ? { identityLabel: ownerAuthorByApi[ownerId] } : null}
+            listing={listing}
             views={views}
             priceRub={"price" in listing ? listing.price : undefined}
           />
@@ -1729,6 +1773,9 @@ function MyListingCard({
             Открыть
           </Link>
         ) : null}
+        <button type="button" onClick={onOpenStats} className={compactActionsRowBtnSecondary}>
+          Статистика
+        </button>
         {listing.editToken ? (
           <Link href={`/edit/${listing.editToken}`} className={compactActionsRowBtnPrimary}>
             Редактировать

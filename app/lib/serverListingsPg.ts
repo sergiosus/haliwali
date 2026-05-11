@@ -306,6 +306,24 @@ export async function pgCountListingsByOwner(ownerId: string): Promise<number> {
   return typeof n === "number" ? n : 0;
 }
 
+export async function pgListPublicListingsByOwner(ownerId: string): Promise<Listing[]> {
+  const oid = ownerId.trim();
+  if (!oid) return [];
+  const { rows } = await getPool().query(
+    `SELECT * FROM listings
+     WHERE owner_id = $1
+       AND status IN ('auto','approved')
+       AND COALESCE(NULLIF(TRIM(deal_status), ''), 'active') = 'active'
+       AND COALESCE(NULLIF(TRIM(listing_lifecycle), ''), 'live') = 'live'
+     ORDER BY updated_at DESC`,
+    [oid],
+  );
+  return rows
+    .map((r) => listingFromPersistentRow(r as unknown as Record<string, unknown>))
+    .filter((x): x is Listing => Boolean(x))
+    .filter((l) => isListingPubliclyListed(l));
+}
+
 export async function pgAdPreviewById(id: string): Promise<Record<string, unknown> | null> {
   const listing = await pgGetById(id);
   if (!listing) return null;

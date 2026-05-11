@@ -147,6 +147,13 @@ export async function countSellerActiveListings(ownerId: string): Promise<number
   return usesPostgres() ? pg.pgCountSellerActiveListings(ownerId) : json.jsonCountSellerActiveListings(ownerId);
 }
 
+export async function listPublicListingsByOwner(ownerId: string): Promise<Listing[]> {
+  const rows = usesPostgres()
+    ? await pg.pgListPublicListingsByOwner(ownerId)
+    : await json.jsonListPublicListingsByOwner(ownerId);
+  return rows.map((l) => listingForPublicViewer(l));
+}
+
 export async function countListingsByOwner(ownerId: string): Promise<number> {
   return usesPostgres() ? pg.pgCountListingsByOwner(ownerId) : json.jsonCountListingsByOwner(ownerId);
 }

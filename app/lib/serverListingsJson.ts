@@ -193,6 +193,23 @@ export async function jsonCountSellerActiveListings(ownerId: string): Promise<nu
   return n;
 }
 
+export async function jsonListPublicListingsByOwner(ownerId: string): Promise<Listing[]> {
+  const oid = ownerId.trim();
+  if (!oid) return [];
+  const { byId } = await readFileShape();
+  const out: Listing[] = [];
+  for (const row of Object.values(byId)) {
+    const l = listingFromPersistentRow(row);
+    if (!l) continue;
+    if ((l.ownerId ?? "").trim() !== oid) continue;
+    if (!isListingPubliclyListed(l)) continue;
+    if (!isActiveDeal((l.dealStatus ?? "active").trim())) continue;
+    out.push(l);
+  }
+  out.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+  return out;
+}
+
 export async function jsonCountListingsByOwner(ownerId: string): Promise<number> {
   const oid = ownerId.trim();
   if (!oid) return 0;

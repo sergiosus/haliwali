@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AuthRequiredModal } from "../AuthRequiredModal";
+import { ListingAuthorLine } from "../ListingAuthorLine";
 import { ListingFavoriteButton } from "../ListingFavoriteButton";
+import { ListingTypeBadge } from "../ListingTypeBadge";
 import { normalizeListingId } from "../../lib/listingId";
-import { formatListingCardAuthor } from "../../lib/listingCardAuthorDisplay";
 import {
   extractListingPhotos,
   listingCardLocationLine,
@@ -16,7 +17,7 @@ import {
 import type { Listing } from "../../lib/listings";
 import { appendReturnUrlQuery } from "../../lib/returnNavigation";
 import { listingPath } from "../../lib/seo";
-import { isLoggedIn as isLoggedInAuth } from "../../lib/auth";
+import { isLoggedIn as isLoggedInAuth, useAuth } from "../../lib/auth";
 import type { PublicAuthorHint } from "../../lib/useCompactListingEnrichment";
 
 function typeSectionRu(t: Listing["type"]) {
@@ -76,6 +77,8 @@ export function MapListingPreviewModal({
   mapReturnPath: string;
 }) {
   const router = useRouter();
+  const auth = useAuth();
+  const currentUserId = auth.status === "ready" ? (auth.userId ?? "").trim() : "";
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [sellerPublic, setSellerPublic] = useState<SellerPublic | null>(null);
 
@@ -131,25 +134,6 @@ export function MapListingPreviewModal({
   const storedSnap =
     storedAuthorPublic ||
     (typeof legacyAuthor === "string" && legacyAuthor.trim() ? legacyAuthor.trim() : undefined);
-
-  const authorDisplayName = formatListingCardAuthor({
-    ownerId,
-    publicApi: stripEmailFromPublicApi(
-      sellerPublic
-        ? {
-            identityLabel: (sellerPublic.identityLabel ?? "").trim() || undefined,
-            name: (sellerPublic.name ?? "").trim() || undefined,
-            displayName: (sellerPublic.displayName ?? "").trim() || undefined,
-          }
-        : stripEmailFromPublicApi(publicAuthor ?? null),
-    ),
-    storedAuthorName: storedSnap,
-    debugListingMeta: {
-      id: listing.id,
-      ownerId: listing.ownerId,
-      authorPublicName: listing.authorPublicName,
-    },
-  });
 
   const title = (listing.title ?? "").trim() || "Объявление";
   const fullHref = appendReturnUrlQuery(listingPath(listing.id, listing.title), mapReturnPath);
@@ -224,7 +208,8 @@ export function MapListingPreviewModal({
           <h2 id="map-listing-preview-title" className="text-lg font-semibold leading-snug text-black">
             {title}
           </h2>
-          <div className="mt-2 text-sm text-black/65">
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-black/65">
+            <ListingTypeBadge type={listing.type} />
             <span>{typeSectionRu(listing.type)}</span>
             {cat ?
               <>
@@ -245,9 +230,29 @@ export function MapListingPreviewModal({
           </div>
           <div className="mt-1 text-xs text-black/45">{listingDealStatusBadgeRu(listing)}</div>
 
-          {authorDisplayName.trim() ?
+          {ownerId ?
             <div className="mt-3 text-sm text-black/70">
-              Автор: <span className="font-semibold text-black">{authorDisplayName}</span>
+              <ListingAuthorLine
+                ownerId={ownerId}
+                currentUserId={currentUserId}
+                publicApi={stripEmailFromPublicApi(
+                  sellerPublic ?
+                    {
+                      identityLabel: (sellerPublic.identityLabel ?? "").trim() || undefined,
+                      name: (sellerPublic.name ?? "").trim() || undefined,
+                      displayName: (sellerPublic.displayName ?? "").trim() || undefined,
+                    }
+                  : stripEmailFromPublicApi(publicAuthor ?? null),
+                )}
+                storedAuthorName={storedSnap}
+                debugListingMeta={{
+                  id: listing.id,
+                  ownerId: listing.ownerId,
+                  authorPublicName: listing.authorPublicName,
+                }}
+                nameClassName="font-semibold text-black"
+                linkClassName="font-semibold text-orange-600 hover:text-orange-700 hover:underline"
+              />
             </div>
           : null}
 

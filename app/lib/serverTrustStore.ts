@@ -10,7 +10,7 @@ const LISTING_VIEWS_PATH = ".data/listing-views.json";
 const VIEW_DEDUP_PATH = ".data/listing-view-dedup.json";
 const REPORTS_PATH = ".data/reports.jsonl";
 
-const VIEW_DEDUP_MS = 30 * 60 * 1000;
+const VIEW_DEDUP_MS = 24 * 60 * 60 * 1000;
 
 export type ReplyStatRow = { count: number; sumMs: number };
 
@@ -144,8 +144,11 @@ export async function incrementListingView(listingId: string): Promise<number> {
 
 type ViewDedupDb = Record<string, Record<string, number>>;
 
-/** Increment view count at most once per viewer session per listing per dedup window. */
-export async function maybeIncrementListingView(listingId: string, viewerKey: string): Promise<{ count: number; incremented: boolean }> {
+/** Dev-only JSON dedup path (production uses `recordListingView` in serverListingViews). */
+export async function maybeIncrementListingViewDev(
+  listingId: string,
+  viewerKey: string,
+): Promise<{ count: number; incremented: boolean }> {
   const id = (listingId ?? "").trim();
   const vk = (viewerKey ?? "").trim();
   if (!id) return { count: 0, incremented: false };
@@ -153,52 +156,6 @@ export async function maybeIncrementListingView(listingId: string, viewerKey: st
   if (!vk) {
     const next = await incrementListingView(id);
     return { count: next, incremented: true };
-  }
-
-  if (usesPostgres()) {
-    const now = Date.now();
-    const dedupKey = `${vk}\0${id}`;
-    const pool = getPool();
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(`DELETE FROM listing_view_dedup WHERE expires_at IS NOT NULL AND expires_at < now()`);
-      const expiresAt = now + VIEW_DEDUP_MS;
-      const ins = await client.query<{ dedup_key: string }>(
-        `INSERT INTO listing_view_dedup (dedup_key, listing_id, viewer_key, created_at, expires_at)
-         VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), to_timestamp($5 / 1000.0))
-         ON CONFLICT (dedup_key) DO NOTHING
-         RETURNING dedup_key`,
-        [dedupKey, id, vk, now, expiresAt],
-      );
-      const incremented = ins.rows.length > 0;
-      let count = 0;
-      if (incremented) {
-        const r = await client.query<{ views_count: number }>(
-          `INSERT INTO listing_views (listing_id, views_count, updated_at)
-           VALUES ($1, 1, now())
-           ON CONFLICT (listing_id) DO UPDATE SET
-             views_count = listing_views.views_count + 1,
-             updated_at = now()
-           RETURNING views_count`,
-          [id],
-        );
-        count = Number(r.rows[0]?.views_count) || 0;
-      } else {
-        const r = await client.query<{ views_count: number }>(
-          `SELECT views_count FROM listing_views WHERE listing_id = $1 LIMIT 1`,
-          [id],
-        );
-        count = Number(r.rows[0]?.views_count) || 0;
-      }
-      await client.query("COMMIT");
-      return { count, incremented };
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release();
-    }
   }
 
   const counts = await readListingViews();
@@ -213,6 +170,17 @@ export async function maybeIncrementListingView(listingId: string, viewerKey: st
   await writeJson(VIEW_DEDUP_PATH, dedup);
   const next = await incrementListingView(id);
   return { count: next, incremented: true };
+}
+
+/** Increment view count at most once per viewer per listing per dedup window. */
+export async function maybeIncrementListingView(listingId: string, viewerKey: string): Promise<{ count: number; incremented: boolean }> {
+  const { recordListingView } = await import("./serverListingViews");
+  const result = await recordListingView({
+    listingId,
+    viewerUserId: null,
+    anonymousViewerId: viewerKey,
+  });
+  return { count: result.count, incremented: result.incremented };
 }
 
 export async function getListingViewCounts(ids: string[]): Promise<Record<string, number>> {

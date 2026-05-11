@@ -1,0 +1,98 @@
+import { cookies } from "next/headers";
+import { randomBytes } from "node:crypto";
+import { adminPrivilegesActive } from "./serverAdminSession";
+import { checkIpRateLimit, extractIp } from "./serverAbuse";
+import { getListingById } from "./serverListingsStore";
+import {
+  hashListingViewIp,
+  hashListingViewUserAgent,
+  recordListingView,
+  type ListingViewLocationHint,
+} from "./serverListingViews";
+import { getUserIdFromSessionCookie } from "./serverSession";
+
+const VIEWER_COOKIE = "haliwali_vsid";
+const COOKIE_MAX = 60 * 60 * 24 * 400;
+const VIEW_IP_WINDOW_MS = 10 * 60 * 1000;
+const VIEW_IP_MAX = 120;
+
+function viewerCookieOpts(maxAge: number) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge,
+    secure: process.env.NODE_ENV === "production",
+  };
+}
+
+function parseLocationHint(raw: unknown): ListingViewLocationHint {
+  if (!raw || typeof raw !== "object") return {};
+  const o = raw as Record<string, unknown>;
+  const city = typeof o.city === "string" ? o.city.trim().slice(0, 120) : "";
+  const region = typeof o.region === "string" ? o.region.trim().slice(0, 120) : "";
+  const country = typeof o.country === "string" ? o.country.trim().slice(0, 80) : "";
+  return {
+    ...(city ? { city } : {}),
+    ...(region ? { region } : {}),
+    ...(country ? { country } : {}),
+  };
+}
+
+export async function handleRecordListingViewRequest(
+  req: Request,
+  listingIdRaw: string,
+  opts?: { location?: ListingViewLocationHint },
+) {
+  const listingId = listingIdRaw.trim();
+  if (!listingId) return { status: 400 as const, body: { error: "BAD_REQUEST" } };
+
+  const ip = extractIp(req);
+  const rl = await checkIpRateLimit({
+    path: "listing_view",
+    ip,
+    limit: VIEW_IP_MAX,
+    windowMs: VIEW_IP_WINDOW_MS,
+  });
+  if (!rl.ok) return { status: 429 as const, body: { error: "RATE_LIMIT" } };
+
+  const listing = await getListingById(listingId);
+  if (!listing) return { status: 404 as const, body: { error: "NOT_FOUND" } };
+
+  const ownerUserId = (listing.ownerId ?? "").trim();
+  const sessionUserId = ((await getUserIdFromSessionCookie()) ?? "").trim();
+  const admin = await adminPrivilegesActive();
+  const skipCount = Boolean(admin || (sessionUserId && ownerUserId && sessionUserId === ownerUserId));
+
+  const jar = await cookies();
+  let anonymousViewerId = jar.get(VIEWER_COOKIE)?.value?.trim() ?? "";
+  if (!anonymousViewerId) anonymousViewerId = randomBytes(18).toString("hex");
+
+  const location = opts?.location ?? {};
+
+  const userAgent = (req.headers.get("user-agent") ?? "").trim();
+  const result = await recordListingView({
+    listingId,
+    viewerUserId: sessionUserId || null,
+    anonymousViewerId: sessionUserId ? null : anonymousViewerId,
+    ownerUserId: ownerUserId || null,
+    location,
+    ipHash: hashListingViewIp(ip),
+    userAgentHash: userAgent ? hashListingViewUserAgent(userAgent) : null,
+    skipCount,
+  });
+
+  return {
+    status: 200 as const,
+    body: { ok: true, count: result.count, incremented: result.incremented, skipped: result.skipped },
+    setViewerCookie: sessionUserId ? null : anonymousViewerId,
+  };
+}
+
+export function applyListingViewViewerCookie(
+  res: { cookies: { set: (name: string, value: string, opts: ReturnType<typeof viewerCookieOpts>) => void } },
+  viewerId: string | null,
+) {
+  if (!viewerId) return;
+  res.cookies.set(VIEWER_COOKIE, viewerId, viewerCookieOpts(COOKIE_MAX));
+}

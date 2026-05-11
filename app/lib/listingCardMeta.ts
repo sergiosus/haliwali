@@ -64,6 +64,14 @@ export function listingDealStatusBadgeRu(listing: Listing): string {
   return "Активно";
 }
 
+/** Короткая подпись типа объявления для бейджа на карточке. */
+export function listingTypeBadgeRu(type: Listing["type"] | string | undefined): string {
+  if (type === "task") return "Задача";
+  if (type === "service") return "Услуга";
+  if (type === "product_sell" || type === "product_buy") return "Товар";
+  return "Объявление";
+}
+
 export function formatListingCardDate(ts: number): string {
   const d = new Date(ts);
   return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });

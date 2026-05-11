@@ -8,7 +8,9 @@ import { isPublicStatus, useListingsStore } from "../../lib/listings";
 import { normalizeListingId } from "../../lib/listingId";
 import { truncateMetaDescription } from "../../lib/seo";
 import { isLoggedIn as isLoggedInAuth, useAuth } from "../../lib/auth";
+import { ListingAuthorLine } from "../../components/ListingAuthorLine";
 import { ListingFavoriteButton } from "../../components/ListingFavoriteButton";
+import { ListingTypeBadge } from "../../components/ListingTypeBadge";
 import { ReturnLink } from "../../components/ReturnLink";
 import { isUserVerified } from "../../lib/users";
 import { AuthRequiredModal } from "../../components/AuthRequiredModal";
@@ -21,7 +23,9 @@ import { fastReplyEligibleFromLocalChats } from "../../lib/chatFastReply";
 import { appendReturnUrlQuery, pathnameWithSearchSansReturn } from "../../lib/returnNavigation";
 import { formatListingCardAuthor } from "../../lib/listingCardAuthorDisplay";
 import { extractListingPhotos, formatViewCountRu } from "../../lib/listingCardMeta";
+import { recordListingViewOnce } from "../../lib/listingViewClient";
 import { listingPath } from "../../lib/seo";
+import { ListingStatsModal } from "../../components/ListingStatsModal";
 
 export default function ListingPage() {
   const params = useParams<{ id: string }>();
@@ -140,11 +144,14 @@ function ListingDetail({
   const [serverDealStatus, setServerDealStatus] = useState<string | null>(null);
   const [sellerPublic, setSellerPublic] = useState<SellerPublic | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const ownerId = listing.ownerId?.trim() ?? "";
+  const auth = useAuth();
+  const viewerId = auth.status === "ready" ? (auth.userId ?? "").trim() : "";
+  const viewerIsOwner = Boolean(viewerId && ownerId && viewerId === ownerId);
   // Phone system removed: communication is chat + audio call inside the service.
   const isUrgent = `${listing.title} ${listing.description}`.toLowerCase().includes("срочно");
   const nextPath = typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "/";
-
-  const ownerId = listing.ownerId?.trim() ?? "";
   const dealStatus = (serverDealStatus ?? listing.dealStatus ?? "active") as "active" | "in_progress" | "completed";
   const storedAuthorPublic =
     typeof (listing as unknown as { authorPublicName?: string }).authorPublicName === "string"
@@ -188,21 +195,25 @@ function ListingDetail({
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/listings/view", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ listingId: listing.id }),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (cancelled || !d || typeof (d as { count?: unknown }).count !== "number") return;
-        setViewCount((d as { count: number }).count);
-      })
-      .catch(() => {});
+    if (viewerIsOwner) {
+      void fetch(`/api/listings/views?ids=${encodeURIComponent(listing.id)}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled || !d || typeof d !== "object") return;
+          const counts = (d as { counts?: Record<string, number> }).counts;
+          const n = counts?.[listing.id];
+          if (typeof n === "number") setViewCount(n);
+        })
+        .catch(() => {});
+    } else {
+      void recordListingViewOnce(listing.id).then((count) => {
+        if (!cancelled && typeof count === "number") setViewCount(count);
+      });
+    }
     return () => {
       cancelled = true;
     };
-  }, [listing.id]);
+  }, [listing.id, viewerIsOwner]);
 
   useEffect(() => {
     let cancelled = false;
@@ -321,6 +332,7 @@ function ListingDetail({
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-semibold uppercase tracking-wide text-black/40">Объявление</div>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <ListingTypeBadge type={listing.type} className="px-2 py-0.5 text-xs" />
                   <span className="inline-flex items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium text-black/70">
                     {dealStatusLabel(dealStatus)}
                   </span>
@@ -368,10 +380,28 @@ function ListingDetail({
                         <span className="mx-1.5 text-gray-400" aria-hidden>
                           •
                         </span>
-                        {authorDisplayName.trim() ? (
-                          <>
-                            Автор: <span className="font-semibold text-neutral-900">{authorDisplayName}</span>
-                          </>
+                        {ownerId ? (
+                          <ListingAuthorLine
+                            ownerId={ownerId}
+                            currentUserId={viewerId}
+                            publicApi={
+                              sellerPublic ?
+                                {
+                                  identityLabel: sellerPublic.identityLabel,
+                                  name: sellerPublic.name,
+                                  displayName: sellerPublic.displayName,
+                                }
+                              : null
+                            }
+                            storedAuthorName={storedAuthorPublic || undefined}
+                            debugListingMeta={{
+                              id: listing.id,
+                              ownerId: listing.ownerId,
+                              authorPublicName: storedAuthorPublic,
+                            }}
+                            nameClassName="font-semibold text-neutral-900"
+                            linkClassName="font-semibold text-orange-600 hover:text-orange-700 hover:underline"
+                          />
                         ) : (
                           formatLastSeenRu(sellerPublic?.lastSeenAt ?? null)
                         )}
@@ -481,6 +511,15 @@ function ListingDetail({
               <div className="min-w-0 flex-1 text-right text-sm leading-tight text-black/50">
                 <div className="break-all">ID: {listing.id}</div>
                 <div>{formatViewCountRu(viewCount ?? 0)}</div>
+                {viewerIsOwner ? (
+                  <button
+                    type="button"
+                    onClick={() => setStatsOpen(true)}
+                    className="mt-1 text-sm font-medium text-orange-600 hover:text-orange-700"
+                  >
+                    Статистика
+                  </button>
+                ) : null}
                 <div>{formatListedDayRu(listing.createdAt)}</div>
                 {listing.updatedAt ? <div>Обновлено: {formatListedDayRu(listing.updatedAt)}</div> : null}
               </div>
@@ -507,6 +546,12 @@ function ListingDetail({
         onClose={() => setReportOpen(false)}
         targetType="listing"
         targetId={listing.id}
+      />
+      <ListingStatsModal
+        open={statsOpen}
+        listingId={listing.id}
+        listingTitle={listing.title}
+        onClose={() => setStatsOpen(false)}
       />
     </div>
   );

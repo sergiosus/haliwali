@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useAuth } from "../lib/auth";
 import type { Listing } from "../lib/listings";
-import { formatListingCardAuthor } from "../lib/listingCardAuthorDisplay";
 import {
   extractListingPhotos,
   formatListingCardDate,
@@ -11,7 +11,9 @@ import {
   listingDealStatusBadgeRu,
   listingPriceSnippet,
 } from "../lib/listingCardMeta";
+import { ListingAuthorLine } from "./ListingAuthorLine";
 import { ListingFavoriteButton } from "./ListingFavoriteButton";
+import { ListingTypeBadge } from "./ListingTypeBadge";
 
 export function CompactListingCard({
   listing,
@@ -35,6 +37,8 @@ export function CompactListingCard({
   /** `plain` — no in-card links; parent handles navigation (e.g. map modal). */
   variant?: "link" | "plain";
 }) {
+  const auth = useAuth();
+  const currentUserId = auth.status === "ready" ? (auth.userId ?? "").trim() : "";
   const photos = extractListingPhotos(listing);
   const first = photos[0];
   const pub = listing;
@@ -55,17 +59,6 @@ export function CompactListingCard({
       : typeof legacyAuthor === "string" && legacyAuthor.trim()
         ? legacyAuthor.trim()
         : undefined;
-  const author = formatListingCardAuthor({
-    ownerId: listing.ownerId,
-    publicApi: publicAuthor ?? null,
-    storedAuthorName: storedAuthor,
-    debugListingMeta: {
-      id: listing.id,
-      ownerId: listing.ownerId,
-      authorPublicName: listing.authorPublicName,
-    },
-  });
-
   const midMetaParts = [locationLine];
   if (category) midMetaParts.push(category);
   const midMeta = midMetaParts.join(" · ");
@@ -73,7 +66,6 @@ export function CompactListingCard({
   const metaTailParts: string[] = [formatListingCardDate(ts), formatViewCountRu(viewCount)];
   const dist = distanceLabel?.trim();
   if (dist) metaTailParts.push(dist);
-  metaTailParts.push(author);
 
   const thumbClass =
     "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-black/10 bg-zinc-100 md:bg-black/[0.04] md:h-20 md:w-20";
@@ -115,6 +107,8 @@ export function CompactListingCard({
           </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] leading-snug text-black/55">
+            <ListingTypeBadge type={listing.type} />
+            <span className="text-black/30">·</span>
             <span>{statusB}</span>
             {isUrgent ? (
               <>
@@ -138,8 +132,25 @@ export function CompactListingCard({
             <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-black/55">{description}</p>
           ) : null}
 
-          <div className="mt-1.5 truncate text-[12px] text-black/50" title={metaTailParts.join(" · ")}>
-            {metaTailParts.join(" · ")}
+          <div className="mt-1.5 truncate text-[12px] text-black/50">
+            <span>{metaTailParts.join(" · ")}</span>
+            <span aria-hidden className="text-black/35">
+              {" "}
+              ·{" "}
+            </span>
+            <ListingAuthorLine
+              ownerId={listing.ownerId}
+              currentUserId={currentUserId}
+              publicApi={publicAuthor ?? null}
+              storedAuthorName={storedAuthor}
+              nameClassName="font-medium text-black/65"
+              linkClassName="font-medium text-orange-600 hover:text-orange-700 hover:underline"
+              debugListingMeta={{
+                id: listing.id,
+                ownerId: listing.ownerId,
+                authorPublicName: listing.authorPublicName,
+              }}
+            />
           </div>
         </div>
       </div>

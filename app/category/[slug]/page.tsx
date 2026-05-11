@@ -479,7 +479,7 @@ export default function CategoryPage() {
           aria-label="Закрыть фильтры"
         >
           <div
-            className="mobile-filter-sheet absolute inset-x-0 bottom-0 box-border max-h-[82vh] overflow-y-auto rounded-t-3xl bg-white p-4"
+            className="mobile-filter-sheet absolute inset-x-0 bottom-0 box-border max-h-[82dvh] overflow-y-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">

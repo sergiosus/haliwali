@@ -76,14 +76,19 @@ export function CompactListingCard({
   metaTailParts.push(author);
 
   const thumbClass =
-    "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-black/10 bg-black/[0.04] md:h-20 md:w-20";
+    "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-black/10 bg-zinc-100 md:bg-black/[0.04] md:h-20 md:w-20";
   const titleClass =
     "min-w-0 flex-1 truncate text-left text-[15px] font-bold leading-snug tracking-tight text-black md:text-[16px]";
 
   const thumbnail =
     first ?
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={first} alt="" className="h-full w-full object-cover" loading="lazy" />
+      <img
+        src={first}
+        alt=""
+        className="h-full w-full object-contain md:object-cover"
+        loading="lazy"
+      />
     : <div className="flex h-full w-full items-center justify-center bg-black/[0.06] px-1 text-center text-[11px] font-medium leading-tight text-black/45">
         Нет фото
       </div>;

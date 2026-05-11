@@ -1487,7 +1487,7 @@ export function LocationModal({
   const nearbyScrollListPanel = (
     <div className="min-h-[260px] rounded-xl border border-black/[0.08] bg-black/[0.02] p-1.5 sm:min-h-[300px]">
       {nearbyListRows.length > 0 ?
-        <ul className="max-h-[min(360px,48vh)] overflow-y-auto sm:max-h-[360px]">
+        <ul className="max-h-[min(360px,48dvh)] overflow-y-auto sm:max-h-[360px]">
           {nearbyListRows.map((row) => {
             const reg = (row.region ?? "").trim();
             const line =
@@ -1516,7 +1516,7 @@ export function LocationModal({
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-sm p-3 sm:p-4"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 px-3 pt-[max(0.75rem,calc(0.75rem+env(safe-area-inset-top)))] pb-[max(0.75rem,calc(0.75rem+env(safe-area-inset-bottom)))] supports-[backdrop-filter]:[@media(hover:hover)_and_(pointer:fine)]:backdrop-blur-sm sm:px-4 sm:py-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="loc-modal-title"
@@ -1524,7 +1524,7 @@ export function LocationModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[90vh] w-[min(96vw,600px)] max-w-[min(96vw,600px)] flex-col overflow-hidden rounded-2xl border border-black/10 bg-white shadow-xl">
+      <div className="flex min-h-0 max-h-[90dvh] w-[min(96vw,600px)] max-w-[min(96vw,600px)] flex-col overflow-hidden rounded-2xl border border-black/10 bg-white shadow-xl sm:max-h-[90vh]">
         <div className="flex shrink-0 items-start justify-between gap-2 px-4 pb-2 pt-3 sm:px-5 sm:pb-2.5 sm:pt-3.5">
           <div id="loc-modal-title" className="text-[15px] font-semibold tracking-tight text-black/90">
             Локация
@@ -1539,7 +1539,7 @@ export function LocationModal({
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-0 sm:px-5">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))] pt-0 sm:px-5 sm:pb-4">
           <div className="relative flex shrink-0 flex-col gap-1.5">
             <div className="flex min-w-0 items-stretch gap-2">
               <input
@@ -1662,7 +1662,7 @@ export function LocationModal({
                         key={mapRemountKey}
                         center={effectiveCircleCenter}
                         zoom={mapZoom}
-                        className="aspect-square w-full min-h-[288px] max-h-[min(46vh,92vw)] sm:min-h-[320px] sm:max-h-[min(42vh,560px)]"
+                        className="aspect-square w-full min-h-[288px] max-h-[min(46dvh,92vw)] sm:min-h-[320px] sm:max-h-[min(42vh,560px)]"
                         settlementMarkers={settlementMarkersForMap}
                         onSettlementMarkerClick={handleSettlementMarkerClick}
                         userLocation={userLocation}
@@ -1700,7 +1700,7 @@ export function LocationModal({
                         </div>
                       : null}
                     </div>
-                  : <div className="flex aspect-square w-full min-h-[288px] max-h-[min(46vh,92vw)] items-center justify-center rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-6 text-center text-sm text-black/55 sm:min-h-[320px] sm:max-h-[min(42vh,560px)]">
+                  : <div className="flex aspect-square w-full min-h-[288px] max-h-[min(46dvh,92vw)] items-center justify-center rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-6 text-center text-sm text-black/55 sm:min-h-[320px] sm:max-h-[min(42vh,560px)]">
                       Нет координат для карты — выберите населённый пункт в списке.
                     </div>
                 : nearbyScrollListPanel}

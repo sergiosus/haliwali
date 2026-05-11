@@ -182,13 +182,13 @@ function ListingCardCover({ photos, compact }: { photos?: string[] | null; compa
   return (
     <div
       className={[
-        "relative w-full shrink-0 overflow-hidden rounded-[11px] bg-black/[0.035]",
+        "relative w-full shrink-0 overflow-hidden rounded-[11px] bg-zinc-100 md:bg-black/[0.035]",
         box,
       ].join(" ")}
     >
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" className="h-full w-full object-cover" />
+        <img src={src} alt="" className="h-full w-full object-contain md:object-cover" />
       ) : (
         <div
           className={[
@@ -502,13 +502,12 @@ function AccountPageInner() {
   }, [auth.status, auth.userId, me]);
 
   useEffect(() => {
-    if (!isDebugAuthClient()) return;
+    if (!isDebugAuthClient() || process.env.NODE_ENV === "production") return;
     if (auth.status !== "ready") return;
     const uid = (auth.userId ?? "").trim();
     console.log("[auth] profile", {
       hasUser: Boolean(uid),
-      userIdLen: uid.length,
-      userIdPrefix: uid.length > 10 ? `${uid.slice(0, 6)}…` : uid || undefined,
+      isAdmin: false,
     });
   }, [auth.status, auth.userId]);
 
@@ -663,20 +662,10 @@ function AccountPageInner() {
   }, [auth.status, auth.userId, me]);
 
   useEffect(() => {
-    if (!isDebugAuthClient() || !me?.ok) return;
-    const uid = (me.user.userId ?? "").trim();
-    const label = getSiteIdentityLabel({
-      name: me.user.name,
-      displayName: me.user.displayName,
-      email: me.user.email,
-    });
+    if (!isDebugAuthClient() || process.env.NODE_ENV === "production" || !me?.ok) return;
     console.log("[account] me.summary", {
-      userIdPrefix: uid.length > 10 ? `${uid.slice(0, 6)}…` : uid || undefined,
-      hasEmail: Boolean(me.user.email?.trim()),
-      hasPhone: Boolean(me.user.phone?.trim()),
-      hasName: Boolean(me.user.name?.trim()),
-      hasDisplayName: Boolean(me.user.displayName?.trim()),
-      labelLen: label.length,
+      hasUser: Boolean((me.user.userId ?? "").trim()),
+      isAdmin: false,
     });
   }, [me]);
 

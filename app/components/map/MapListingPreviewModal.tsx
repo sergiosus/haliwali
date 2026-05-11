@@ -160,7 +160,7 @@ export function MapListingPreviewModal({
   const chatReturn = mapReturnPath;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[80] flex items-end justify-center px-0 pb-[env(safe-area-inset-bottom)] pt-[max(0.5rem,env(safe-area-inset-top))] sm:items-center sm:p-4 sm:pb-4 sm:pt-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/45"
@@ -172,7 +172,7 @@ export function MapListingPreviewModal({
         role="dialog"
         aria-modal
         aria-labelledby="map-listing-preview-title"
-        className="relative z-10 flex max-h-[min(92vh,880px)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-black/10 bg-white shadow-2xl sm:rounded-2xl"
+        className="relative z-10 flex max-h-[min(92dvh,880px)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-black/10 bg-white shadow-2xl sm:max-h-[min(92vh,880px)] sm:rounded-2xl"
       >
         <div className="flex items-center justify-between gap-2 border-b border-black/10 px-4 py-3">
           <div className="min-w-0 text-sm font-semibold text-black/50">Объявление</div>
@@ -188,7 +188,7 @@ export function MapListingPreviewModal({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))] pt-4 sm:pb-4">
           {images.length > 0 ?
             <div className="mb-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}

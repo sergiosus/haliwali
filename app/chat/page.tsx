@@ -89,6 +89,62 @@ const CHAT_QUICK_EMOJIS = [
   "❌",
 ];
 
+/** Same budget as `app/lib/uploadClient.ts` for slow mobile uploads. */
+const CHAT_UPLOAD_FETCH_TIMEOUT_MS = 120_000;
+const CHAT_SEND_FETCH_TIMEOUT_MS = 120_000;
+const CHAT_UPLOAD_FAIL_MESSAGE = "Не удалось загрузить файл. Проверьте интернет и попробуйте снова.";
+const CHAT_UPLOAD_TIMEOUT_MESSAGE =
+  "Превышено время ожидания при загрузке файла. Проверьте интернет и попробуйте снова.";
+const CHAT_SEND_FILE_FAIL_MESSAGE = "Не удалось отправить вложение. Проверьте интернет и попробуйте снова.";
+const CHAT_SEND_FILE_TIMEOUT_MESSAGE =
+  "Превышено время ожидания при отправке вложения. Проверьте интернет и попробуйте снова.";
+
+function nextPollBackoffMs(failCount: number, capMs = 60_000, baseMs = 2000): number {
+  const n = Math.min(Math.max(failCount, 1), 6);
+  return Math.min(capMs, baseMs * 2 ** n);
+}
+
+function createIncomingCallRingAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+  const Ctor = w.AudioContext ?? w.webkitAudioContext;
+  if (!Ctor) return null;
+  try {
+    return new Ctor();
+  } catch {
+    return null;
+  }
+}
+
+/** One short ring pulse on an already-`running` context. Must not throw. */
+function playIncomingRingPulse(ctx: AudioContext): void {
+  try {
+    if (ctx.state !== "running") return;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g);
+    g.connect(ctx.destination);
+    g.gain.value = 0.06;
+    o.frequency.value = 520;
+    o.start();
+    window.setTimeout(() => {
+      try {
+        o.stop();
+      } catch {
+        /* noop */
+      }
+      try {
+        o.disconnect();
+        g.disconnect();
+      } catch {
+        /* noop */
+      }
+    }, 220);
+  } catch {
+    /* noop */
+  }
+}
+
 function formatChatMessageTime(ts: number): string {
   return new Date(ts).toLocaleString("ru-RU", {
     day: "2-digit",
@@ -385,6 +441,24 @@ function ChatInner() {
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   /** Один проброс localStorage→сервер на chatId за сессию (пустой GET, есть локальные сообщения). */
   const hydrateLocalToServerRef = useRef<Set<string>>(new Set());
+  /** Prevents double-submit before `isUploading` state commits (mobile double-tap). */
+  const chatFileUploadLockRef = useRef(false);
+  const syncChatFlightRef = useRef(false);
+  const syncChatFailCountRef = useRef(0);
+  const syncChatBackoffUntilRef = useRef(0);
+  const loadPeersFlightRef = useRef(false);
+  const loadPeersFailCountRef = useRef(0);
+  const loadPeersBackoffUntilRef = useRef(0);
+  const outgoingStatusFlightRef = useRef(false);
+  const incomingPollFlightRef = useRef(false);
+  const incomingPollFailCountRef = useRef(0);
+  const incomingPollBackoffUntilRef = useRef(0);
+  /** Reused for the whole incoming-call ring session (avoid `new AudioContext` every beep). */
+  const incomingRingAudioCtxRef = useRef<AudioContext | null>(null);
+  /** While true, interval skips beeps until user taps «Включить звук звонка». */
+  const incomingRingAwaitingGestureRef = useRef(false);
+  /** Avoid repeated `setState` when autoplay stays blocked. */
+  const incomingRingUnlockPromptShownRef = useRef(false);
   const [replyDraft, setReplyDraft] = useState<{
     messageId: string;
     senderLabel: string;
@@ -402,6 +476,8 @@ function ChatInner() {
     callerId: string;
     callerName: string;
   }>(null);
+  /** iOS / in-app browsers: show unlock control when `AudioContext` stays suspended without a gesture. */
+  const [incomingCallRingShowUnlockButton, setIncomingCallRingShowUnlockButton] = useState(false);
   const [rtcOpen, setRtcOpen] = useState(false);
   const [rtcRole, setRtcRole] = useState<"caller" | "callee">("caller");
   const [rtcCallId, setRtcCallId] = useState<string | null>(null);
@@ -595,6 +671,10 @@ function ChatInner() {
 
   const loadOwnerListingPeers = useCallback(async () => {
     if (!mounted || !listingId || !auth.userId) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    const nowPeers = Date.now();
+    if (nowPeers < loadPeersBackoffUntilRef.current) return;
+    if (loadPeersFlightRef.current) return;
     if (listingOwnerId !== auth.userId) {
       setOwnerListingPeerOptions([]);
       return;
@@ -603,9 +683,16 @@ function ChatInner() {
       setOwnerListingPeerOptions([]);
       return;
     }
+    loadPeersFlightRef.current = true;
     try {
       const r = await fetch("/api/chats", { credentials: "include", cache: "no-store" });
-      if (!r.ok) return;
+      if (!r.ok) {
+        loadPeersFailCountRef.current += 1;
+        loadPeersBackoffUntilRef.current = Date.now() + nextPollBackoffMs(loadPeersFailCountRef.current);
+        return;
+      }
+      loadPeersFailCountRef.current = 0;
+      loadPeersBackoffUntilRef.current = 0;
       const d = (await r.json()) as { conversations?: unknown };
       const convs = d.conversations;
       if (!Array.isArray(convs)) return;
@@ -624,7 +711,10 @@ function ChatInner() {
         .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
       setOwnerListingPeerOptions(rows);
     } catch {
-      /* noop */
+      loadPeersFailCountRef.current += 1;
+      loadPeersBackoffUntilRef.current = Date.now() + nextPollBackoffMs(loadPeersFailCountRef.current);
+    } finally {
+      loadPeersFlightRef.current = false;
     }
   }, [mounted, listingId, auth.userId, listingOwnerId, peerUserIdRaw]);
 
@@ -636,7 +726,10 @@ function ChatInner() {
     if (!mounted || !listingId || !auth.userId) return;
     if (listingOwnerId !== auth.userId) return;
     if (peerUserIdRaw.trim()) return;
-    const tid = window.setInterval(() => void loadOwnerListingPeers(), 45000);
+    const tid = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void loadOwnerListingPeers();
+    }, 45000);
     return () => window.clearInterval(tid);
   }, [mounted, listingId, auth.userId, listingOwnerId, peerUserIdRaw, loadOwnerListingPeers]);
 
@@ -762,6 +855,26 @@ function ChatInner() {
     }
   }, [rtcCallId]);
 
+  const unlockIncomingCallRingSound = useCallback(async () => {
+    incomingRingAwaitingGestureRef.current = false;
+    let ctx = incomingRingAudioCtxRef.current;
+    if (!ctx) {
+      ctx = createIncomingCallRingAudioContext();
+      incomingRingAudioCtxRef.current = ctx;
+    }
+    if (!ctx) return;
+    try {
+      await ctx.resume();
+    } catch {
+      /* autoplay / policy */
+    }
+    if (ctx.state === "running") {
+      incomingRingUnlockPromptShownRef.current = false;
+      setIncomingCallRingShowUnlockButton(false);
+      playIncomingRingPulse(ctx);
+    }
+  }, []);
+
   function shortPreview(v: string, max = 64) {
     const t = v.trim().replace(/\s+/g, " ");
     if (t.length <= max) return t;
@@ -849,12 +962,23 @@ function ChatInner() {
 
   const syncServerChat = useCallback(async () => {
     if (!listingId || !auth.userId || !chatId) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    const nowSync = Date.now();
+    if (nowSync < syncChatBackoffUntilRef.current) return;
+    if (syncChatFlightRef.current) return;
+    syncChatFlightRef.current = true;
     try {
       const r = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, {
         credentials: "include",
         cache: "no-store",
       });
-      if (!r.ok) return;
+      if (!r.ok) {
+        syncChatFailCountRef.current += 1;
+        syncChatBackoffUntilRef.current = Date.now() + nextPollBackoffMs(syncChatFailCountRef.current);
+        return;
+      }
+      syncChatFailCountRef.current = 0;
+      syncChatBackoffUntilRef.current = 0;
       const j = (await r.json()) as { messages?: unknown };
       const raw = Array.isArray(j.messages) ? j.messages : [];
       const serverMsgs = raw
@@ -941,7 +1065,10 @@ function ChatInner() {
         window.dispatchEvent(new CustomEvent("haliwali-chats-updated"));
       }
     } catch {
-      /* ignore */
+      syncChatFailCountRef.current += 1;
+      syncChatBackoffUntilRef.current = Date.now() + nextPollBackoffMs(syncChatFailCountRef.current);
+    } finally {
+      syncChatFlightRef.current = false;
     }
   }, [listingId, auth.userId, chatId, listingOwnerId, buyerIdResolved, displayAd?.title, localListing]);
 
@@ -1015,7 +1142,10 @@ function ChatInner() {
 
   useEffect(() => {
     if (!listingId || !auth.userId || !chatId) return;
-    const tid = window.setInterval(() => void syncServerChat(), 45000);
+    const tid = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void syncServerChat();
+    }, 45000);
     return () => window.clearInterval(tid);
   }, [listingId, auth.userId, chatId, syncServerChat]);
 
@@ -1024,6 +1154,37 @@ function ChatInner() {
       void syncServerChat();
     });
   }, [syncServerChat]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return undefined;
+    function onVisibility() {
+      if (document.visibilityState !== "visible") return;
+      syncChatFailCountRef.current = 0;
+      syncChatBackoffUntilRef.current = 0;
+      loadPeersFailCountRef.current = 0;
+      loadPeersBackoffUntilRef.current = 0;
+      incomingPollFailCountRef.current = 0;
+      incomingPollBackoffUntilRef.current = 0;
+      void syncServerChat();
+      void loadOwnerListingPeers();
+    }
+    function onOnline() {
+      syncChatFailCountRef.current = 0;
+      syncChatBackoffUntilRef.current = 0;
+      loadPeersFailCountRef.current = 0;
+      loadPeersBackoffUntilRef.current = 0;
+      incomingPollFailCountRef.current = 0;
+      incomingPollBackoffUntilRef.current = 0;
+      void syncServerChat();
+      void loadOwnerListingPeers();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [syncServerChat, loadOwnerListingPeers]);
 
   const visibleMsgs = useMemo(() => {
     return msgs.filter((m) => {
@@ -1101,62 +1262,96 @@ function ChatInner() {
   useEffect(() => {
     if (!outgoingRingOpen || !outgoingCallId) return;
     const cid = outgoingCallId;
-    const tid = window.setInterval(async () => {
-      const r = await fetch(`/api/calls/status?callId=${encodeURIComponent(cid)}`, {
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (!r.ok) return;
-      const j = (await r.json()) as { ok?: boolean; call?: { status?: string } };
-      const st = j.call?.status;
-      if (st === "active") {
-        setOutgoingRingOpen(false);
-        setOutgoingCallId(null);
-        setRtcPeerUserId(opponent.id.trim());
-        {
-          const hn = opponentLabel.trim();
-          setRtcPeerHint(hn && !isPublicDisplayNameFallback(hn) ? hn : undefined);
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (outgoingStatusFlightRef.current) return;
+      outgoingStatusFlightRef.current = true;
+      void (async () => {
+        try {
+          const r = await fetch(`/api/calls/status?callId=${encodeURIComponent(cid)}`, {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (!r.ok) return;
+          const j = (await r.json()) as { ok?: boolean; call?: { status?: string } };
+          const st = j.call?.status;
+          if (st === "active") {
+            setOutgoingRingOpen(false);
+            setOutgoingCallId(null);
+            setRtcPeerUserId(opponent.id.trim());
+            {
+              const hn = opponentLabel.trim();
+              setRtcPeerHint(hn && !isPublicDisplayNameFallback(hn) ? hn : undefined);
+            }
+            setRtcCallId(cid);
+            setRtcRole("caller");
+            setRtcOpen(true);
+          } else if (st === "declined") {
+            setOutgoingRingOpen(false);
+            setOutgoingCallId(null);
+            setCallRejectedBanner(
+              `${getPublicSenderName({
+                userId: opponent.id.trim(),
+                displayHint: opponentLabel.trim(),
+                senderNameFromMessage: opponentLabel.trim(),
+                emptyLabel: "Собеседник",
+              })} отклонил звонок`,
+            );
+          } else if (st === "ended") {
+            setOutgoingRingOpen(false);
+            setOutgoingCallId(null);
+          }
+        } finally {
+          outgoingStatusFlightRef.current = false;
         }
-        setRtcCallId(cid);
-        setRtcRole("caller");
-        setRtcOpen(true);
-      } else if (st === "declined") {
-        setOutgoingRingOpen(false);
-        setOutgoingCallId(null);
-        setCallRejectedBanner(
-          `${getPublicSenderName({
-            userId: opponent.id.trim(),
-            displayHint: opponentLabel.trim(),
-            senderNameFromMessage: opponentLabel.trim(),
-            emptyLabel: "Собеседник",
-          })} отклонил звонок`,
-        );
-      } else if (st === "ended") {
-        setOutgoingRingOpen(false);
-        setOutgoingCallId(null);
-      }
-    }, 650);
+      })();
+    };
+    const tid = window.setInterval(tick, 650);
     return () => window.clearInterval(tid);
   }, [outgoingRingOpen, outgoingCallId, opponentLabel, opponent.id]);
 
   useEffect(() => {
     if (!mounted || !auth.userId || rtcOpen || outgoingRingOpen) return;
-    const tid = window.setInterval(async () => {
-      const r = await fetch("/api/calls/incoming", { credentials: "include", cache: "no-store" });
-      if (!r.ok) return;
-      const j = (await r.json()) as {
-        ok?: boolean;
-        call: null | { callId: string; callerId: string; callerName: string };
-      };
-      if (!j.ok) return;
-      if (!j.call) {
-        setIncomingCallInfo(null);
-        return;
-      }
-      setIncomingCallInfo((prev) => {
-        if (prev?.callId === j.call!.callId) return prev;
-        return j.call!;
-      });
+    const tid = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const nowInc = Date.now();
+      if (nowInc < incomingPollBackoffUntilRef.current) return;
+      if (incomingPollFlightRef.current) return;
+      incomingPollFlightRef.current = true;
+      void (async () => {
+        try {
+          const r = await fetch("/api/calls/incoming", { credentials: "include", cache: "no-store" });
+          if (!r.ok) {
+            incomingPollFailCountRef.current += 1;
+            incomingPollBackoffUntilRef.current = Date.now() + nextPollBackoffMs(incomingPollFailCountRef.current);
+            return;
+          }
+          incomingPollFailCountRef.current = 0;
+          incomingPollBackoffUntilRef.current = 0;
+          const j = (await r.json()) as {
+            ok?: boolean;
+            call: null | { callId: string; callerId: string; callerName: string };
+          };
+          if (!j.ok) {
+            incomingPollFailCountRef.current += 1;
+            incomingPollBackoffUntilRef.current = Date.now() + nextPollBackoffMs(incomingPollFailCountRef.current);
+            return;
+          }
+          if (!j.call) {
+            setIncomingCallInfo(null);
+            return;
+          }
+          setIncomingCallInfo((prev) => {
+            if (prev?.callId === j.call!.callId) return prev;
+            return j.call!;
+          });
+        } catch {
+          incomingPollFailCountRef.current += 1;
+          incomingPollBackoffUntilRef.current = Date.now() + nextPollBackoffMs(incomingPollFailCountRef.current);
+        } finally {
+          incomingPollFlightRef.current = false;
+        }
+      })();
     }, 2000);
     return () => window.clearInterval(tid);
   }, [mounted, auth.userId, rtcOpen, outgoingRingOpen]);
@@ -1169,32 +1364,65 @@ function ChatInner() {
 
   useEffect(() => {
     if (!incomingCallInfo) return;
+
+    incomingRingAwaitingGestureRef.current = false;
+    incomingRingUnlockPromptShownRef.current = false;
+    queueMicrotask(() => setIncomingCallRingShowUnlockButton(false));
+
     let cancelled = false;
-    function beep() {
-      try {
-        const ctx = new AudioContext();
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.connect(g);
-        g.connect(ctx.destination);
-        g.gain.value = 0.06;
-        o.frequency.value = 520;
-        o.start();
-        window.setTimeout(() => {
-          o.stop();
-          void ctx.close();
-        }, 220);
-      } catch {
-        /* ringtone optional */
+
+    async function attemptIncomingRingBeep(): Promise<void> {
+      if (cancelled) return;
+      if (incomingRingAwaitingGestureRef.current) return;
+
+      let ctx = incomingRingAudioCtxRef.current;
+      if (!ctx) {
+        ctx = createIncomingCallRingAudioContext();
+        incomingRingAudioCtxRef.current = ctx;
       }
+      if (!ctx) return;
+
+      try {
+        if (ctx.state === "suspended") await ctx.resume();
+      } catch {
+        incomingRingAwaitingGestureRef.current = true;
+        if (!incomingRingUnlockPromptShownRef.current) {
+          incomingRingUnlockPromptShownRef.current = true;
+          setIncomingCallRingShowUnlockButton(true);
+        }
+        return;
+      }
+
+      if (ctx.state !== "running") {
+        incomingRingAwaitingGestureRef.current = true;
+        if (!incomingRingUnlockPromptShownRef.current) {
+          incomingRingUnlockPromptShownRef.current = true;
+          setIncomingCallRingShowUnlockButton(true);
+        }
+        return;
+      }
+
+      playIncomingRingPulse(ctx);
     }
-    beep();
+
+    void attemptIncomingRingBeep();
     const interval = window.setInterval(() => {
-      if (!cancelled) beep();
+      void attemptIncomingRingBeep();
     }, 2800);
+
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      incomingRingAwaitingGestureRef.current = false;
+      incomingRingUnlockPromptShownRef.current = false;
+      const c = incomingRingAudioCtxRef.current;
+      incomingRingAudioCtxRef.current = null;
+      try {
+        void c?.close();
+      } catch {
+        /* noop */
+      }
+      queueMicrotask(() => setIncomingCallRingShowUnlockButton(false));
     };
   }, [incomingCallInfo?.callId]);
 
@@ -1202,11 +1430,37 @@ function ChatInner() {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("chatId", conversationChatId);
-    const res = await fetch("/api/chat/upload", { method: "POST", credentials: "include", cache: "no-store", body: fd });
-    if (!res.ok) throw new Error("Upload failed");
-    const data = (await res.json()) as { url?: string };
-    if (!data?.url) throw new Error("Invalid upload response");
-    return { url: data.url };
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), CHAT_UPLOAD_FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch("/api/chat/upload", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        body: fd,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      const aborted = isAbort || /abort/i.test(message);
+      if (aborted) throw new Error(CHAT_UPLOAD_TIMEOUT_MESSAGE);
+      throw new Error(CHAT_UPLOAD_FAIL_MESSAGE);
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+    const text = await res.text().catch(() => "");
+    let data: unknown = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+    if (!res.ok) throw new Error(CHAT_UPLOAD_FAIL_MESSAGE);
+    const url = typeof (data as { url?: unknown } | null)?.url === "string" ? String((data as { url: string }).url).trim() : "";
+    if (!url) throw new Error(CHAT_UPLOAD_FAIL_MESSAGE);
+    return { url };
   }
 
   function clearSelectedFile() {
@@ -1720,34 +1974,49 @@ function ChatInner() {
 
                   if (selectedFile) {
                     if (!selectedFile.name) return;
+                    if (isUploading || chatFileUploadLockRef.current) return;
+                    chatFileUploadLockRef.current = true;
                     setIsUploading(true);
                     try {
                       const uploaded = await uploadChatFile(selectedFile, chatId);
-                      const res = await fetch("/api/chats/send", {
-                        method: "POST",
-                        credentials: "include",
-                        cache: "no-store",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          listingId,
-                          type: "file",
-                          fileUrl: uploaded.url,
-                          fileName: selectedFile.name,
-                          text: "",
-                          peerUserId: senderId === listingOwnerId ? buyerIdResolved : undefined,
-                          senderName,
-                          replyToMessageId: replyDraft?.messageId,
-                          replyToText: replyDraft
-                            ? `${replyDraft.senderLabel}: ${replyDraft.fileName ?? (replyDraft.text ?? "")}`.trim()
-                            : undefined,
-                        }),
-                      });
+                      const sendController = new AbortController();
+                      const sendTimeoutId = window.setTimeout(() => sendController.abort(), CHAT_SEND_FETCH_TIMEOUT_MS);
+                      let res: Response;
+                      try {
+                        res = await fetch("/api/chats/send", {
+                          method: "POST",
+                          credentials: "include",
+                          cache: "no-store",
+                          headers: { "Content-Type": "application/json" },
+                          signal: sendController.signal,
+                          body: JSON.stringify({
+                            listingId,
+                            type: "file",
+                            fileUrl: uploaded.url,
+                            fileName: selectedFile.name,
+                            text: "",
+                            peerUserId: senderId === listingOwnerId ? buyerIdResolved : undefined,
+                            senderName,
+                            replyToMessageId: replyDraft?.messageId,
+                            replyToText: replyDraft
+                              ? `${replyDraft.senderLabel}: ${replyDraft.fileName ?? (replyDraft.text ?? "")}`.trim()
+                              : undefined,
+                          }),
+                        });
+                      } catch (sendErr) {
+                        const msg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+                        const isAbort =
+                          (sendErr instanceof DOMException && sendErr.name === "AbortError") || /abort/i.test(msg);
+                        throw new Error(isAbort ? CHAT_SEND_FILE_TIMEOUT_MESSAGE : CHAT_SEND_FILE_FAIL_MESSAGE);
+                      } finally {
+                        window.clearTimeout(sendTimeoutId);
+                      }
                       const data = (await res.json().catch(() => ({}))) as {
                         ok?: boolean;
                         message?: Record<string, unknown>;
                       };
                       if (!res.ok || !data.ok || !data.message) {
-                        setFileError("Не удалось отправить вложение.");
+                        setFileError(CHAT_SEND_FILE_FAIL_MESSAGE);
                         return;
                       }
                       const nextMsg = serverRowToChatMessage(data.message, chatId);
@@ -1764,8 +2033,11 @@ function ChatInner() {
                       inputRef.current?.focus();
                     } catch (err) {
                       console.error(err);
-                      setFileError("Не удалось отправить вложение.");
+                      const msg =
+                        err instanceof Error && err.message.trim() ? err.message.trim() : CHAT_UPLOAD_FAIL_MESSAGE;
+                      setFileError(msg);
                     } finally {
+                      chatFileUploadLockRef.current = false;
                       setIsUploading(false);
                     }
                     return;
@@ -1893,7 +2165,7 @@ function ChatInner() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Напишите сообщение…"
-                className="h-11 w-full rounded-2xl border border-black/10 bg-white px-4 text-sm outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)]"
+                className="h-11 w-full rounded-2xl border border-black/10 bg-white px-4 text-base outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] sm:text-sm"
                 disabled={isUploading}
               />
               <button
@@ -1959,6 +2231,21 @@ function ChatInner() {
                   })}{" "}
                   звонит вам
                 </p>
+                {incomingCallRingShowUnlockButton ? (
+                  <div className="mt-4 rounded-2xl border border-amber-200/90 bg-amber-50/95 p-3">
+                    <p className="text-sm font-medium leading-snug text-amber-950/90">
+                      Звук звонка может быть отключён браузером (часто на iPhone или во встроенном браузере).
+                      Нажмите кнопку ниже после вашего действия — звонок остаётся на экране.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void unlockIncomingCallRingSound()}
+                      className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-2xl border border-amber-300/80 bg-white px-4 text-sm font-semibold text-amber-950/95 hover:bg-amber-50"
+                    >
+                      Включить звук звонка
+                    </button>
+                  </div>
+                ) : null}
                 <div className="mt-5 grid gap-2">
                   <button
                     type="button"

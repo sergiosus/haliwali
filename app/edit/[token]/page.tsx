@@ -599,16 +599,14 @@ function EditPhotos({
           if (files.length > remaining) setError("Максимум 10 фото");
 
           try {
-            const prepared = await Promise.all(nextFiles.map(prepareUploadableJpegFile));
-            setPhotoSlots((prev) => [
-              ...prev,
-              ...prepared.map((p) => ({
-                kind: "pending" as const,
-                file: p.file,
-                objectUrl: p.objectUrl,
-              })),
-            ]);
+            const prepared: Array<{ kind: "pending"; file: File; objectUrl: string }> = [];
+            for (const f of nextFiles) {
+              const p = await prepareUploadableJpegFile(f);
+              prepared.push({ kind: "pending", file: p.file, objectUrl: p.objectUrl });
+            }
+            setPhotoSlots((prev) => [...prev, ...prepared]);
           } catch (err) {
+            console.error("[edit listing] photo prepare failed", err);
             const msg = err instanceof Error ? err.message : "";
             setError(msg || "Неподдерживаемый формат изображения");
           }
@@ -677,14 +675,19 @@ function EditPhotos({
   );
 }
 
-/** Client-side JPEG under 5MB for `/api/upload` — same pipeline as before, but returns `File` + preview blob URL (not base64 in listing). */
+/** Client-side JPEG under 5MB for `/api/upload` — returns `File` + preview blob URL (not base64 in listing). */
 async function prepareUploadableJpegFile(file: File): Promise<{ file: File; objectUrl: string }> {
-  const dataUrl = await convertImageToJpegDataUrl(file);
-  const res = await fetch(dataUrl);
-  const blob = await res.blob();
-  const out = new File([blob], "photo.jpg", { type: "image/jpeg" });
-  const objectUrl = URL.createObjectURL(out);
-  return { file: out, objectUrl };
+  return convertImageToJpegFile(file);
+}
+
+function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("Не удалось обработать изображение"))),
+      "image/jpeg",
+      quality,
+    );
+  });
 }
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -701,7 +704,7 @@ function isSupportedImageType(mime: string) {
   );
 }
 
-async function convertImageToJpegDataUrl(file: File) {
+async function convertImageToJpegFile(file: File): Promise<{ file: File; objectUrl: string }> {
   if (!isSupportedImageType(file.type)) {
     throw new Error("Неподдерживаемый формат изображения");
   }
@@ -724,11 +727,20 @@ async function convertImageToJpegDataUrl(file: File) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Не удалось обработать изображение");
+  if (!ctx) {
+    bitmap.close();
+    throw new Error("Не удалось обработать изображение");
+  }
 
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
 
-  return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  const blob = await canvasToJpegBlob(canvas, JPEG_QUALITY);
+  const out = new File([blob], "photo.jpg", { type: "image/jpeg" });
+  if (out.size > MAX_IMAGE_BYTES) {
+    throw new Error("После сжатия фото всё ещё слишком большое. Выберите другое изображение.");
+  }
+  const objectUrl = URL.createObjectURL(out);
+  return { file: out, objectUrl };
 }
 

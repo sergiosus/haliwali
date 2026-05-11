@@ -298,28 +298,7 @@ export default function MapBrowsePage() {
         continue;
       }
 
-      /** TEMPORARY: remove after marker pipeline debugging. */
-      if (process.env.NODE_ENV === "development") {
-        const rawLat = l.latitude ?? l.location?.lat;
-        const rawLng = l.longitude ?? l.location?.lng;
-        const hasLatRaw =
-          rawLat !== undefined && rawLat !== null && String(rawLat).trim() !== "";
-        const hasLngRaw =
-          rawLng !== undefined && rawLng !== null && String(rawLng).trim() !== "";
-        const precise = listingCoordinatesForMap(l);
-        const city = (l.city ?? "").trim();
-        let reason: string;
-        if (!precise && (hasLatRaw || hasLngRaw)) reason = "coordinates_invalid_or_incomplete";
-        else if (!city) reason = "no_city_for_static_fallback";
-        else reason = "city_not_in_static_catalog";
-        console.log("[MAP_MARKER_SKIPPED]", {
-          id: l.id,
-          reason,
-          lat: rawLat ?? null,
-          lng: rawLng ?? null,
-          status: l.status,
-        });
-      }
+      // Keep marker pipeline silent in production (and avoid repeating per-marker logs on desktop).
     }
     return out;
   }, [baseFiltered, selectedId]);
@@ -327,7 +306,17 @@ export default function MapBrowsePage() {
   useEffect(() => {
     if (!selectedId || !listRef.current) return;
     const el = document.getElementById(`map-row-${selectedId}`);
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    try {
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+      // Reduce scroll storms on rapid taps / low-end devices: only smooth-scroll if selection stabilizes.
+      const now = Date.now();
+      const prev = (window as unknown as { __haliwaliMapLastScroll?: { id: string; at: number } }).__haliwaliMapLastScroll;
+      (window as unknown as { __haliwaliMapLastScroll?: { id: string; at: number } }).__haliwaliMapLastScroll = { id: selectedId, at: now };
+      const tooSoon = prev && prev.id !== selectedId && now - prev.at < 450;
+      el?.scrollIntoView({ block: "nearest", behavior: reduceMotion || tooSoon ? "auto" : "smooth" });
+    } catch {
+      el?.scrollIntoView({ block: "nearest", behavior: "auto" });
+    }
   }, [selectedId]);
 
   const scopeLabel = homepageLocationLabelFromScope(mapScope);

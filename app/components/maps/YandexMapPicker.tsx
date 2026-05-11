@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { loadYandexMaps, type YmapsNamespace } from "../../lib/maps/yandexLoader";
+import { loadYandexMaps, resetYandexMapsLoaderForRetry, type YmapsNamespace } from "../../lib/maps/yandexLoader";
 import { calculateDistanceKm } from "@/lib/shared/geo";
 import { GeolocationButton } from "../map/GeolocationButton";
 
@@ -135,8 +135,92 @@ const CENTER_EMIT_DEBOUNCE_MS = 140;
 const VIEWPORT_STABLE_DEBOUNCE_MS = 420;
 /** Delay before hiding listing hover popup after pointer leaves marker/card (no flicker). */
 const LISTING_POPUP_LEAVE_DELAY_MS = 1600;
+/** After pan/zoom gesture ends, ignore one map `click` close on touch-like UIs (avoids stray close). */
+const MAP_CLICK_CLOSE_GUARD_MS = 180;
+/** Embedded / slow networks: avoid indefinite blank map when Yandex never becomes interactive. */
+const YANDEX_MAP_LOAD_TIMEOUT_MS = 35_000;
+
+const MAP_FALLBACK_MESSAGE =
+  "Карта не загрузилась. Откройте сайт в браузере или попробуйте позже.";
+const MAP_FALLBACK_IN_APP_HINT = "Встроенный браузер может ограничивать карты.";
+
+function detectLikelyInAppBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = (navigator.userAgent || "").toLowerCase();
+  return /telegram|vk\.com|vkontakte|instagram|fbav|fban|micromessenger|webview|line\//i.test(ua);
+}
+
+/**
+ * True when hover is unreliable (phones) or the primary pointer is coarse (touch).
+ * Used only to switch listing popup from hover-driven to tap / outside-tap lifecycle.
+ */
+function getPreferTapListingPopup(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const hoverNone = window.matchMedia("(hover: none)");
+    const coarse = window.matchMedia("(pointer: coarse)");
+    return Boolean(hoverNone.matches || coarse.matches);
+  } catch {
+    return false;
+  }
+}
 /** Minimum movement (m, approx) before emitting duplicate center. */
 const CENTER_EMIT_MIN_MOVE_M = 35;
+/**
+ * Listings within this distance share one map placemark + one stacked popup (avoids hover flipping
+ * between overlapping dot icons).
+ */
+const LISTING_MARKER_GROUP_RADIUS_M = 30;
+
+function listingMarkerGroupKey(members: readonly MapListingMarker[]): string {
+  return members
+    .map((m) => m.id)
+    .slice()
+    .sort()
+    .join("|");
+}
+
+/** Union-find on indices: merge any pair within {@link LISTING_MARKER_GROUP_RADIUS_M} meters (transitive). */
+function groupListingMarkersByProximity(markers: readonly MapListingMarker[]): MapListingMarker[][] {
+  if (markers.length === 0) return [];
+  const n = markers.length;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  function find(i: number): number {
+    return parent[i] === i ? i : (parent[i] = find(parent[i]));
+  }
+  function union(a: number, b: number) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  }
+  for (let i = 0; i < n; i++) {
+    const a = markers[i]!;
+    if (!Number.isFinite(a.lat + a.lng)) continue;
+    for (let j = i + 1; j < n; j++) {
+      const b = markers[j]!;
+      if (!Number.isFinite(b.lat + b.lng)) continue;
+      const dM = calculateDistanceKm(a.lat, a.lng, b.lat, b.lng) * 1000;
+      if (dM <= LISTING_MARKER_GROUP_RADIUS_M) union(i, j);
+    }
+  }
+  const buckets = new Map<number, MapListingMarker[]>();
+  for (let i = 0; i < n; i++) {
+    const m = markers[i]!;
+    const r = find(i);
+    const arr = buckets.get(r);
+    if (arr) arr.push(m);
+    else buckets.set(r, [m]);
+  }
+  return Array.from(buckets.values()).map((g) => g.slice().sort((x, y) => x.id.localeCompare(y.id)));
+}
+
+function groupRepresentativeLatLng(group: readonly MapListingMarker[]): { lat: number; lng: number } | null {
+  const ok = group.filter((m) => Number.isFinite(m.lat + m.lng));
+  if (ok.length === 0) return null;
+  const lat = ok.reduce((s, m) => s + m.lat, 0) / ok.length;
+  const lng = ok.reduce((s, m) => s + m.lng, 0) / ok.length;
+  return { lat, lng };
+}
 
 /** Nearby settlements: tiny filled raster dot (avoids `*CircleDotIcon` / preset ring blobs). */
 const SETTLEMENT_MAP_DOT_PX = 6;
@@ -155,13 +239,14 @@ function centerMovedEnough(a: MapCenter, b: MapCenter): boolean {
 }
 
 /** Thumbnail for map listing popup: image or neutral placeholder if missing / broken. */
-function ListingPopupThumb({ url }: { url?: string }) {
+function ListingPopupThumb({ url, compact }: { url?: string; compact?: boolean }) {
   const trimmed = typeof url === "string" ? url.trim() : "";
   const [broken, setBroken] = useState(false);
+  const box = compact ? "h-10 w-10" : "h-14 w-14";
   if (!trimmed || broken) {
     return (
       <div
-        className="h-14 w-14 shrink-0 rounded-lg border border-dashed border-black/15 bg-black/[0.04]"
+        className={`${box} shrink-0 rounded-lg border border-dashed border-black/15 bg-black/[0.04]`}
         aria-hidden
       />
     );
@@ -171,7 +256,7 @@ function ListingPopupThumb({ url }: { url?: string }) {
     <img
       src={trimmed}
       alt=""
-      className="h-14 w-14 shrink-0 rounded-lg border border-black/10 object-cover"
+      className={`${box} shrink-0 rounded-lg border border-black/10 object-cover`}
       loading="lazy"
       decoding="async"
       onError={() => setBroken(true)}
@@ -213,7 +298,12 @@ export function YandexMapPicker({
   /** Loaded `ymaps` namespace (for Placemark after geolocation). */
   const ymapsApiRef = useRef<unknown>(null);
   const [mapReady, setMapReady] = useState(false);
+  /** Script/timeout/init failure — show fallback instead of blank map. */
+  const [mapLoadFailed, setMapLoadFailed] = useState(false);
+  /** Bump to re-run map init (retry). */
+  const [mapLoadAttempt, setMapLoadAttempt] = useState(0);
   const [geoLoading, setGeoLoading] = useState(false);
+  const likelyInAppBrowser = useMemo(() => detectLikelyInAppBrowser(), []);
   const onCenterChangeRef = useRef(onCenterChange);
   const onMapClickRef = useRef(onMapClick);
   const onSettlementMarkerClickRef = useRef(onSettlementMarkerClick);
@@ -241,30 +331,46 @@ export function YandexMapPicker({
   const listingPlacemarksRef = useRef<unknown[]>([]);
   const userLocationPlacemarkRef = useRef<unknown>(null);
 
-  // React-controlled hover / click-pinned preview for listing markers (do not rely on Yandex balloons).
-  const [hoveredListingId, setHoveredListingId] = useState<string | null>(null);
-  const [activeListingId, setActiveListingId] = useState<string | null>(null);
-  /** Screen position for the single preview card; keyed by hoveredListingId ?? activeListingId. */
+  // React-controlled hover / click-pinned preview for listing marker **groups** (one popup per co-located cluster).
+  const [hoveredListingGroupKey, setHoveredListingGroupKey] = useState<string | null>(null);
+  const [activeListingGroupKey, setActiveListingGroupKey] = useState<string | null>(null);
+  /** Screen position for the preview stack; anchored to the group's representative lat/lng. */
   const [activeListingPreviewPos, setActiveListingPreviewPos] = useState<{ x: number; y: number } | null>(null);
   const activePreviewMarkerRef = useRef<{
-    id: string;
+    groupKey: string;
     lat: number;
     lng: number;
-    previewTitle: string;
-    previewType: string;
-    previewCity: string;
-    previewPrice?: string;
   } | null>(null);
 
   /** Step 1 / 7: delayed close after leaving marker and popup. */
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeListingIdRef = useRef<string | null>(null);
-  activeListingIdRef.current = activeListingId;
+  const activeListingGroupKeyRef = useRef<string | null>(null);
+  activeListingGroupKeyRef.current = activeListingGroupKey;
 
   const markerHoveredRef = useRef(false);
   const popupHoveredRef = useRef(false);
 
-  const displayListingId = hoveredListingId ?? activeListingId;
+  /** Touch / coarse-pointer: listing previews use tap + outside tap, not hover. */
+  const [preferTapListingPopup, setPreferTapListingPopup] = useState(false);
+  const preferTapListingPopupRef = useRef(false);
+  preferTapListingPopupRef.current = preferTapListingPopup;
+
+  /** After a map pan/zoom gesture, suppress tap-outside close briefly (touch-like UIs). */
+  const mapGestureCloseGuardUntilRef = useRef(0);
+  /** Listing placemark `click` is often followed by a map `click`; avoid clearing the popup in the same gesture. */
+  const listingPlacemarkClickSuppressMapCloseUntilRef = useRef(0);
+
+  const displayGroupKey = hoveredListingGroupKey ?? activeListingGroupKey;
+
+  const listingGroups = useMemo(() => groupListingMarkersByProximity(listingMarkers), [listingMarkers]);
+
+  const displayListingGroup = useMemo(() => {
+    if (!displayGroupKey) return null;
+    for (const g of listingGroups) {
+      if (listingMarkerGroupKey(g) === displayGroupKey) return g;
+    }
+    return null;
+  }, [listingGroups, displayGroupKey]);
 
   const clearCloseTimer = () => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -276,14 +382,14 @@ export function YandexMapPicker({
     clearCloseTimer();
     markerHoveredRef.current = false;
     popupHoveredRef.current = false;
-    setHoveredListingId(null);
-    setActiveListingId(null);
+    setHoveredListingGroupKey(null);
+    setActiveListingGroupKey(null);
     setActiveListingPreviewPos(null);
     activePreviewMarkerRef.current = null;
   };
 
   /**
-   * Step 2–3: after leaving marker or popup, hide unless pinned (activeListingId).
+   * Step 2–3: after leaving marker or popup, hide unless pinned (activeListingGroupKey).
    * Re-entering marker or popup clears the timer (no flicker).
    */
   const schedulePreviewHide = () => {
@@ -291,13 +397,13 @@ export function YandexMapPicker({
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null;
       if (markerHoveredRef.current || popupHoveredRef.current) return;
-      if (!activeListingIdRef.current) {
-        setHoveredListingId(null);
+      if (!activeListingGroupKeyRef.current) {
+        setHoveredListingGroupKey(null);
         setActiveListingPreviewPos(null);
         activePreviewMarkerRef.current = null;
         return;
       }
-      setHoveredListingId(null);
+      setHoveredListingGroupKey(null);
     }, LISTING_POPUP_LEAVE_DELAY_MS);
   };
 
@@ -325,47 +431,66 @@ export function YandexMapPicker({
       x = Math.max(14, Math.min(rect.width - 14, x));
       y = Math.max(14, Math.min(rect.height - 14, y));
       setActiveListingPreviewPos({ x, y });
-      if (process.env.NODE_ENV === "development") {
-        console.log("[map-listing-popup]", { markerId: cur.id, popupPos: { x, y } });
-      }
     } catch {
       /* noop */
     }
   }, []);
 
-  const displayListingMarker = useMemo(() => {
-    if (!displayListingId) return null;
-    return listingMarkers.find((m) => m.id === displayListingId) ?? null;
-  }, [listingMarkers, displayListingId]);
-
-  /** Keep preview geometry + copy in sync when hover ends but click-pinned id stays. */
+  /** Keep preview anchored to the active marker group's representative coordinates. */
   useLayoutEffect(() => {
-    const lm = displayListingMarker;
-    if (!lm) {
-      return;
-    }
+    const group = displayListingGroup;
+    if (!group?.length) return;
+    const rep = groupRepresentativeLatLng(group);
+    if (!rep) return;
     activePreviewMarkerRef.current = {
-      id: lm.id,
-      lat: lm.lat,
-      lng: lm.lng,
-      previewTitle: lm.previewTitle,
-      previewType: lm.previewType,
-      previewCity: lm.previewCity,
-      previewPrice: lm.previewPrice,
+      groupKey: listingMarkerGroupKey(group),
+      lat: rep.lat,
+      lng: rep.lng,
     };
     if (mapReady) updateActivePreviewPosition();
-  }, [displayListingMarker, mapReady, updateActivePreviewPosition]);
+  }, [displayListingGroup, mapReady, updateActivePreviewPosition]);
 
   /** Step 7: clear close timer on unmount. */
   useEffect(() => () => clearCloseTimer(), []);
 
+  useLayoutEffect(() => {
+    const sync = () => setPreferTapListingPopup(getPreferTapListingPopup());
+    sync();
+    let mqlHover: MediaQueryList | null = null;
+    let mqlPointer: MediaQueryList | null = null;
+    try {
+      mqlHover = window.matchMedia("(hover: none)");
+      mqlPointer = window.matchMedia("(pointer: coarse)");
+      const onChange = () => sync();
+      mqlHover.addEventListener("change", onChange);
+      mqlPointer.addEventListener("change", onChange);
+      return () => {
+        mqlHover?.removeEventListener("change", onChange);
+        mqlPointer?.removeEventListener("change", onChange);
+      };
+    } catch {
+      return undefined;
+    }
+  }, []);
+
   useEffect(() => {
     let dead = false;
     let onResize: (() => void) | null = null;
+    let loadTimeoutId: number | undefined;
     if (!holderRef.current || !Number.isFinite(effLat + effLng)) return undefined;
 
-    void loadYandexMaps()
+    setMapLoadFailed(false);
+
+    const loadTimeoutPromise = new Promise<never>((_, reject) => {
+      loadTimeoutId = window.setTimeout(() => reject(new Error("YANDEX_MAP_LOAD_TIMEOUT")), YANDEX_MAP_LOAD_TIMEOUT_MS);
+    });
+
+    void Promise.race([loadYandexMaps(), loadTimeoutPromise])
       .then((ym) => {
+        if (loadTimeoutId !== undefined) {
+          window.clearTimeout(loadTimeoutId);
+          loadTimeoutId = undefined;
+        }
         if (dead || !holderRef.current) return;
         if (mapInstRef.current) return;
 
@@ -374,111 +499,168 @@ export function YandexMapPicker({
         ymaps.ready(() => {
           if (dead || !holderRef.current || mapInstRef.current) return;
 
-          const { lat: lat0, lng: lng0, zoom: z0 } = effRef.current;
-          const center0 = [lat0, lng0] as [number, number];
-          const map = new ymaps.Map(holderRef.current, {
-            center: center0,
-            zoom: z0 ?? 11,
-            controls: ["zoomControl"],
-          });
-
+          let map: YmapsNamespace | null = null;
           try {
-            map.container?.fitToViewport?.();
-          } catch {
-            /* noop */
-          }
+            const { lat: lat0, lng: lng0, zoom: z0 } = effRef.current;
+            const center0 = [lat0, lng0] as [number, number];
+            map = new ymaps.Map(holderRef.current, {
+              center: center0,
+              zoom: z0 ?? 11,
+              controls: ["zoomControl"],
+            });
 
-          // Keep map fitted on viewport resize (prevents internal scrollbars / clipped tiles).
-          onResize = () => {
             try {
               map.container?.fitToViewport?.();
             } catch {
               /* noop */
             }
-          };
-          try {
-            window.addEventListener("resize", onResize);
-          } catch {
-            /* noop */
-          }
 
-          const emitIfMoved = (next: MapCenter) => {
-            const last = lastEmittedRef.current;
-            if (last && !centerMovedEnough(last, next)) return;
-            lastEmittedRef.current = next;
-            onCenterChangeRef.current?.(next);
-          };
-
-          const scheduleEmitFromMap = () => {
-            if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-            debounceTimerRef.current = setTimeout(() => {
-              debounceTimerRef.current = null;
+            // Keep map fitted on viewport resize (prevents internal scrollbars / clipped tiles).
+            onResize = () => {
               try {
-                const c = map.getCenter() as number[] | undefined;
-                if (!c || c.length < 2) return;
-                emitIfMoved({ lat: c[0]!, lng: c[1]! });
+                map?.container?.fitToViewport?.();
               } catch {
                 /* noop */
               }
-            }, CENTER_EMIT_DEBOUNCE_MS);
-          };
-
-          map.events.add("actionend", scheduleEmitFromMap);
-          map.events.add("boundschange", scheduleEmitFromMap);
-
-          const scheduleViewportStable = () => {
-            if (!onViewportStableRef.current) return;
-            if (viewportStableTimerRef.current) clearTimeout(viewportStableTimerRef.current);
-            viewportStableTimerRef.current = setTimeout(() => {
-              viewportStableTimerRef.current = null;
-              try {
-                const c = map.getCenter() as number[] | undefined;
-                const b = map.getBounds?.() as number[][] | undefined;
-                if (!c || c.length < 2 || !b || !Array.isArray(b) || b.length < 2) return;
-                const centerMap: MapCenter = { lat: c[0]!, lng: c[1]! };
-                const box = normalizeYandexBoundsGeo(b);
-                if (!box) return;
-                onViewportStableRef.current?.({ center: centerMap, bounds: box });
-              } catch {
-                /* noop */
-              }
-            }, VIEWPORT_STABLE_DEBOUNCE_MS);
-          };
-
-          map.events.add("actionend", scheduleViewportStable);
-          map.events.add("boundschange", scheduleViewportStable);
-
-          // Keep React hover preview positioned on pan/zoom.
-          const onMove = () => {
+            };
             try {
-              updateActivePreviewPosition();
+              window.addEventListener("resize", onResize);
             } catch {
               /* noop */
             }
-          };
-          map.events.add("actionend", onMove);
-          map.events.add("boundschange", onMove);
 
-          map.events.add("click", (e: { get: (k: string) => unknown }) => {
-            closePreviewImmediatelyRef.current();
-            const coords = e.get("coords") as [number, number] | undefined;
-            if (!coords || coords.length < 2) return;
-            const mapCenter: MapCenter = { lat: coords[0]!, lng: coords[1]! };
-            onMapClickRef.current?.(mapCenter);
-            lastEmittedRef.current = mapCenter;
-            onCenterChangeRef.current?.(mapCenter);
-          });
+            const emitIfMoved = (next: MapCenter) => {
+              const last = lastEmittedRef.current;
+              if (last && !centerMovedEnough(last, next)) return;
+              lastEmittedRef.current = next;
+              onCenterChangeRef.current?.(next);
+            };
 
-          ymapsApiRef.current = ymaps;
-          mapInstRef.current = { map };
-          setMapReady(true);
+            const scheduleEmitFromMap = () => {
+              if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+              debounceTimerRef.current = setTimeout(() => {
+                debounceTimerRef.current = null;
+                try {
+                  const c = map!.getCenter() as number[] | undefined;
+                  if (!c || c.length < 2) return;
+                  emitIfMoved({ lat: c[0]!, lng: c[1]! });
+                } catch {
+                  /* noop */
+                }
+              }, CENTER_EMIT_DEBOUNCE_MS);
+            };
+
+            map.events.add("actionend", scheduleEmitFromMap);
+            map.events.add("boundschange", scheduleEmitFromMap);
+
+            const scheduleViewportStable = () => {
+              if (!onViewportStableRef.current) return;
+              if (viewportStableTimerRef.current) clearTimeout(viewportStableTimerRef.current);
+              viewportStableTimerRef.current = setTimeout(() => {
+                viewportStableTimerRef.current = null;
+                try {
+                  const c = map!.getCenter() as number[] | undefined;
+                  const b = map!.getBounds?.() as number[][] | undefined;
+                  if (!c || c.length < 2 || !b || !Array.isArray(b) || b.length < 2) return;
+                  const centerMap: MapCenter = { lat: c[0]!, lng: c[1]! };
+                  const box = normalizeYandexBoundsGeo(b);
+                  if (!box) return;
+                  onViewportStableRef.current?.({ center: centerMap, bounds: box });
+                } catch {
+                  /* noop */
+                }
+              }, VIEWPORT_STABLE_DEBOUNCE_MS);
+            };
+
+            map.events.add("actionend", scheduleViewportStable);
+            map.events.add("boundschange", scheduleViewportStable);
+
+            // Keep React hover preview positioned on pan/zoom.
+            const onMove = () => {
+              try {
+                updateActivePreviewPosition();
+              } catch {
+                /* noop */
+              }
+            };
+            map.events.add("actionend", onMove);
+            map.events.add("boundschange", onMove);
+
+            // Touch-like UIs: brief guard after pan/zoom so a stray map click does not dismiss the listing popup.
+            map.events.add("actionstart", () => {
+              try {
+                if (!preferTapListingPopupRef.current) return;
+                const until = Date.now() + MAP_CLICK_CLOSE_GUARD_MS;
+                if (until > mapGestureCloseGuardUntilRef.current) mapGestureCloseGuardUntilRef.current = until;
+              } catch {
+                /* noop */
+              }
+            });
+            map.events.add("actionend", () => {
+              try {
+                if (!preferTapListingPopupRef.current) return;
+                const until = Date.now() + MAP_CLICK_CLOSE_GUARD_MS;
+                if (until > mapGestureCloseGuardUntilRef.current) mapGestureCloseGuardUntilRef.current = until;
+              } catch {
+                /* noop */
+              }
+            });
+
+            map.events.add("click", (e: { get: (k: string) => unknown }) => {
+              const tapUx = preferTapListingPopupRef.current;
+              const skipCloseFromRecentGesture = tapUx && Date.now() < mapGestureCloseGuardUntilRef.current;
+              const skipCloseFromListingPlacemark =
+                Date.now() < listingPlacemarkClickSuppressMapCloseUntilRef.current;
+              if (!skipCloseFromRecentGesture && !skipCloseFromListingPlacemark) {
+                closePreviewImmediatelyRef.current();
+              }
+              const coords = e.get("coords") as [number, number] | undefined;
+              if (!coords || coords.length < 2) return;
+              const mapCenter: MapCenter = { lat: coords[0]!, lng: coords[1]! };
+              onMapClickRef.current?.(mapCenter);
+              lastEmittedRef.current = mapCenter;
+              onCenterChangeRef.current?.(mapCenter);
+            });
+
+            ymapsApiRef.current = ymaps;
+            mapInstRef.current = { map };
+            setMapReady(true);
+            setMapLoadFailed(false);
+          } catch {
+            resetYandexMapsLoaderForRetry();
+            try {
+              map?.destroy?.();
+            } catch {
+              /* noop */
+            }
+            mapInstRef.current = null;
+            ymapsApiRef.current = null;
+            if (!dead) {
+              setMapReady(false);
+              setMapLoadFailed(true);
+            }
+          }
         });
         /* eslint-enable @typescript-eslint/no-explicit-any */
       })
-      .catch(() => setMapReady(false));
+      .catch(() => {
+        if (loadTimeoutId !== undefined) {
+          window.clearTimeout(loadTimeoutId);
+          loadTimeoutId = undefined;
+        }
+        resetYandexMapsLoaderForRetry();
+        if (!dead) {
+          setMapReady(false);
+          setMapLoadFailed(true);
+        }
+      });
 
     return () => {
       dead = true;
+      if (loadTimeoutId !== undefined) {
+        window.clearTimeout(loadTimeoutId);
+        loadTimeoutId = undefined;
+      }
       try {
         if (onResize) window.removeEventListener("resize", onResize);
       } catch {
@@ -512,7 +694,7 @@ export function YandexMapPicker({
       mapInstRef.current = null;
       setMapReady(false);
     };
-  }, [updateActivePreviewPosition]);
+  }, [updateActivePreviewPosition, mapLoadAttempt]);
 
   /** Sync prop center → map without changing zoom (avoids snap-back after user zooms out). */
   useLayoutEffect(() => {
@@ -709,35 +891,42 @@ export function YandexMapPicker({
     // If we changed markers, close any existing preview (prevents "stuck" popup).
     closePreviewImmediately();
 
-    for (const lm of listingMarkers) {
-      if (!Number.isFinite(lm.lat + lm.lng)) continue;
+    const groups = groupListingMarkersByProximity(listingMarkers);
+
+    for (const group of groups) {
+      const rep = groupRepresentativeLatLng(group);
+      if (!rep) continue;
+      const groupKey = listingMarkerGroupKey(group);
+      const anySelected = group.some((m) => m.isSelected);
+      const anyHovered = group.some((m) => m.isHovered);
       const pm = new ymaps.Placemark(
-        [lm.lat, lm.lng],
+        [rep.lat, rep.lng],
         {},
         {
-          preset: lm.isSelected
+          preset: anySelected
             ? "islands#redCircleDotIcon"
-            : lm.isHovered
+            : anyHovered
               ? "islands#orangeCircleDotIcon"
               : "islands#blueCircleDotIcon",
-          zIndex: lm.isSelected ? 780 : lm.isHovered ? 750 : 720,
+          zIndex: anySelected ? 780 : anyHovered ? 750 : 720,
           hasBalloon: false,
           hasHint: false,
           openBalloonOnClick: false,
         },
       );
 
-      // React-only preview (no native hint/balloon).
-      pm.events.add("mouseenter", () => {
-        markerHoveredRef.current = true;
-        popupHoveredRef.current = false;
-        clearCloseTimer();
-        setHoveredListingId(lm.id);
-      });
-      pm.events.add("mouseleave", () => {
-        markerHoveredRef.current = false;
-        schedulePreviewHide();
-      });
+      if (!preferTapListingPopup) {
+        pm.events.add("mouseenter", () => {
+          markerHoveredRef.current = true;
+          popupHoveredRef.current = false;
+          clearCloseTimer();
+          setHoveredListingGroupKey(groupKey);
+        });
+        pm.events.add("mouseleave", () => {
+          markerHoveredRef.current = false;
+          schedulePreviewHide();
+        });
+      }
 
       pm.events.add("click", (e: unknown) => {
         try {
@@ -745,16 +934,21 @@ export function YandexMapPicker({
         } catch {
           /* noop */
         }
+        listingPlacemarkClickSuppressMapCloseUntilRef.current = Date.now() + 450;
         if (listingMarkerClickNavigatesOnlyRef.current) {
-          onListingMarkerClickRef.current?.(lm.id);
+          const first = group[0];
+          if (first) onListingMarkerClickRef.current?.(first.id);
           return;
         }
         clearCloseTimer();
         markerHoveredRef.current = true;
         popupHoveredRef.current = false;
-        setActiveListingId(lm.id);
-        setHoveredListingId(lm.id);
-        onListingMarkerClickRef.current?.(lm.id);
+        setActiveListingGroupKey(groupKey);
+        setHoveredListingGroupKey(groupKey);
+        if (group.length === 1) {
+          const only = group[0];
+          if (only) onListingMarkerClickRef.current?.(only.id);
+        }
       });
       try {
         map.geoObjects?.add?.(pm);
@@ -763,7 +957,7 @@ export function YandexMapPicker({
         /* noop */
       }
     }
-  }, [mapReady, listingMarkersJson]);
+  }, [mapReady, listingMarkersJson, preferTapListingPopup]);
 
   const userLocationKey = useMemo(
     () =>
@@ -838,7 +1032,9 @@ export function YandexMapPicker({
     /* eslint-enable @typescript-eslint/no-explicit-any */
 
     if (!map?.setCenter || typeof navigator === "undefined" || !navigator.geolocation) {
-      console.warn("Geolocation not available");
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("Geolocation not available");
+      }
       return;
     }
 
@@ -857,12 +1053,16 @@ export function YandexMapPicker({
           onCenterChangeRef.current?.(nextCenter);
           onGeolocationButtonSuccessRef.current?.(nextCenter);
         } catch (e) {
-          console.warn(e);
+          if (process.env.NODE_ENV !== "production") {
+            console.warn(e);
+          }
         }
       },
       (err) => {
         setGeoLoading(false);
-        console.error("Geolocation error", err);
+        if (process.env.NODE_ENV !== "production") {
+          console.error("Geolocation error", err);
+        }
         const code = (err as { code?: unknown })?.code;
         if (code === 1) {
           try {
@@ -899,6 +1099,24 @@ export function YandexMapPicker({
   return (
     <div className={shell} style={shellContainerStyle}>
       <div ref={holderRef} className="absolute inset-0 z-0" />
+      {mapLoadFailed ?
+        <div
+          className="absolute inset-0 z-[8] flex flex-col items-center justify-center gap-3 bg-black/[0.06] p-4 text-center"
+          role="alert"
+        >
+          <p className="max-w-sm text-sm font-medium leading-snug text-black/85">{MAP_FALLBACK_MESSAGE}</p>
+          {likelyInAppBrowser ?
+            <p className="max-w-sm text-xs leading-snug text-black/55">{MAP_FALLBACK_IN_APP_HINT}</p>
+          : null}
+          <button
+            type="button"
+            onClick={() => setMapLoadAttempt((n) => n + 1)}
+            className="inline-flex h-11 min-w-[140px] items-center justify-center rounded-2xl border border-black/12 bg-white px-5 text-sm font-semibold text-black/90 hover:bg-black/[0.03]"
+          >
+            Повторить
+          </button>
+        </div>
+      : null}
       {viewportSearchOverlay ?
         <div className="pointer-events-none absolute inset-0 z-[12] overflow-hidden rounded-2xl" aria-hidden>
           <div
@@ -918,28 +1136,32 @@ export function YandexMapPicker({
         <GeolocationButton loading={geoLoading} onClick={handleMyLocation} />
       : null}
 
-      {mapReady && displayListingMarker && activeListingPreviewPos ? (
+      {mapReady && displayListingGroup && displayListingGroup.length > 0 && activeListingPreviewPos ? (
         <div
-          className="pointer-events-auto absolute z-30 max-w-[240px]"
+          className="pointer-events-auto absolute z-30 max-w-[min(92vw,280px)]"
           style={{
             left: activeListingPreviewPos.x,
             top: activeListingPreviewPos.y,
             transform: "translate(-50%, calc(-100% - 10px))",
           }}
-          onMouseEnter={() => {
-            popupHoveredRef.current = true;
-            clearCloseTimer();
-          }}
-          onMouseLeave={() => {
-            popupHoveredRef.current = false;
-            schedulePreviewHide();
-          }}
+          {...(preferTapListingPopup ?
+            {}
+          : {
+              onMouseEnter: () => {
+                popupHoveredRef.current = true;
+                clearCloseTimer();
+              },
+              onMouseLeave: () => {
+                popupHoveredRef.current = false;
+                schedulePreviewHide();
+              },
+            })}
         >
-          <div className="relative rounded-2xl border border-black/10 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
+          <div className="relative max-h-[min(50vh,320px)] overflow-y-auto rounded-2xl border border-black/10 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
             <button
               type="button"
               aria-label="Закрыть"
-              className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-sm text-black/70 shadow-[0_2px_8px_rgba(0,0,0,0.12)] hover:bg-white"
+              className="sticky top-0 z-10 ml-auto mr-1.5 mt-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-white/95 text-sm text-black/70 shadow-[0_2px_8px_rgba(0,0,0,0.12)] ring-1 ring-black/10 hover:bg-white"
               onClick={(ev) => {
                 try {
                   ev.preventDefault();
@@ -952,39 +1174,33 @@ export function YandexMapPicker({
             >
               ×
             </button>
-            <div
-              role="button"
-              tabIndex={0}
-              className="cursor-pointer flex gap-2.5 p-2 pr-9 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#ff7a00]/40"
-              onClick={() => {
-                const id = displayListingId;
-                if (id) onListingMarkerClickRef.current?.(id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  const id = displayListingId;
-                  if (id) onListingMarkerClickRef.current?.(id);
-                }
-              }}
-            >
-              <ListingPopupThumb url={displayListingMarker.previewImage} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-bold leading-tight text-black/90">
-                  {displayListingMarker.previewTitle.trim() || "Объявление"}
-                </div>
-                {displayListingMarker.previewPrice?.trim() ?
-                  <div className="mt-0.5 truncate text-xs font-semibold tabular-nums text-black/85">
-                    {displayListingMarker.previewPrice.trim()}
+            <div className="-mt-8 flex flex-col divide-y divide-black/10 px-1 pb-2 pt-1">
+              {displayListingGroup.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className="flex w-full cursor-pointer gap-2.5 px-2 py-2.5 text-left outline-none first:pt-7 hover:bg-black/[0.03] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#ff7a00]/35"
+                  onClick={() => {
+                    onListingMarkerClickRef.current?.(m.id);
+                  }}
+                >
+                  <ListingPopupThumb url={m.previewImage} compact />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-bold leading-tight text-black/90">
+                      {m.previewTitle.trim() || "Объявление"}
+                    </div>
+                    {m.previewPrice?.trim() ?
+                      <div className="mt-0.5 truncate text-xs font-semibold tabular-nums text-black/85">{m.previewPrice.trim()}</div>
+                    : null}
+                    {m.previewType.trim() ?
+                      <div className="mt-1 truncate text-xs leading-snug text-black/60">{m.previewType}</div>
+                    : null}
+                    {m.previewCity.trim() ?
+                      <div className="mt-0.5 truncate text-xs leading-snug text-black/55">{m.previewCity}</div>
+                    : null}
                   </div>
-                : null}
-                {displayListingMarker.previewType.trim() ?
-                  <div className="mt-1 truncate text-xs leading-snug text-black/60">{displayListingMarker.previewType}</div>
-                : null}
-                {displayListingMarker.previewCity.trim() ?
-                  <div className="mt-0.5 truncate text-xs leading-snug text-black/55">{displayListingMarker.previewCity}</div>
-                : null}
-              </div>
+                </button>
+              ))}
             </div>
           </div>
         </div>

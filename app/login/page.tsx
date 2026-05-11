@@ -976,14 +976,14 @@ function LoginPageInner() {
 
               {forgotOpen ? (
                 <div
-                  className="fixed inset-0 z-[95] flex items-center justify-center bg-black/55 p-4"
+                  className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/55 p-4 pt-[max(1rem,calc(1rem+env(safe-area-inset-top)))] pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))] sm:items-center sm:pt-4 sm:pb-4"
                   onClick={() => {
                     if (!forgotBusy) setForgotOpen(false);
                   }}
                   role="presentation"
                 >
                   <div
-                    className="w-full max-w-[440px] rounded-2xl bg-white p-5 shadow-xl"
+                    className="my-auto w-full max-w-[440px] max-h-[85dvh] overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:max-h-[90vh]"
                     onClick={(e) => e.stopPropagation()}
                     role="dialog"
                     aria-modal="true"

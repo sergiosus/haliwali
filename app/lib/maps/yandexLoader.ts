@@ -15,6 +15,20 @@ const SCRIPT_SELECTOR = 'script[data-haliwali-yandex-maps-api="2.1"][data-haliwa
 
 let loadInflight: Promise<YmapsNamespace> | null = null;
 
+/**
+ * Clears in-flight load state and removes our script tag(s) so a retry can inject a fresh copy
+ * (e.g. after timeout in embedded browsers where the first request hangs).
+ */
+export function resetYandexMapsLoaderForRetry(): void {
+  loadInflight = null;
+  if (typeof document === "undefined") return;
+  try {
+    document.querySelectorAll(SCRIPT_SELECTOR).forEach((el) => el.remove());
+  } catch {
+    /* noop */
+  }
+}
+
 function ymapsReady(ymaps: YmapsNamespace): Promise<YmapsNamespace> {
   return new Promise((resolve, reject) => {
     try {

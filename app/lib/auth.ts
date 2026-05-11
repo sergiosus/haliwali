@@ -183,7 +183,9 @@ export function setSession(userId: string, contact: string) {
   if (c) localStorage.setItem(CONTACT_KEY, c);
   localStorage.setItem(USER_ID_KEY_LEGACY, id);
   setSnapshot({ status: "ready", userId: id });
-  if (isDebugAuthClient()) console.log("[auth] setSession (client)", { hasUser: true, userId: id });
+  if (isDebugAuthClient() && process.env.NODE_ENV !== "production") {
+    console.log("[auth] setSession (client)", { hasUser: true, isAdmin: false });
+  }
 }
 
 /**
@@ -195,16 +197,18 @@ export async function refreshAuthFromServer(options?: { bypassCache?: boolean })
   setSnapshot({ status: "loading", userId: snapshot.userId });
   try {
     const { status, data } = await loadAuthMeFromServer({ bypassCache: options?.bypassCache });
-    if (isDebugAuthClient()) {
+    if (isDebugAuthClient() && process.env.NODE_ENV !== "production") {
       console.log("[auth] /api/auth/me result", {
         status,
         hasUser: Boolean(status === 200 && data.ok && data.user?.userId),
-        userId: data.ok && data.user?.userId ? data.user.userId : undefined,
+        isAdmin: false,
       });
     }
     return applyAuthFromMeResponse(status, data);
   } catch (e: unknown) {
-    if (isDebugAuthClient()) console.warn("[auth] /api/auth/me failed", e);
+    if (isDebugAuthClient() && process.env.NODE_ENV !== "production") {
+      console.warn("[auth] /api/auth/me failed", e);
+    }
     setSnapshot({ status: "ready", userId: null });
     if (typeof window !== "undefined") {
       localStorage.removeItem(USER_ID_KEY_LEGACY);

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getAuthSnapshot, logout as logoutAuth, subscribeAuth, useAuth } from "../lib/auth";
 import { isDebugAuthClient } from "../lib/debugAuth";
@@ -74,6 +74,7 @@ export function SiteHeader() {
   const [mounted, setMounted] = useState(false);
   const [chatUnreadTotal, setChatUnreadTotal] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const accountMenuId = useId();
 
   const refreshChatUnread = useCallback(async () => {
     if (!mounted || auth.status !== "ready" || !auth.userId) {
@@ -146,13 +147,19 @@ export function SiteHeader() {
 
   /** Open dropdown with short opacity/slide animation (outside effects to satisfy lint rules). */
   function openAccountMenuAnimated() {
-    setMenuPanelEntered(false);
-    setMenuOpen(true);
-    queueMicrotask(() => {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => setMenuPanelEntered(true));
+    if (menuUseHover) {
+      setMenuPanelEntered(false);
+      setMenuOpen(true);
+      queueMicrotask(() => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => setMenuPanelEntered(true));
+        });
       });
-    });
+    } else {
+      /* Touch / coarse pointer: show panel immediately so links stay tappable (no pointer-events-none gap). */
+      setMenuOpen(true);
+      setMenuPanelEntered(true);
+    }
   }
 
   function syncHeaderProfile() {
@@ -167,27 +174,9 @@ export function SiteHeader() {
     setUserLabel(label);
     setUserAvatar(profile?.avatarData ?? "");
     setUserVerified(Boolean(user?.phoneVerified));
-    if (process.env.NODE_ENV === "development" && uid && user) {
-      console.log("[AUTH CURRENT USER]", {
-        userId: uid,
-        serverProfileName: user.serverProfileName,
-        serverChosenDisplay: user.serverChosenDisplay,
-        email: user.email,
-        contact: user.contact,
-      });
-      console.log(
-        "[HEADER DISPLAY]",
-        label ||
-          getSiteIdentityLabel({
-            name: user.serverProfileName,
-            displayName: user.serverChosenDisplay,
-            email: user.email?.includes("@") ? user.email : undefined,
-            contact: user.contact?.includes("@") ? user.contact : undefined,
-          }),
-      );
-    }
-    if (isDebugAuthClient()) {
-      console.log("[auth] header user", { hasUser: Boolean(uid), userId: uid || undefined });
+    if (isDebugAuthClient() && process.env.NODE_ENV !== "production") {
+      // Minimal, non-sensitive debug only.
+      console.log("[auth] header", { hasUser: Boolean(uid), isAdmin: false });
     }
   }
 
@@ -289,10 +278,13 @@ export function SiteHeader() {
 
   useEffect(() => {
     if (!menuOpen && !accountSwitcherOpen) return;
-    function onDocClick(e: MouseEvent) {
-      if (menuOpen && menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        closeAccountMenu();
-      }
+    /** Outside close: `pointerdown` works for touch + mouse; `mousedown` alone misses many mobile taps. */
+    function onDocPointerDown(e: PointerEvent) {
+      if (!menuOpen || !menuRef.current) return;
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (menuRef.current.contains(t)) return;
+      closeAccountMenu();
     }
     function onEsc(e: globalThis.KeyboardEvent) {
       if (e.key === "Escape") {
@@ -300,10 +292,10 @@ export function SiteHeader() {
         setAccountSwitcherOpen(false);
       }
     }
-    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onEsc);
     return () => {
-      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("pointerdown", onDocPointerDown);
       document.removeEventListener("keydown", onEsc);
     };
   }, [menuOpen, accountSwitcherOpen]);
@@ -398,13 +390,12 @@ export function SiteHeader() {
       <button
         type="button"
         onClick={() => {
-          // Keep click as fallback (touch/non-hover devices).
-          if (menuUseHover) return;
           if (menuOpen) closeAccountMenu();
           else openAccountMenuAnimated();
         }}
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-expanded={menuOpen}
+        aria-controls={`${accountMenuId}-menu`}
         className="cursor-pointer text-left md:whitespace-nowrap"
       >
         <div className="inline-flex min-w-0 max-w-[min(18rem,calc(100vw-13rem))] items-center gap-2 text-sm font-semibold text-gray-800 hover:underline md:max-w-none">
@@ -431,17 +422,16 @@ export function SiteHeader() {
       {menuOpen ? (
         <div className="absolute right-0 top-full z-[80] w-[220px] pt-2">
           <div
-            role="menu"
+            id={`${accountMenuId}-menu`}
             className={[
               "rounded-xl border border-black/10 bg-white p-2 shadow-lg transition-[opacity,transform] duration-150 ease-out",
-              menuPanelEntered
-                ? "pointer-events-auto translate-y-0 opacity-100"
-                : "pointer-events-none -translate-y-[5px] opacity-0",
+              /* Mobile (`!menuUseHover`): panel enters immediately — always tappable. Desktop hover: block hits only while faded in. */
+              menuUseHover && !menuPanelEntered ? "pointer-events-none" : "pointer-events-auto",
+              menuPanelEntered ? "translate-y-0 opacity-100" : "-translate-y-[5px] opacity-0",
             ].join(" ")}
           >
           <Link
             href="/account"
-            role="menuitem"
             onClick={() => closeAccountMenu()}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
@@ -449,7 +439,6 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=favorites"
-            role="menuitem"
             onClick={() => closeAccountMenu()}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
@@ -457,7 +446,6 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=messages"
-            role="menuitem"
             onClick={() => closeAccountMenu()}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
@@ -465,7 +453,6 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=profile"
-            role="menuitem"
             onClick={() => closeAccountMenu()}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
@@ -473,7 +460,6 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/support"
-            role="menuitem"
             onClick={() => closeAccountMenu()}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
@@ -481,7 +467,6 @@ export function SiteHeader() {
           </Link>
           <Link
             href="/account?tab=settings"
-            role="menuitem"
             onClick={() => closeAccountMenu()}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
@@ -489,7 +474,6 @@ export function SiteHeader() {
           </Link>
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               closeAccountMenu();
               setAccountSwitcherOpen(true);
@@ -500,7 +484,6 @@ export function SiteHeader() {
           </button>
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               closeAccountMenu();
               handleLogout();

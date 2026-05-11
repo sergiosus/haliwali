@@ -743,6 +743,7 @@ function EditLinkSuccessModal({
   onClose: () => void;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const manualCopyRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -752,6 +753,18 @@ function EditLinkSuccessModal({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (copyState !== "error") return;
+    queueMicrotask(() => {
+      try {
+        manualCopyRef.current?.focus();
+        manualCopyRef.current?.select();
+      } catch {
+        /* noop */
+      }
+    });
+  }, [copyState]);
 
   if (!open || !editPath) return null;
 
@@ -836,8 +849,24 @@ function EditLinkSuccessModal({
           </div>
 
           {copyState === "error" ? (
-            <div className="mt-3 text-sm text-red-600">
-              Не удалось скопировать — скопируйте вручную
+            <div className="mt-3 text-left">
+              <div className="text-sm text-red-600">
+                Не удалось скопировать автоматически. Скопируйте ссылку вручную.
+              </div>
+              <input
+                ref={manualCopyRef}
+                readOnly
+                value={fullUrl}
+                aria-label="Ссылка для ручного копирования"
+                onFocus={(e) => {
+                  try {
+                    e.currentTarget.select();
+                  } catch {
+                    /* noop */
+                  }
+                }}
+                className="mt-2 h-11 w-full rounded-2xl border border-black/15 bg-white px-4 font-mono text-sm text-black/85 outline-none focus:border-black/25 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)]"
+              />
             </div>
           ) : null}
 
@@ -908,7 +937,7 @@ function ListingDetailsModal({
       <div
         className={[
           "relative w-full max-w-xl rounded-3xl bg-white p-5 pb-6 shadow-xl sm:p-6 sm:pb-8",
-          "max-h-[90vh] overflow-y-auto",
+          "max-h-[90dvh] overflow-y-auto sm:max-h-[90vh]",
           "transition-transform duration-150",
           open ? "scale-100" : "scale-95",
         ].join(" ")}
@@ -1055,7 +1084,7 @@ function FullscreenImageViewer({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 transition-opacity duration-150"
+      className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/90 p-4 pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))] pt-[max(1rem,calc(1rem+env(safe-area-inset-top)))] transition-opacity duration-150 sm:p-4 sm:pb-4 sm:pt-4"
       role="dialog"
       aria-modal="true"
       aria-label="Просмотр фото"
@@ -1117,7 +1146,7 @@ function FullscreenImageViewer({
             <img
               src={src}
               alt=""
-              className="max-h-[90vh] max-w-[90vw] rounded-2xl object-contain shadow-2xl transition-transform duration-150"
+              className="max-h-[90dvh] max-w-[90vw] rounded-2xl object-contain shadow-2xl transition-transform duration-150 sm:max-h-[90vh]"
               style={{ transform: "scale(1)" }}
             />
           ) : (
@@ -1167,7 +1196,7 @@ function DialogShell({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 pb-[max(1rem,calc(1rem+env(safe-area-inset-bottom)))] pt-[max(1rem,calc(1rem+env(safe-area-inset-top)))] sm:items-center sm:p-4 sm:pb-4 sm:pt-4"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -1175,7 +1204,7 @@ function DialogShell({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-5 pb-6 shadow-xl sm:p-6 sm:pb-8">
+      <div className="relative w-full max-w-xl max-h-[90dvh] overflow-y-auto rounded-3xl bg-white p-5 pb-6 shadow-xl sm:max-h-[90vh] sm:p-6 sm:pb-8">
         <div className="flex items-start justify-between gap-4 pr-12">
           <div className="min-w-0">
             <div className="text-lg font-semibold tracking-tight">{title}</div>

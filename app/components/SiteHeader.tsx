@@ -74,6 +74,8 @@ export function SiteHeader() {
   const [mounted, setMounted] = useState(false);
   const [chatUnreadTotal, setChatUnreadTotal] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuPanelRef = useRef<HTMLDivElement | null>(null);
   const accountMenuId = useId();
 
   const refreshChatUnread = useCallback(async () => {
@@ -280,10 +282,13 @@ export function SiteHeader() {
     if (!menuOpen && !accountSwitcherOpen) return;
     /** Outside close: `pointerdown` works for touch + mouse; `mousedown` alone misses many mobile taps. */
     function onDocPointerDown(e: PointerEvent) {
-      if (!menuOpen || !menuRef.current) return;
+      if (!menuOpen) return;
       const t = e.target;
       if (!(t instanceof Node)) return;
-      if (menuRef.current.contains(t)) return;
+      // Do not treat taps inside trigger/panel as outside (mobile: ensure Link click still runs).
+      if (menuPanelRef.current?.contains(t)) return;
+      if (menuTriggerRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
       closeAccountMenu();
     }
     function onEsc(e: globalThis.KeyboardEvent) {
@@ -388,6 +393,7 @@ export function SiteHeader() {
       }}
     >
       <button
+        ref={menuTriggerRef}
         type="button"
         onClick={() => {
           if (menuOpen) closeAccountMenu();
@@ -423,6 +429,7 @@ export function SiteHeader() {
         <div className="absolute right-0 top-full z-[80] w-[220px] pt-2">
           <div
             id={`${accountMenuId}-menu`}
+            ref={menuPanelRef}
             className={[
               "rounded-xl border border-black/10 bg-white p-2 shadow-lg transition-[opacity,transform] duration-150 ease-out",
               /* Mobile (`!menuUseHover`): panel enters immediately — always tappable. Desktop hover: block hits only while faded in. */
@@ -432,42 +439,42 @@ export function SiteHeader() {
           >
           <Link
             href="/account"
-            onClick={() => closeAccountMenu()}
+            onClick={() => queueMicrotask(() => closeAccountMenu())}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Мои объявления
           </Link>
           <Link
             href="/account?tab=favorites"
-            onClick={() => closeAccountMenu()}
+            onClick={() => queueMicrotask(() => closeAccountMenu())}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Избранное
           </Link>
           <Link
             href="/account?tab=messages"
-            onClick={() => closeAccountMenu()}
+            onClick={() => queueMicrotask(() => closeAccountMenu())}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             {chatUnreadTotal > 0 ? `Сообщения (${chatUnreadTotal})` : "Сообщения"}
           </Link>
           <Link
             href="/account?tab=profile"
-            onClick={() => closeAccountMenu()}
+            onClick={() => queueMicrotask(() => closeAccountMenu())}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Профиль
           </Link>
           <Link
             href="/support"
-            onClick={() => closeAccountMenu()}
+            onClick={() => queueMicrotask(() => closeAccountMenu())}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Поддержка
           </Link>
           <Link
             href="/account?tab=settings"
-            onClick={() => closeAccountMenu()}
+            onClick={() => queueMicrotask(() => closeAccountMenu())}
             className="flex h-10 items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
           >
             Настройки

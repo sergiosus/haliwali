@@ -114,6 +114,11 @@ type Props = {
   viewportSearchOverlay?: boolean;
   showGeolocationButton?: boolean;
   listingMarkers?: readonly MapListingMarker[];
+  /**
+   * Optional pre-grouped listing markers (e.g. server-side or page-level grouping).
+   * When provided, the map renders exactly one placemark + one stacked popup per group.
+   */
+  listingMarkerGroups?: readonly { key: string; members: readonly MapListingMarker[] }[];
   onListingMarkerClick?: (id: string) => void;
   /**
    * When true: marker click invokes `onListingMarkerClick` but does not “pin” the preview via click
@@ -281,6 +286,7 @@ export function YandexMapPicker({
   viewportSearchOverlay = false,
   showGeolocationButton = true,
   listingMarkers = [],
+  listingMarkerGroups,
   onListingMarkerClick,
   onViewportStable,
   listingMarkerClickNavigatesOnly = false,
@@ -362,7 +368,14 @@ export function YandexMapPicker({
 
   const displayGroupKey = hoveredListingGroupKey ?? activeListingGroupKey;
 
-  const listingGroups = useMemo(() => groupListingMarkersByProximity(listingMarkers), [listingMarkers]);
+  const listingGroups = useMemo(() => {
+    if (listingMarkerGroups && listingMarkerGroups.length > 0) {
+      return listingMarkerGroups
+        .map((g) => (Array.isArray(g.members) ? g.members.slice() : []))
+        .filter((g) => g.length > 0) as MapListingMarker[][];
+    }
+    return groupListingMarkersByProximity(listingMarkers);
+  }, [listingMarkers, listingMarkerGroups]);
 
   const displayListingGroup = useMemo(() => {
     if (!displayGroupKey) return null;
@@ -860,7 +873,10 @@ export function YandexMapPicker({
     }
   }, [mapReady, settlementMarkersJson]);
 
-  const listingMarkersJson = useMemo(() => JSON.stringify(listingMarkers), [listingMarkers]);
+  const listingMarkersJson = useMemo(
+    () => JSON.stringify({ listingMarkers, listingMarkerGroups: listingMarkerGroups ?? null }),
+    [listingMarkers, listingMarkerGroups],
+  );
 
   useEffect(() => {
     if (!mapReady || !mapInstRef.current) return;
@@ -891,7 +907,7 @@ export function YandexMapPicker({
     // If we changed markers, close any existing preview (prevents "stuck" popup).
     closePreviewImmediately();
 
-    const groups = groupListingMarkersByProximity(listingMarkers);
+    const groups = listingGroups;
 
     for (const group of groups) {
       const rep = groupRepresentativeLatLng(group);

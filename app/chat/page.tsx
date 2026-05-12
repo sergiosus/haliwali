@@ -48,7 +48,7 @@ const chatComposerIconBtnClass =
 const chatComposerFormClass =
   "flex w-full min-w-0 max-md:flex-col max-md:gap-2 md:flex-row md:items-end md:gap-2";
 const chatComposerTextareaClass =
-  "block w-full min-w-0 max-w-full shrink-0 resize-none rounded-2xl border border-black/10 bg-white px-3 py-2.5 text-base leading-snug outline-none placeholder:text-ellipsis focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:cursor-not-allowed disabled:bg-black/[0.02] disabled:text-black/45 max-md:min-h-[3.5rem] max-md:max-h-32 md:order-3 md:min-h-11 md:max-h-28 md:flex-1 md:px-4 md:py-2.5 md:text-sm";
+  "block w-full min-w-0 max-w-full shrink-0 resize-none whitespace-pre-wrap rounded-2xl border border-black/10 bg-white px-3 py-2.5 text-base leading-snug outline-none placeholder:text-ellipsis focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:cursor-not-allowed disabled:bg-black/[0.02] disabled:text-black/45 max-md:min-h-[3.5rem] max-md:max-h-32 md:order-3 md:min-h-11 md:max-h-28 md:flex-1 md:px-4 md:py-2.5 md:text-sm";
 const chatComposerMobileControlsClass =
   "flex w-full shrink-0 items-center justify-between gap-2 max-md:flex md:hidden";
 
@@ -1891,20 +1891,20 @@ function ChatInner() {
                 ) : null}
               </div>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
+            <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
               <div className="mt-auto flex flex-col gap-2 pb-0">
               {visibleMsgs.length > 0 ? (
                 visibleMsgs.map((m) => {
                   const isTom = isEveryoneDeleted(m);
                   const isOwn = m.senderId === currentSenderId;
                   return (
-                    <div key={m.id} className={["flex w-full", isOwn ? "justify-end" : "justify-start"].join(" ")}>
+                    <div key={m.id} className={["flex w-full min-w-0", isOwn ? "justify-end" : "justify-start"].join(" ")}>
                     <div
                       ref={(el) => {
                         msgRefs.current[m.id] = el;
                       }}
                       className={[
-                        "group relative max-w-[min(88%,340px)] rounded-2xl border px-3 py-2.5 text-sm shadow-sm",
+                        "group relative min-w-0 max-w-[min(88%,340px)] max-md:max-w-[85vw] overflow-hidden rounded-2xl border px-3 py-2.5 text-sm shadow-sm",
                         isTom
                           ? "border-black/[0.08] bg-black/[0.02]"
                           : isOwn
@@ -2040,7 +2040,11 @@ function ChatInner() {
                           )}
                         </div>
                       ) : (
-                        <div className="mt-1 text-black/80 whitespace-pre-wrap">{m.text}</div>
+                        <div
+                          className="mt-1 max-w-full min-w-0 break-words whitespace-pre-wrap text-black/80 [overflow-wrap:anywhere]"
+                        >
+                          {m.text}
+                        </div>
                       )}
                     </div>
                     </div>
@@ -2363,9 +2367,11 @@ function ChatInner() {
                 ref={inputRef}
                 value={text}
                 rows={3}
+                enterKeyHint="enter"
+                inputMode="text"
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                     e.preventDefault();
                     e.currentTarget.form?.requestSubmit();
                   }

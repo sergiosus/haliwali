@@ -8,6 +8,76 @@ type UsersDbShape = {
   phoneIndex: Record<string, string>;
 };
 
+const USER_SELECT_SQL = `SELECT user_id, email, phone, password_hash, phone_visible, created_at, last_seen_at,
+            COALESCE(deletion_status, '') AS deletion_status,
+            delete_requested_at, delete_scheduled_at,
+            COALESCE(full_name, '') AS full_name,
+            COALESCE(public_display_name, '') AS public_display_name,
+            deleted_at, deleted_by_user_id, delete_reason, purge_after, purged_at
+     FROM users`;
+
+function tsFromPg(value: unknown): number | undefined {
+  if (value == null) return undefined;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function mapPgUserRow(r: {
+  user_id: string;
+  email: string;
+  phone: string;
+  password_hash: string | null;
+  phone_visible: boolean;
+  created_at: string;
+  last_seen_at: string | null;
+  deletion_status: string;
+  delete_requested_at: string | null;
+  delete_scheduled_at: string | null;
+  full_name: string | null;
+  public_display_name: string | null;
+  deleted_at?: Date | string | null;
+  deleted_by_user_id?: string | null;
+  delete_reason?: string | null;
+  purge_after?: Date | string | null;
+  purged_at?: Date | string | null;
+}): StoredUser {
+  const email = normalizeEmail(r.email ?? "");
+  const phone = normalizePhone(r.phone ?? "");
+  const rawDs = (r.deletion_status ?? "").trim();
+  const createdAt = Number(r.created_at);
+  const fullNameTrim = ((r.full_name ?? "") as string).trim();
+  const publicDisplayTrim = ((r.public_display_name ?? "") as string).trim();
+  const softDeletedAt = tsFromPg(r.deleted_at);
+  const purgeAfter = tsFromPg(r.purge_after);
+  const purgedAt = tsFromPg(r.purged_at);
+  const deletedByUserId = (r.deleted_by_user_id ?? "").trim();
+  const deleteReason = (r.delete_reason ?? "").trim();
+  return {
+    userId: r.user_id,
+    email,
+    phone,
+    phoneVisible: Boolean(r.phone_visible),
+    passwordHash: (r.password_hash ?? "").trim(),
+    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    lastSeenAt: r.last_seen_at != null ? Number(r.last_seen_at) : undefined,
+    deletionStatus: rawDs === "pending_deletion" || rawDs === "deleted" ? rawDs : "",
+    ...(fullNameTrim ? { name: fullNameTrim } : {}),
+    ...(publicDisplayTrim ? { displayName: publicDisplayTrim } : {}),
+    ...(r.delete_requested_at != null ? { deleteRequestedAt: Number(r.delete_requested_at) } : {}),
+    ...(r.delete_scheduled_at != null ? { deleteScheduledAt: Number(r.delete_scheduled_at) } : {}),
+    ...(softDeletedAt != null ? { softDeletedAt } : {}),
+    ...(purgeAfter != null ? { purgeAfter } : {}),
+    ...(purgedAt != null ? { purgedAt } : {}),
+    ...(deletedByUserId ? { deletedByUserId } : {}),
+    ...(deleteReason ? { deleteReason } : {}),
+  };
+}
+
 /** Single-user fetch (avoids loading entire table; correct source for password change). */
 export async function pgFetchUserById(userId: string): Promise<StoredUser | null> {
   const id = (userId ?? "").trim();
@@ -25,38 +95,15 @@ export async function pgFetchUserById(userId: string): Promise<StoredUser | null
     delete_scheduled_at: string | null;
     full_name: string | null;
     public_display_name: string | null;
-  }>(
-    `SELECT user_id, email, phone, password_hash, phone_visible, created_at, last_seen_at,
-            COALESCE(deletion_status, '') AS deletion_status,
-            delete_requested_at, delete_scheduled_at,
-            COALESCE(full_name, '') AS full_name,
-            COALESCE(public_display_name, '') AS public_display_name
-     FROM users WHERE user_id = $1 LIMIT 1`,
-    [id],
-  );
+    deleted_at: Date | string | null;
+    deleted_by_user_id: string | null;
+    delete_reason: string | null;
+    purge_after: Date | string | null;
+    purged_at: Date | string | null;
+  }>(`${USER_SELECT_SQL} WHERE user_id = $1 LIMIT 1`, [id]);
   const r = rows[0];
   if (!r) return null;
-  const email = normalizeEmail(r.email ?? "");
-  const phone = normalizePhone(r.phone ?? "");
-  const rawDs = (r.deletion_status ?? "").trim();
-  const createdAt = Number(r.created_at);
-  const fullNameTrim = ((r.full_name ?? "") as string).trim();
-  const publicDisplayTrim = ((r.public_display_name ?? "") as string).trim();
-  const u: StoredUser = {
-    userId: r.user_id,
-    email,
-    phone,
-    phoneVisible: Boolean(r.phone_visible),
-    passwordHash: (r.password_hash ?? "").trim(),
-    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
-    lastSeenAt: r.last_seen_at != null ? Number(r.last_seen_at) : undefined,
-    deletionStatus: rawDs === "pending_deletion" || rawDs === "deleted" ? rawDs : "",
-    ...(fullNameTrim ? { name: fullNameTrim } : {}),
-    ...(publicDisplayTrim ? { displayName: publicDisplayTrim } : {}),
-    ...(r.delete_requested_at != null ? { deleteRequestedAt: Number(r.delete_requested_at) } : {}),
-    ...(r.delete_scheduled_at != null ? { deleteScheduledAt: Number(r.delete_scheduled_at) } : {}),
-  };
-  return u;
+  return mapPgUserRow(r);
 }
 
 /** Row shape for admin checks (`users.is_admin`, legacy `users.role`). */
@@ -105,42 +152,22 @@ export async function pgLoadUsersDb(): Promise<UsersDbShape> {
     delete_scheduled_at: string | null;
     full_name: string | null;
     public_display_name: string | null;
-  }>(
-    `SELECT user_id, email, phone, password_hash, phone_visible, created_at, last_seen_at,
-            COALESCE(deletion_status, '') AS deletion_status,
-            delete_requested_at, delete_scheduled_at,
-            COALESCE(full_name, '') AS full_name,
-            COALESCE(public_display_name, '') AS public_display_name
-     FROM users`,
-  );
+    deleted_at: Date | string | null;
+    deleted_by_user_id: string | null;
+    delete_reason: string | null;
+    purge_after: Date | string | null;
+    purged_at: Date | string | null;
+  }>(USER_SELECT_SQL);
 
   const usersById: Record<string, StoredUser> = {};
   const emailIndex: Record<string, string> = {};
   const phoneIndex: Record<string, string> = {};
 
   for (const r of rows) {
-    const email = normalizeEmail(r.email ?? "");
-    const phone = normalizePhone(r.phone ?? "");
-    const rawDs = (r.deletion_status ?? "").trim();
-    const fullNameTrim = ((r.full_name ?? "") as string).trim();
-    const publicDisplayTrim = ((r.public_display_name ?? "") as string).trim();
-    const u: StoredUser = {
-      userId: r.user_id,
-      email,
-      phone,
-      phoneVisible: Boolean(r.phone_visible),
-      passwordHash: r.password_hash,
-      createdAt: Number(r.created_at),
-      lastSeenAt: r.last_seen_at != null ? Number(r.last_seen_at) : undefined,
-      deletionStatus: rawDs === "pending_deletion" || rawDs === "deleted" ? rawDs : "",
-      ...(fullNameTrim ? { name: fullNameTrim } : {}),
-      ...(publicDisplayTrim ? { displayName: publicDisplayTrim } : {}),
-      ...(r.delete_requested_at != null ? { deleteRequestedAt: Number(r.delete_requested_at) } : {}),
-      ...(r.delete_scheduled_at != null ? { deleteScheduledAt: Number(r.delete_scheduled_at) } : {}),
-    };
+    const u = mapPgUserRow(r);
     usersById[u.userId] = u;
-    if (email) emailIndex[email] = u.userId;
-    if (phone) phoneIndex[phone] = u.userId;
+    if (u.email) emailIndex[u.email] = u.userId;
+    if (u.phone) phoneIndex[u.phone] = u.userId;
   }
 
   return { usersById, emailIndex, phoneIndex };
@@ -236,11 +263,81 @@ export async function pgHasEmailOrPhone(emailRaw: string, phoneRaw: string): Pro
   const phone = normalizePhone(phoneRaw);
   const { rowCount } = await getPool().query(
     `SELECT 1 FROM users
-     WHERE ($1::text <> '' AND email = $1) OR ($2::text <> '' AND phone = $2)
+     WHERE deleted_at IS NULL
+       AND purged_at IS NULL
+       AND COALESCE(deletion_status, '') <> 'deleted'
+       AND (($1::text <> '' AND email = $1) OR ($2::text <> '' AND phone = $2))
      LIMIT 1`,
     [email, phone],
   );
   return (rowCount ?? 0) > 0;
+}
+
+export async function pgCountActivePrivilegedAdmins(): Promise<number> {
+  const { rows } = await getPool().query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c
+     FROM users
+     WHERE deleted_at IS NULL
+       AND purged_at IS NULL
+       AND COALESCE(deletion_status, '') <> 'deleted'
+       AND (COALESCE(is_admin, FALSE) OR COALESCE(TRIM(role), '') = 'admin')`,
+  );
+  const n = Number(rows[0]?.c ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export async function pgSoftDeleteUser(args: {
+  userId: string;
+  deletedByUserId: string;
+  reason?: string;
+}): Promise<void> {
+  const id = (args.userId ?? "").trim();
+  if (!id) return;
+  await getPool().query(
+    `UPDATE users
+     SET deleted_at = NOW(),
+         purge_after = NOW() + INTERVAL '10 days',
+         deleted_by_user_id = $2,
+         delete_reason = $3
+     WHERE user_id = $1`,
+    [id, args.deletedByUserId, (args.reason ?? "").trim() || null],
+  );
+}
+
+export async function pgRestoreSoftDeletedUser(userId: string): Promise<void> {
+  const id = (userId ?? "").trim();
+  if (!id) return;
+  await getPool().query(
+    `UPDATE users
+     SET deleted_at = NULL,
+         purge_after = NULL,
+         purged_at = NULL,
+         delete_reason = NULL,
+         deleted_by_user_id = NULL
+     WHERE user_id = $1`,
+    [id],
+  );
+}
+
+export async function pgPurgeSoftDeletedUser(userId: string, newPasswordHash: string, erasedAt: number): Promise<void> {
+  const id = (userId ?? "").trim();
+  if (!id) return;
+  await getPool().query(
+    `UPDATE users SET
+       email = '',
+       phone = '',
+       password_hash = $2,
+       phone_visible = FALSE,
+       deletion_status = 'deleted',
+       delete_requested_at = $3,
+       delete_scheduled_at = NULL,
+       last_seen_at = NULL,
+       full_name = '',
+       public_display_name = $4,
+       purged_at = NOW()
+     WHERE user_id = $1`,
+    [id, newPasswordHash, erasedAt, "Пользователь удалён"],
+  );
 }
 
 export function isPgUniqueViolation(err: unknown): boolean {

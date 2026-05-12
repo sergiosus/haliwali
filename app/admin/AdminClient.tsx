@@ -193,7 +193,10 @@ const userStatusRu: Record<string, string> = {
   pending_deletion: "Ожидает удаления",
   blocked: "Заблокирован",
   deleted: "Удалён",
+  trashed: "В корзине",
 };
+
+type AdminUsersView = "active" | "trash";
 
 type AdminUserRow = {
   id: string;
@@ -213,6 +216,11 @@ type AdminUserRow = {
   listingsCount: number;
   activeListingsCount: number;
   reportsCount: number;
+  softDeletedAt?: number;
+  purgeAfter?: number;
+  purgedAt?: number;
+  deletedByUserId?: string;
+  deleteReason?: string;
 };
 
 /** «Имя» column / detail — единое правило с остальным приложением. */
@@ -350,6 +358,7 @@ export default function AdminClient() {
   const [reportsReload, setReportsReload] = useState(0);
   const [reports, setReports] = useState<AdminReportRow[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUserRow[]>([]);
+  const [usersView, setUsersView] = useState<AdminUsersView>("active");
   const [usersLoading, setUsersLoading] = useState(false);
   const [detailUserId, setDetailUserId] = useState<string | null>(null);
   const [userDetail, setUserDetail] = useState<AdminUserDetail | null>(null);
@@ -472,7 +481,8 @@ export default function AdminClient() {
 
   const refreshUsers = useCallback(() => {
     setUsersLoading(true);
-    void fetch("/api/admin/users", { credentials: "include", cache: "no-store" })
+    const viewQuery = usersView === "trash" ? "?view=trash" : "?view=active";
+    void fetch(`/api/admin/users${viewQuery}`, { credentials: "include", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!d || typeof d !== "object") return;
@@ -515,15 +525,22 @@ export default function AdminClient() {
               listingsCount: o.listingsCount,
               activeListingsCount: o.activeListingsCount,
               reportsCount: o.reportsCount,
+              softDeletedAt: typeof o.softDeletedAt === "number" ? o.softDeletedAt : undefined,
+              purgeAfter: typeof o.purgeAfter === "number" ? o.purgeAfter : undefined,
+              purgedAt: typeof o.purgedAt === "number" ? o.purgedAt : undefined,
+              deletedByUserId: typeof o.deletedByUserId === "string" ? o.deletedByUserId : undefined,
+              deleteReason: typeof o.deleteReason === "string" ? o.deleteReason : undefined,
             });
           }
         }
         setAdminUsers(cleaned);
-        setCounts((c) => ({ ...c, users: cleaned.length }));
+        if (usersView === "active") {
+          setCounts((c) => ({ ...c, users: cleaned.length }));
+        }
       })
       .catch(() => {})
       .finally(() => setUsersLoading(false));
-  }, []);
+  }, [usersView]);
 
   const bumpUserDetail = useCallback((userId: string) => {
     setDetailUserId((cur) => {
@@ -650,7 +667,7 @@ export default function AdminClient() {
   useEffect(() => {
     if (!loaded || tab !== "users") return;
     refreshUsers();
-  }, [loaded, tab, refreshUsers]);
+  }, [loaded, tab, usersView, refreshUsers]);
 
   useEffect(() => {
     if (!supportTicketId) {
@@ -832,6 +849,32 @@ export default function AdminClient() {
 
       {tab === "users" ? (
         <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setUsersView("active")}
+              className={[
+                "h-9 rounded-2xl border px-4 text-sm font-semibold transition-colors",
+                usersView === "active"
+                  ? "border-black/20 bg-black text-white"
+                  : "border-black/15 bg-white text-black hover:bg-black/5",
+              ].join(" ")}
+            >
+              Активные
+            </button>
+            <button
+              type="button"
+              onClick={() => setUsersView("trash")}
+              className={[
+                "h-9 rounded-2xl border px-4 text-sm font-semibold transition-colors",
+                usersView === "trash"
+                  ? "border-black/20 bg-black text-white"
+                  : "border-black/15 bg-white text-black hover:bg-black/5",
+              ].join(" ")}
+            >
+              Удалённые / Корзина
+            </button>
+          </div>
           {usersLoading ? <div className="text-sm text-black/60">Загрузка пользователей…</div> : null}
           <div className="overflow-x-auto rounded-3xl border border-black/10 bg-white shadow-[0_1px_0_0_rgba(0,0,0,0.03)]">
             <table className="min-w-full text-left text-sm">
@@ -839,10 +882,20 @@ export default function AdminClient() {
                 <tr className="border-b border-black/10 text-black/55">
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">Пользователь</th>
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">Имя</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">Регистрация</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">Статус</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">Объявления</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">Жалобы</th>
+                  {usersView === "trash" ? (
+                    <>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Удалён</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Очистка</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Кем</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Регистрация</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Статус</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Объявления</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Жалобы</th>
+                    </>
+                  )}
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">Действия</th>
                 </tr>
               </thead>
@@ -875,10 +928,32 @@ export default function AdminClient() {
                     >
                       {adminUsersTableResolvedName(u)}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-black/70">{new Date(u.createdAt).toLocaleString("ru-RU")}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-black/80">{userStatusRu[u.status] ?? u.status}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-black/70">{u.listingsCount}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-black/70">{u.reportsCount}</td>
+                    {usersView === "trash" ? (
+                      <>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/70">
+                          {typeof u.softDeletedAt === "number"
+                            ? new Date(u.softDeletedAt).toLocaleString("ru-RU")
+                            : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/70">
+                          {typeof u.purgeAfter === "number"
+                            ? new Date(u.purgeAfter).toLocaleString("ru-RU")
+                            : typeof u.purgedAt === "number"
+                              ? "Очищен"
+                              : "—"}
+                        </td>
+                        <td className="max-w-[140px] truncate px-4 py-3 text-black/70" title={u.deletedByUserId ?? ""}>
+                          {u.deletedByUserId?.trim() || "—"}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/70">{new Date(u.createdAt).toLocaleString("ru-RU")}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/80">{userStatusRu[u.status] ?? u.status}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/70">{u.listingsCount}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/70">{u.reportsCount}</td>
+                      </>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -888,51 +963,91 @@ export default function AdminClient() {
                         >
                           Открыть
                         </button>
-                        {!u.moderationBlocked ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/block`, { method: "POST" }).then(() => {
-                                refreshUsers();
-                                bumpUserDetail(u.id);
-                              });
-                            }}
-                            className="h-8 rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black hover:bg-black/5"
-                          >
-                            Заблокировать
-                          </button>
+                        {usersView === "active" ? (
+                          <>
+                            {!u.moderationBlocked ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/block`, { method: "POST" }).then(() => {
+                                    refreshUsers();
+                                    bumpUserDetail(u.id);
+                                  });
+                                }}
+                                className="h-8 rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black hover:bg-black/5"
+                              >
+                                Заблокировать
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/unblock`, { method: "POST" }).then(() => {
+                                    refreshUsers();
+                                    bumpUserDetail(u.id);
+                                  });
+                                }}
+                                className="h-8 rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black hover:bg-black/5"
+                              >
+                                Разблокировать
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!confirm("Пользователь будет перемещён в корзину на 10 дней.")) return;
+                                void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/soft-delete`, {
+                                  method: "POST",
+                                }).then(() => {
+                                  refreshUsers();
+                                  setDetailUserId((cur) => (cur === u.id ? null : cur));
+                                });
+                              }}
+                              className="h-8 rounded-xl border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50"
+                            >
+                              Удалить
+                            </button>
+                          </>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/unblock`, { method: "POST" }).then(() => {
-                                refreshUsers();
-                                bumpUserDetail(u.id);
-                              });
-                            }}
-                            className="h-8 rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black hover:bg-black/5"
-                          >
-                            Разблокировать
-                          </button>
+                          <>
+                            {u.status === "trashed" ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/restore`, {
+                                    method: "POST",
+                                  }).then(() => {
+                                    refreshUsers();
+                                    setDetailUserId((cur) => (cur === u.id ? null : cur));
+                                  });
+                                }}
+                                className="h-8 rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black hover:bg-black/5"
+                              >
+                                Восстановить
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (
+                                  !confirm(
+                                    "Окончательно анонимизировать пользователя? Восстановление станет невозможным.",
+                                  )
+                                )
+                                  return;
+                                void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/purge`, {
+                                  method: "POST",
+                                }).then(() => {
+                                  refreshUsers();
+                                  setDetailUserId((cur) => (cur === u.id ? null : cur));
+                                });
+                              }}
+                              className="h-8 rounded-xl border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50"
+                            >
+                              Удалить навсегда
+                            </button>
+                          </>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (
-                              !confirm(
-                                "Удалить и анонимизировать аккаунт? Объявления будут удалены, сессии сброшены. Действие необратимо.",
-                              )
-                            )
-                              return;
-                            void fetch(`/api/admin/users/${encodeURIComponent(u.id)}/anonymize`, { method: "POST" }).then(() => {
-                              refreshUsers();
-                              setDetailUserId((cur) => (cur === u.id ? null : cur));
-                            });
-                          }}
-                          className="h-8 rounded-xl border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50"
-                        >
-                          Удалить
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1017,53 +1132,91 @@ export default function AdminClient() {
                     {userDetail.listings.length === 0 ? <div className="mt-2 text-black/50">Нет объявлений.</div> : null}
                   </div>
                   <div className="flex flex-wrap gap-2 pt-2">
-                    {!userDetail.moderationBlocked ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/block`, { method: "POST" }).then(() => {
-                            refreshUsers();
-                            bumpUserDetail(userDetail.id);
-                          });
-                        }}
-                        className="h-10 rounded-2xl border border-black/20 bg-white px-4 text-sm font-semibold text-black hover:bg-black/5"
-                      >
-                        Заблокировать
-                      </button>
+                    {usersView === "active" ? (
+                      <>
+                        {!userDetail.moderationBlocked ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/block`, { method: "POST" }).then(() => {
+                                refreshUsers();
+                                bumpUserDetail(userDetail.id);
+                              });
+                            }}
+                            className="h-10 rounded-2xl border border-black/20 bg-white px-4 text-sm font-semibold text-black hover:bg-black/5"
+                          >
+                            Заблокировать
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/unblock`, { method: "POST" }).then(() => {
+                                refreshUsers();
+                                bumpUserDetail(userDetail.id);
+                              });
+                            }}
+                            className="h-10 rounded-2xl border border-black/20 bg-white px-4 text-sm font-semibold text-black hover:bg-black/5"
+                          >
+                            Разблокировать
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!confirm("Пользователь будет перемещён в корзину на 10 дней.")) return;
+                            void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/soft-delete`, {
+                              method: "POST",
+                            }).then(() => {
+                              refreshUsers();
+                              setDetailUserId(null);
+                            });
+                          }}
+                          className="h-10 rounded-2xl border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50"
+                        >
+                          Удалить
+                        </button>
+                      </>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/unblock`, { method: "POST" }).then(() => {
-                            refreshUsers();
-                            bumpUserDetail(userDetail.id);
-                          });
-                        }}
-                        className="h-10 rounded-2xl border border-black/20 bg-white px-4 text-sm font-semibold text-black hover:bg-black/5"
-                      >
-                        Разблокировать
-                      </button>
+                      <>
+                        {userDetail.status === "trashed" ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/restore`, {
+                                method: "POST",
+                              }).then(() => {
+                                refreshUsers();
+                                setDetailUserId(null);
+                              });
+                            }}
+                            className="h-10 rounded-2xl border border-black/20 bg-white px-4 text-sm font-semibold text-black hover:bg-black/5"
+                          >
+                            Восстановить
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (
+                              !confirm(
+                                "Окончательно анонимизировать пользователя? Восстановление станет невозможным.",
+                              )
+                            )
+                              return;
+                            void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/purge`, {
+                              method: "POST",
+                            }).then(() => {
+                              refreshUsers();
+                              setDetailUserId(null);
+                            });
+                          }}
+                          className="h-10 rounded-2xl border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50"
+                        >
+                          Удалить навсегда
+                        </button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (
-                          !confirm(
-                            "Удалить и анонимизировать аккаунт? Объявления будут удалены, сессии сброшены. Действие необратимо.",
-                          )
-                        )
-                          return;
-                        void fetch(`/api/admin/users/${encodeURIComponent(userDetail.id)}/anonymize`, {
-                          method: "POST",
-                        }).then(() => {
-                          refreshUsers();
-                          setDetailUserId(null);
-                        });
-                      }}
-                      className="h-10 rounded-2xl border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50"
-                    >
-                      Удалить / анонимизировать
-                    </button>
                   </div>
                 </div>
               ) : (

@@ -4,6 +4,7 @@ import { readUsersDb } from "../../../../lib/serverUsersStore";
 import { readReplyStats, fastReplyEligible } from "../../../../lib/serverTrustStore";
 import { countSellerActiveListings } from "../../../../lib/serverListingsStore";
 import { isUserPhoneVerified } from "../../../../lib/serverPhoneVerified";
+import { isUserPubliclyRemoved, PURGED_PUBLIC_LABEL } from "../../../../lib/serverUserSoftDelete";
 import { getSafePublicName } from "@/lib/utils/getSafePublicName";
 
 export const runtime = "nodejs";
@@ -19,15 +20,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ userId: string
   const u = db.usersById[id];
   if (!u) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  const deleted = (u.deletionStatus ?? "") === "deleted";
+  const removed = isUserPubliclyRemoved(u);
 
   /** Profile «полное имя» (PostgreSQL full_name); для подписей на карточках объявлений — отдельно от ника. */
-  const name = deleted ? undefined : `${u.name ?? ""}`.trim() || undefined;
+  const name = removed ? undefined : `${u.name ?? ""}`.trim() || undefined;
 
-  const displayName = deleted ? "Удалённый пользователь" : getSafePublicName({ userId: id, name: u.name, displayName: u.displayName });
+  const displayName = removed
+    ? PURGED_PUBLIC_LABEL
+    : getSafePublicName({ userId: id, name: u.name, displayName: u.displayName });
 
   /** Карточки / сторонние клиенты: только безопасное имя, без email-префиксов. */
-  const identityLabel = deleted ? undefined : displayName;
+  const identityLabel = removed ? PURGED_PUBLIC_LABEL : displayName;
 
   const stats = await readReplyStats();
   const fastReply = fastReplyEligible(stats[id]);

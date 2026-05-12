@@ -1,6 +1,7 @@
 import type { StoredUser } from "./serverUsersStore";
 import { getPublicUserName } from "./getPublicUserName";
 import { USER_DISPLAY_FALLBACK } from "./userDisplayName";
+import { isUserPurgedOrRemoved, isUserSoftDeleted } from "./serverUserSoftDelete";
 
 /** Login label for tables (same source as auth / verified-users). */
 export function adminLoginOrEmail(u: StoredUser): string {
@@ -49,8 +50,18 @@ export function adminReporterLabel(u: StoredUser): string {
 
 export function adminUserStatus(u: StoredUser, moderationBlocked: boolean): string {
   if (moderationBlocked) return "blocked";
+  if (isUserPurgedOrRemoved(u)) return "deleted";
+  if (isUserSoftDeleted(u)) return "trashed";
   const ds = (u.deletionStatus ?? "").trim();
   if (ds === "deleted") return "deleted";
   if (ds === "pending_deletion") return "pending_deletion";
   return "active";
+}
+
+export function isAdminUsersTrashRow(u: StoredUser): boolean {
+  return isUserSoftDeleted(u) || isUserPurgedOrRemoved(u);
+}
+
+export function isAdminUsersActiveRow(u: StoredUser): boolean {
+  return !isAdminUsersTrashRow(u);
 }

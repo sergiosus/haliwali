@@ -45,6 +45,12 @@ const chatCardShellClass =
   "flex min-h-[max(520px,calc(100dvh-17rem))] flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none";
 const chatComposerIconBtnClass =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white text-black/70 hover:bg-black/[0.03] md:h-11 md:w-11 md:rounded-2xl";
+const chatComposerFormClass =
+  "flex w-full min-w-0 max-md:flex-col max-md:gap-2 md:flex-row md:items-end md:gap-2";
+const chatComposerTextareaClass =
+  "block w-full min-w-0 max-w-full shrink-0 resize-none rounded-2xl border border-black/10 bg-white px-3 py-2.5 text-base leading-snug outline-none placeholder:text-ellipsis focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:cursor-not-allowed disabled:bg-black/[0.02] disabled:text-black/45 max-md:min-h-[3.5rem] max-md:max-h-32 md:order-3 md:min-h-11 md:max-h-28 md:flex-1 md:px-4 md:py-2.5 md:text-sm";
+const chatComposerMobileControlsClass =
+  "flex w-full shrink-0 items-center justify-between gap-2 max-md:flex md:hidden";
 
 type ChatMessage = {
   id: string;
@@ -2152,7 +2158,7 @@ function ChatInner() {
             ) : null}
 
             <form
-              className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:items-end md:gap-2"
+              className={chatComposerFormClass}
               onSubmit={(e) => {
                 e.preventDefault();
                 if (isUploading || chatIsBlocked) return;
@@ -2356,7 +2362,7 @@ function ChatInner() {
               <textarea
                 ref={inputRef}
                 value={text}
-                rows={2}
+                rows={3}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -2365,14 +2371,14 @@ function ChatInner() {
                   }
                 }}
                 placeholder="Сообщение..."
-                className="max-h-32 min-h-14 w-full min-w-0 resize-none rounded-2xl border border-black/10 bg-white px-3 py-2.5 text-base leading-snug outline-none placeholder:text-ellipsis focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:cursor-not-allowed disabled:bg-black/[0.02] disabled:text-black/45 md:order-3 md:max-h-28 md:min-h-11 md:flex-1 md:px-4 md:py-2.5 md:text-sm"
+                className={chatComposerTextareaClass}
                 disabled={composerDisabled}
               />
-              <div className="flex items-center justify-between gap-2 md:contents">
-                <div className="flex items-center gap-1.5 md:contents">
+              <div className={chatComposerMobileControlsClass}>
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    className={`${chatComposerIconBtnClass} md:order-1`}
+                    className={chatComposerIconBtnClass}
                     onClick={() => fileInputRef.current?.click()}
                     aria-label="Прикрепить файл"
                     disabled={composerDisabled}
@@ -2381,7 +2387,7 @@ function ChatInner() {
                       <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
                     </svg>
                   </button>
-                  <div className="relative shrink-0 md:order-2" ref={emojiPickerWrapRef}>
+                  <div className="relative shrink-0" ref={emojiPickerWrapRef}>
                     <button
                       type="button"
                       className={chatComposerIconBtnClass}
@@ -2417,14 +2423,65 @@ function ChatInner() {
                 </div>
                 <button
                   type="submit"
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-base text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 md:order-4 md:h-11 md:w-auto md:rounded-2xl md:px-5 md:text-sm md:font-semibold"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-base text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={composerDisabled}
                   aria-label="Отправить"
                 >
-                  <span className="md:hidden" aria-hidden>
-                    ➤
-                  </span>
-                  <span className="hidden md:inline">{isUploading ? "Загрузка…" : "Отправить"}</span>
+                  <span aria-hidden>➤</span>
+                </button>
+              </div>
+              <div className="hidden md:contents">
+                <button
+                  type="button"
+                  className={`${chatComposerIconBtnClass} md:order-1`}
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Прикрепить файл"
+                  disabled={composerDisabled}
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
+                  </svg>
+                </button>
+                <div className="relative shrink-0 md:order-2">
+                  <button
+                    type="button"
+                    className={chatComposerIconBtnClass}
+                    onClick={() => setEmojiPickerOpen((o) => !o)}
+                    aria-label="Смайлы"
+                    aria-expanded={emojiPickerOpen}
+                    disabled={composerDisabled}
+                  >
+                    <span aria-hidden>🙂</span>
+                  </button>
+                  {emojiPickerOpen ? (
+                    <div
+                      className="absolute bottom-full left-0 z-[60] mb-1.5 w-[min(100vw-2rem,220px)] rounded-xl border border-black/10 bg-white p-2 shadow-lg"
+                      role="listbox"
+                      aria-label="Выбор смайла"
+                    >
+                      <div className="grid grid-cols-7 gap-0.5">
+                        {CHAT_QUICK_EMOJIS.map((emo) => (
+                          <button
+                            key={emo}
+                            type="button"
+                            className="grid h-8 w-8 place-items-center rounded-lg text-lg leading-none hover:bg-black/[0.06]"
+                            onClick={() => insertEmojiAtCursor(emo)}
+                            aria-label={emo}
+                          >
+                            {emo}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="submit"
+                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-2xl bg-orange-500 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 md:order-4"
+                  disabled={composerDisabled}
+                  aria-label="Отправить"
+                >
+                  {isUploading ? "Загрузка…" : "Отправить"}
                 </button>
               </div>
             </form>

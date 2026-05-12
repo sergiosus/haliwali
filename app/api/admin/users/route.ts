@@ -5,6 +5,8 @@ import {
   adminLoginOrEmail,
   adminReporterLabel,
   adminUserStatus,
+  isAdminUsersActiveRow,
+  isAdminUsersTrashRow,
 } from "../../../lib/adminUserDto";
 import {
   buildListingOwnerMap,
@@ -30,12 +32,17 @@ function normalizeUsersList(db: Awaited<ReturnType<typeof readUsersDb>>): Stored
   return vals;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const deny = restDenyPrivilegedAdminResponse(await getAdminPrivilegedFailure());
   if (deny) return deny;
 
+  const viewRaw = new URL(req.url).searchParams.get("view");
+  const view = viewRaw === "trash" ? "trash" : "active";
+
   const db = await readUsersDb(USERS_PATH);
-  const usersList = normalizeUsersList(db);
+  const usersList = normalizeUsersList(db).filter((u) =>
+    view === "trash" ? isAdminUsersTrashRow(u) : isAdminUsersActiveRow(u),
+  );
   usersList.sort((a, b) => b.createdAt - a.createdAt);
 
   const listings = await listBootstrap(null, true);
@@ -63,6 +70,11 @@ export async function GET() {
       status: adminUserStatus(u, moderationBlocked),
       moderationBlocked,
       deletionStatus: (u.deletionStatus ?? "").trim() || "",
+      ...(typeof u.softDeletedAt === "number" ? { softDeletedAt: u.softDeletedAt } : {}),
+      ...(typeof u.purgeAfter === "number" ? { purgeAfter: u.purgeAfter } : {}),
+      ...(typeof u.purgedAt === "number" ? { purgedAt: u.purgedAt } : {}),
+      ...(u.deletedByUserId ? { deletedByUserId: u.deletedByUserId } : {}),
+      ...(u.deleteReason ? { deleteReason: u.deleteReason } : {}),
       ...(typeof u.deleteRequestedAt === "number" ? { deleteRequestedAt: u.deleteRequestedAt } : {}),
       ...(typeof u.deleteScheduledAt === "number" ? { deleteScheduledAt: u.deleteScheduledAt } : {}),
       listingsCount: total,
@@ -71,5 +83,5 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ users });
+  return NextResponse.json({ users, view });
 }

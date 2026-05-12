@@ -53,6 +53,11 @@ export type StoredUser = {
   deletionStatus?: AccountDeletionStatus;
   deleteRequestedAt?: number;
   deleteScheduledAt?: number;
+  softDeletedAt?: number;
+  deletedByUserId?: string;
+  deleteReason?: string;
+  purgeAfter?: number;
+  purgedAt?: number;
 };
 
 type UsersDb = {

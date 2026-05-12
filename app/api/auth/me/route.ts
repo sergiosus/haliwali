@@ -5,6 +5,7 @@ import { isDebugAuthServer } from "../../../lib/debugAuth";
 import { finalizePendingDeletionIfDue } from "../../../lib/serverAccountDeletion";
 import { readUsersDb } from "../../../lib/serverUsersStore";
 import { clearUserSessionCookie, getUserIdFromSessionCookie } from "../../../lib/serverSession";
+import { isUserLoginDenied } from "../../../lib/serverUserSoftDelete";
 import { toUserPrivateDTO } from "../../../lib/dto";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -35,7 +36,7 @@ export async function GET() {
     }
     return NextResponse.json({ ok: false }, { status: 401 });
   }
-  if ((user.deletionStatus ?? "") === "deleted") {
+  if (isUserLoginDenied(user)) {
     const res = NextResponse.json({ ok: false }, { status: 401 });
     clearUserSessionCookie(res);
     return res;

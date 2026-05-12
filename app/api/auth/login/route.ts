@@ -7,6 +7,7 @@ import { normalizeEmail, normalizePhone } from "../../../lib/identity";
 import { readUsersDb, touchUserLastSeen } from "../../../lib/serverUsersStore";
 import { createUserSession, setUserSessionCookie } from "../../../lib/serverSession";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
+import { isUserLoginDenied } from "../../../lib/serverUserSoftDelete";
 import { toUserPublicDTO } from "../../../lib/dto";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
   const db2 = await readUsersDb(USERS_PATH);
   const fresh = db2.usersById[user.userId];
   if (!fresh) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
-  if ((fresh.deletionStatus ?? "") === "deleted") {
+  if (isUserLoginDenied(fresh)) {
     return NextResponse.json({ error: "ACCOUNT_REMOVED" }, { status: 403 });
   }
 

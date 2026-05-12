@@ -3,6 +3,7 @@ import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
 import { getUserIdFromSessionCookie } from "../../../lib/serverSession";
 import { readUsersDb } from "../../../lib/serverUsersStore";
 import { createCall, findActiveOrPendingCall } from "../../../lib/serverCallsStore";
+import { chatUserBlockedForbidden } from "../../../lib/serverChatUserBlock";
 import path from "node:path";
 
 export const runtime = "nodejs";
@@ -45,6 +46,10 @@ export async function POST(req: Request) {
   for (const pid of participantIds) {
     if (!pid) return NextResponse.json({ error: "BAD_REQUEST" }, { status: 400 });
     if (!usersDb.usersById[pid]) return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    if (pid !== userId) {
+      const blockedForbidden = await chatUserBlockedForbidden(userId, pid);
+      if (blockedForbidden) return blockedForbidden;
+    }
   }
 
   // Reuse an existing non-expired pending/active call for this chat if caller is a participant.

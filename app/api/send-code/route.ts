@@ -212,9 +212,6 @@ export async function POST(req: Request) {
     dev && type === "email" && typeof (result as { devCode?: unknown }).devCode === "string"
       ? ((result as { devCode?: string }).devCode ?? "")
       : "";
-  if (devCode) {
-    console.log("[DEV EMAIL CODE]", devCode);
-  }
   const okPayload = NextResponse.json({
     ok: true,
     cooldownSec: result.cooldownSec,

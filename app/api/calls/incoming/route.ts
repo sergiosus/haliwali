@@ -2,6 +2,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { getUserIdFromSessionCookie } from "../../../lib/serverSession";
 import { findIncomingPendingForUser } from "../../../lib/serverCallsStore";
+import { isChatBlockedBetweenUsers } from "../../../lib/serverChatUserBlocksStore";
 import { readUsersDb } from "../../../lib/serverUsersStore";
 import { getSafePublicName } from "@/lib/utils/getSafePublicName";
 
@@ -15,6 +16,10 @@ export async function GET() {
 
   const call = await findIncomingPendingForUser(userId);
   if (!call) {
+    return NextResponse.json({ ok: true, call: null });
+  }
+
+  if (await isChatBlockedBetweenUsers(userId, call.callerId)) {
     return NextResponse.json({ ok: true, call: null });
   }
 

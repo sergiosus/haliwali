@@ -3,6 +3,22 @@ import { readFile, writeFile } from "node:fs/promises";
 import nodemailer from "nodemailer";
 import { isDebugAuthServer } from "./debugAuth";
 import { isValidPhone, normalizeEmail, normalizePhone, PHONE_VALIDATION_MESSAGE } from "./identity";
+import {
+  buildOtpFromHeader,
+  isMailRuGroupDomain,
+  logOtpEmailAccepted,
+  logOtpEmailError,
+  logOtpEmailMailRuGroup,
+  logOtpEmailProvider,
+  logOtpEmailRejected,
+  logOtpEmailResponse,
+  logOtpEmailStart,
+  readOtpFromAlignmentLog,
+  readOtpSmtpProviderLog,
+  recipientDomainFromAddress,
+  shouldSuppressOtpEmailDeliveryFailure,
+  summarizeSendMailResult,
+} from "./otpEmailDeliveryLog";
 import { getPool, usesPostgres } from "./pgPool";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
 
@@ -62,8 +78,7 @@ function smtpConfigOrThrow() {
 }
 
 function smtpFromField(): string {
-  const address = (process.env.SMTP_FROM ?? "").trim() || "no-reply@haliwali.local";
-  return address;
+  return buildOtpFromHeader();
 }
 
 function maskEmailForLogs(email: string): string {
@@ -321,30 +336,18 @@ async function sendEmailOtp(
   setStage: (s: "smtp-env" | "create-transporter" | "verify-transporter" | "send-mail") => void,
   dbg: boolean,
 ) {
+  const recipientDomain = recipientDomainFromAddress(email);
   let stage = getStage();
   try {
     setStage("smtp-env");
     stage = "smtp-env";
-    const host = (process.env.SMTP_HOST ?? "").trim();
-    const portRaw = (process.env.SMTP_PORT ?? "").trim();
-    const secureRaw = (process.env.SMTP_SECURE ?? "").trim();
-    const userPresent = Boolean((process.env.SMTP_USER ?? "").trim());
-    const passPresent = Boolean((process.env.SMTP_PASSWORD ?? "").trim());
-    const from = (process.env.SMTP_FROM ?? "").trim();
+    const provider = readOtpSmtpProviderLog();
+    const fromHeader = smtpFromField();
+    const alignment = readOtpFromAlignmentLog(fromHeader);
+    logOtpEmailStart(recipientDomain);
+    logOtpEmailProvider(provider, alignment);
 
-    const port = Number(portRaw || "587");
-    const secure =
-      secureRaw === "true" || secureRaw === "1"
-        ? true
-        : secureRaw === "false" || secureRaw === "0" || !secureRaw
-          ? false
-          : (() => {
-              throw new Error("SMTP_SECURE is invalid");
-            })();
-
-    if (dbg) console.log("[OTP_EMAIL] smtp:config", { host, port: String(port), secure: String(secure) });
-
-    if (!host || !Number.isFinite(port) || port <= 0 || !userPresent || !passPresent || !from) {
+    if (!provider.host || !Number.isFinite(provider.port) || provider.port <= 0 || !alignment.smtpFrom) {
       throw new Error("SMTP_ENV_MISSING");
     }
 
@@ -352,7 +355,7 @@ async function sendEmailOtp(
     stage = "create-transporter";
     if (dbg) console.log("[OTP_EMAIL] smtp:transporter:create");
     const cfg = smtpConfigOrThrow();
-    const transporter = nodemailer.createTransport(cfg); // createTransport required
+    const transporter = nodemailer.createTransport(cfg);
 
     setStage("verify-transporter");
     stage = "verify-transporter";
@@ -362,44 +365,42 @@ async function sendEmailOtp(
 
     setStage("send-mail");
     stage = "send-mail";
-    if (dbg) console.log("[OTP_EMAIL] smtp:sendMail:start", { to: maskEmailForLogs(email) });
     const info = await transporter.sendMail({
-      from: smtpFromField(),
+      from: fromHeader,
       to: email,
       subject,
       text,
     });
-    const accepted = Array.isArray((info as any)?.accepted) ? (info as any).accepted : [];
-    const rejected = Array.isArray((info as any)?.rejected) ? (info as any).rejected : [];
-    const response = String((info as any)?.response ?? "");
-    const messageId = String((info as any)?.messageId ?? "");
+    const result = summarizeSendMailResult(info);
+    logOtpEmailResponse(result);
 
-    if (!accepted || accepted.length === 0) {
+    if (result.rejectedCount > 0) {
+      logOtpEmailRejected(result);
+    }
+    if (result.acceptedCount > 0) {
+      logOtpEmailAccepted(result);
+    }
+
+    if (isMailRuGroupDomain(recipientDomain)) {
+      logOtpEmailMailRuGroup(recipientDomain, result.acceptedCount > 0);
+    }
+
+    if (shouldSuppressOtpEmailDeliveryFailure(recipientDomain, result)) {
+      return;
+    }
+
+    if (result.acceptedCount === 0) {
       throw new Error("SMTP did not accept OTP email");
     }
-
-    if (dbg) {
-      console.log("[OTP_EMAIL] smtp:sendMail:ok", {
-        acceptedCount: accepted.length,
-        rejectedCount: rejected.length,
-        responseLen: response.length,
-        messageIdLen: messageId.length,
-      });
-    }
   } catch (e) {
-    console.error("[OTP_EMAIL] smtp:error", {
+    logOtpEmailError({
       stage,
       name: e instanceof Error ? e.name : undefined,
       message: e instanceof Error ? e.message : String(e),
-      ...(dbg
-        ? {
-            code: (e as { code?: unknown }).code,
-            command: (e as { command?: unknown }).command,
-            response: (e as { response?: unknown }).response,
-            responseCode: (e as { responseCode?: unknown }).responseCode,
-            stack: e instanceof Error ? e.stack : undefined,
-          }
-        : {}),
+      code: (e as { code?: unknown }).code,
+      command: (e as { command?: unknown }).command,
+      response: (e as { response?: unknown }).response,
+      responseCode: (e as { responseCode?: unknown }).responseCode,
     });
     throw e;
   }

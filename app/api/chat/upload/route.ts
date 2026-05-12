@@ -11,6 +11,7 @@ import {
   savePrivateChatFile,
 } from "../../../lib/serverChatPrivateFiles";
 import { isListingConversationParticipant } from "../../../lib/serverListingChatsStore";
+import { chatUserBlockedForbidden } from "../../../lib/serverChatUserBlock";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
 import { getUserIdFromSessionCookie } from "../../../lib/serverSession";
 
@@ -33,6 +34,16 @@ export async function POST(req: Request) {
     const chatIdRaw = typeof form.get("chatId") === "string" ? (form.get("chatId") as string).trim() : "";
     if (!chatIdRaw || !isListingConversationParticipant(userId, chatIdRaw)) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    }
+
+    const peerUserId = chatIdRaw
+      .split("::")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .find((part) => part !== userId);
+    if (peerUserId) {
+      const blockedForbidden = await chatUserBlockedForbidden(userId, peerUserId);
+      if (blockedForbidden) return blockedForbidden;
     }
 
     const file = form.get("file");

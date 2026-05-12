@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
 import { getUserIdFromSessionCookie } from "../../../lib/serverSession";
 import { getCall, updateCall } from "../../../lib/serverCallsStore";
+import { chatUserBlockedForbidden } from "../../../lib/serverChatUserBlock";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,9 @@ export async function POST(req: Request) {
   if (call.status === "ended" || call.status === "declined") return NextResponse.json({ error: "NOT_ACTIVE" }, { status: 409 });
   if (call.status !== "pending") return NextResponse.json({ error: "NOT_PENDING" }, { status: 409 });
   if (userId === call.callerId) return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+
+  const blockedForbidden = await chatUserBlockedForbidden(userId, call.callerId);
+  if (blockedForbidden) return blockedForbidden;
 
   const next = await updateCall(callId, { status: "active" });
   return NextResponse.json({ ok: true, call: next });

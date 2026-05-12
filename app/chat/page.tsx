@@ -36,10 +36,13 @@ import {
 } from "../lib/getPublicUserName";
 import { formatListingCardAuthor, LISTING_AUTHOR_FALLBACK_LABEL } from "../lib/listingCardAuthorDisplay";
 
-/** Внешняя оболочка чата: центрирование, padding 24px 16px 56px. */
-const chatPageShellOuterClass = "flex w-full justify-center px-4 pt-6 pb-14";
-/** Внутренняя колонка: до 920px на десктопе, 100% на мобильных. */
-const chatPageShellInnerClass = "mx-auto w-full max-w-[920px]";
+/** Mobile: full viewport column; desktop: centered shell with bottom padding. */
+const chatPageShellOuterClass =
+  "flex min-h-[100dvh] w-full flex-1 flex-col px-3 pt-3 pb-0 md:min-h-0 md:px-4 md:pt-6 md:pb-14";
+/** Inner column grows on mobile so the chat card can fill space above the composer. */
+const chatPageShellInnerClass = "mx-auto flex w-full max-w-[920px] min-h-0 flex-1 flex-col";
+const chatComposerIconBtnClass =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white text-black/70 hover:bg-black/[0.03] md:h-11 md:w-11 md:rounded-2xl";
 
 type ChatMessage = {
   id: string;
@@ -98,6 +101,7 @@ const CHAT_UPLOAD_TIMEOUT_MESSAGE =
 const CHAT_SEND_FILE_FAIL_MESSAGE = "Не удалось отправить вложение. Проверьте интернет и попробуйте снова.";
 const CHAT_SEND_FILE_TIMEOUT_MESSAGE =
   "Превышено время ожидания при отправке вложения. Проверьте интернет и попробуйте снова.";
+const CHAT_USER_BLOCKED_MESSAGE = "Сообщение недоступно. Пользователь заблокирован.";
 
 function nextPollBackoffMs(failCount: number, capMs = 60_000, baseMs = 2000): number {
   const n = Math.min(Math.max(failCount, 1), 6);
@@ -487,6 +491,16 @@ function ChatInner() {
   const [callRejectedBanner, setCallRejectedBanner] = useState<string | null>(null);
   const [deleteModal, setDeleteModal] = useState<null | { messageId: string }>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [peerBlock, setPeerBlock] = useState({
+    blockedBetween: false,
+    blockedByMe: false,
+    blockedByPeer: false,
+  });
+  const [peerBlockLoading, setPeerBlockLoading] = useState(false);
+  const [blockModalOpen, setBlockModalOpen] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const chatMenuRef = useRef<HTMLDivElement | null>(null);
 
   /** Владелец объявления: варианты диалогов по этому listingId (если в URL нет peerUserId). */
   const [ownerListingPeerOptions, setOwnerListingPeerOptions] = useState<
@@ -741,6 +755,12 @@ function ChatInner() {
     return !buyerIdResolved.trim();
   }, [listingOwnerId, auth.userId, peerUserIdRaw, ownerListingPeerOptions.length, buyerIdResolved]);
 
+  const canManagePeerBlock = Boolean(
+    auth.userId && opponent.id && opponent.id !== currentSenderId && !showOwnerPeerPicker,
+  );
+  const chatIsBlocked = peerBlock.blockedBetween;
+  const composerDisabled = isUploading || chatIsBlocked;
+
   const chatId = useMemo(() => {
     const ownerId = listingOwnerId.trim();
     const buyer = buyerIdResolved.trim();
@@ -748,9 +768,108 @@ function ChatInner() {
     return `${listingId}::${ownerId}::${buyer}`;
   }, [listingId, listingOwnerId, buyerIdResolved]);
 
+  const refreshPeerBlockStatus = useCallback(async () => {
+    const peerUserId = opponent.id.trim();
+    if (!auth.userId || !peerUserId || peerUserId === auth.userId) {
+      setPeerBlock({ blockedBetween: false, blockedByMe: false, blockedByPeer: false });
+      return;
+    }
+    setPeerBlockLoading(true);
+    try {
+      const res = await fetch(`/api/chats/users/block?peerUserId=${encodeURIComponent(peerUserId)}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        blockedBetween?: boolean;
+        blockedByMe?: boolean;
+        blockedByPeer?: boolean;
+      };
+      if (!res.ok || !data.ok) {
+        setPeerBlock({ blockedBetween: false, blockedByMe: false, blockedByPeer: false });
+        return;
+      }
+      setPeerBlock({
+        blockedBetween: Boolean(data.blockedBetween),
+        blockedByMe: Boolean(data.blockedByMe),
+        blockedByPeer: Boolean(data.blockedByPeer),
+      });
+    } catch {
+      setPeerBlock({ blockedBetween: false, blockedByMe: false, blockedByPeer: false });
+    } finally {
+      setPeerBlockLoading(false);
+    }
+  }, [auth.userId, opponent.id]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    void refreshPeerBlockStatus();
+  }, [mounted, refreshPeerBlockStatus]);
+
+  useEffect(() => {
+    if (!chatMenuOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      const root = chatMenuRef.current;
+      if (!root) return;
+      if (e.target instanceof Node && !root.contains(e.target)) {
+        setChatMenuOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [chatMenuOpen]);
+
+  const blockPeerUser = useCallback(async () => {
+    const peerUserId = opponent.id.trim();
+    if (!peerUserId || blockBusy) return;
+    setBlockBusy(true);
+    try {
+      const res = await fetch("/api/chats/users/block", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ peerUserId }),
+      });
+      if (!res.ok) return;
+      setBlockModalOpen(false);
+      setChatMenuOpen(false);
+      setMessageActionsTargetId(null);
+      await refreshPeerBlockStatus();
+    } finally {
+      setBlockBusy(false);
+    }
+  }, [blockBusy, opponent.id, refreshPeerBlockStatus]);
+
+  const unblockPeerUser = useCallback(async () => {
+    const peerUserId = opponent.id.trim();
+    if (!peerUserId || blockBusy) return;
+    setBlockBusy(true);
+    try {
+      const res = await fetch("/api/chats/users/block", {
+        method: "DELETE",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ peerUserId }),
+      });
+      if (!res.ok) return;
+      setChatMenuOpen(false);
+      setMessageActionsTargetId(null);
+      await refreshPeerBlockStatus();
+    } finally {
+      setBlockBusy(false);
+    }
+  }, [blockBusy, opponent.id, refreshPeerBlockStatus]);
+
   const beginOutgoingCall = useCallback(async () => {
     if (typeof window === "undefined") return;
     setSendError(null);
+    if (chatIsBlocked) {
+      setSendError(CHAT_USER_BLOCKED_MESSAGE);
+      return;
+    }
     if (!chatId || !opponent.id) {
       setSendError(
         listingOwnerId && currentSenderId === listingOwnerId
@@ -777,17 +896,24 @@ function ChatInner() {
       error?: string;
     };
     if (!res.ok || !data.ok || !data.call?.callId) {
-      setSendError(data.error === "FORBIDDEN" ? "Нельзя начать звонок." : "Не удалось начать звонок.");
+      if (data.error === "USER_BLOCKED") {
+        setSendError(CHAT_USER_BLOCKED_MESSAGE);
+        void refreshPeerBlockStatus();
+      } else {
+        setSendError(data.error === "FORBIDDEN" ? "Нельзя начать звонок." : "Не удалось начать звонок.");
+      }
       return;
     }
     setOutgoingCallId(data.call.callId);
     setOutgoingRingOpen(true);
   }, [
     chatId,
+    chatIsBlocked,
     opponent.id,
     currentSenderId,
     listingOwnerId,
     outboundSenderNameForApi,
+    refreshPeerBlockStatus,
   ]);
 
   async function cancelOutgoingCall() {
@@ -1479,7 +1605,16 @@ function ChatInner() {
     } catch {
       data = null;
     }
-    if (!res.ok) throw new Error(CHAT_UPLOAD_FAIL_MESSAGE);
+    if (!res.ok) {
+      const errCode =
+        data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string"
+          ? String((data as { error: string }).error)
+          : "";
+      if (res.status === 403 && errCode === "USER_BLOCKED") {
+        throw new Error(CHAT_USER_BLOCKED_MESSAGE);
+      }
+      throw new Error(CHAT_UPLOAD_FAIL_MESSAGE);
+    }
     const url = typeof (data as { url?: unknown } | null)?.url === "string" ? String((data as { url: string }).url).trim() : "";
     if (!url) throw new Error(CHAT_UPLOAD_FAIL_MESSAGE);
     return { url };
@@ -1584,14 +1719,14 @@ function ChatInner() {
   }
 
   return (
-    <div className="min-h-full bg-black/[0.03] text-black">
+    <div className="flex min-h-[100dvh] flex-col bg-black/[0.03] text-black">
       <div className={chatPageShellOuterClass}>
         <div className={chatPageShellInnerClass}>
-        <header className="py-4">
+        <header className="shrink-0 py-3 md:py-4">
           <ReturnLink fallback="/" className="text-sm text-black/60 hover:text-black" />
         </header>
 
-        <main className="pb-16">
+        <main className="flex min-h-0 flex-1 flex-col pb-0 md:pb-16">
           {adLoading ? (
             <div className="mb-4 cursor-default rounded-3xl border border-black/10 bg-white p-5">
               <div className="h-3 w-24 rounded bg-black/10" />
@@ -1704,19 +1839,61 @@ function ChatInner() {
             </div>
           ) : null}
 
-          <div className="flex max-h-[min(82dvh,760px)] min-h-[min(72dvh,640px)] flex-col overflow-hidden rounded-3xl border border-black/10 bg-white">
+          <div className="mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white md:mb-0 md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
               <div className="text-lg font-semibold tracking-tight">Чат</div>
-              <button
-                type="button"
-                onClick={() => void beginOutgoingCall()}
-                className="inline-flex h-9 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-black/80 hover:bg-black/[0.03]"
-              >
-                Позвонить
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                {!chatIsBlocked ? (
+                  <button
+                    type="button"
+                    onClick={() => void beginOutgoingCall()}
+                    className="inline-flex h-9 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-black/80 hover:bg-black/[0.03]"
+                  >
+                    Позвонить
+                  </button>
+                ) : null}
+                {canManagePeerBlock ? (
+                  <div className="relative" ref={chatMenuRef}>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-white text-lg leading-none text-black/70 hover:bg-black/[0.03]"
+                      aria-label="Меню чата"
+                      aria-expanded={chatMenuOpen}
+                      onClick={() => setChatMenuOpen((open) => !open)}
+                    >
+                      ⋯
+                    </button>
+                    {chatMenuOpen ? (
+                      <div className="absolute right-0 top-full z-50 mt-1.5 w-[min(16rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white py-1 shadow-lg">
+                        {peerBlock.blockedByMe ? (
+                          <button
+                            type="button"
+                            className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-black/80 hover:bg-black/[0.03] disabled:opacity-50"
+                            disabled={blockBusy}
+                            onClick={() => void unblockPeerUser()}
+                          >
+                            Разблокировать пользователя
+                          </button>
+                        ) : !peerBlock.blockedByMe ? (
+                          <button
+                            type="button"
+                            className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-black/80 hover:bg-black/[0.03]"
+                            onClick={() => {
+                              setChatMenuOpen(false);
+                              setBlockModalOpen(true);
+                            }}
+                          >
+                            Заблокировать пользователя
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
-              <div className="flex flex-col gap-2">
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
+              <div className="mt-auto flex flex-col gap-2 pb-1">
               {visibleMsgs.length > 0 ? (
                 visibleMsgs.map((m) => {
                   const isTom = isEveryoneDeleted(m);
@@ -1878,7 +2055,24 @@ function ChatInner() {
               </div>
             </div>
 
-            <div className="sticky bottom-0 shrink-0 border-t border-black/10 bg-white px-3 py-3 sm:px-4">
+            <div className="sticky bottom-0 z-10 shrink-0 border-t border-black/10 bg-white px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-3 md:static md:z-auto">
+            {chatIsBlocked ? (
+              <div className="mb-1 flex items-center justify-between gap-2 rounded-xl border border-black/10 bg-black/[0.03] px-3 py-2 text-sm text-black/65">
+                <span>Пользователь заблокирован</span>
+                {peerBlock.blockedByMe ? (
+                  <button
+                    type="button"
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-white px-2.5 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
+                    disabled={blockBusy}
+                    onClick={() => void unblockPeerUser()}
+                  >
+                    Разблокировать
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {!chatIsBlocked ? (
+              <>
             {selectedFile ? (
               <div className="mb-3 rounded-2xl border border-black/10 bg-black/[0.02] p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -1965,10 +2159,10 @@ function ChatInner() {
             ) : null}
 
             <form
-              className="flex items-end gap-2"
+              className="flex w-full min-w-0 items-end gap-1.5 md:gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (isUploading) return;
+                if (isUploading || chatIsBlocked) return;
                 void (async () => {
                   const senderId = currentSenderId;
                   const senderName = outboundSenderNameForApi;
@@ -1993,6 +2187,11 @@ function ChatInner() {
                   }
 
                   setSendError(null);
+
+                  if (chatIsBlocked) {
+                    setSendError(CHAT_USER_BLOCKED_MESSAGE);
+                    return;
+                  }
 
                   if (!auth.userId) {
                     setSendError("Войдите, чтобы отправить сообщение.");
@@ -2050,9 +2249,15 @@ function ChatInner() {
                       const data = (await res.json().catch(() => ({}))) as {
                         ok?: boolean;
                         message?: Record<string, unknown>;
+                        error?: string;
                       };
                       if (!res.ok || !data.ok || !data.message) {
-                        setFileError(CHAT_SEND_FILE_FAIL_MESSAGE);
+                        if (data.error === "USER_BLOCKED") {
+                          setFileError(CHAT_USER_BLOCKED_MESSAGE);
+                          void refreshPeerBlockStatus();
+                        } else {
+                          setFileError(CHAT_SEND_FILE_FAIL_MESSAGE);
+                        }
                         return;
                       }
                       const nextMsg = serverRowToChatMessage(data.message, chatId);
@@ -2105,6 +2310,9 @@ function ChatInner() {
                   if (!res.ok || !data.ok || !data.message) {
                     if (data.error === "PEER_REQUIRED") {
                       setSendError("Откройте чат из раздела «Сообщения» в кабинете.");
+                    } else if (data.error === "USER_BLOCKED") {
+                      setSendError(CHAT_USER_BLOCKED_MESSAGE);
+                      void refreshPeerBlockStatus();
                     } else {
                       setSendError("Не удалось отправить сообщение.");
                     }
@@ -2129,7 +2337,7 @@ function ChatInner() {
                 type="file"
                 className="hidden"
                 accept=".jpg,.jpeg,.png,.webp"
-                disabled={isUploading}
+                disabled={composerDisabled}
                 onChange={(e) => {
                   const file = e.target.files?.[0] ?? null;
                   if (!file) {
@@ -2154,10 +2362,10 @@ function ChatInner() {
               />
               <button
                 type="button"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-black/10 bg-white text-sm text-black/70 hover:bg-black/[0.03]"
+                className={chatComposerIconBtnClass}
                 onClick={() => fileInputRef.current?.click()}
                 aria-label="Прикрепить файл"
-                disabled={isUploading}
+                disabled={composerDisabled}
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
@@ -2166,11 +2374,11 @@ function ChatInner() {
               <div className="relative shrink-0" ref={emojiPickerWrapRef}>
                 <button
                   type="button"
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-black/10 bg-white text-lg leading-none hover:bg-black/[0.03]"
+                  className={chatComposerIconBtnClass}
                   onClick={() => setEmojiPickerOpen((o) => !o)}
                   aria-label="Смайлы"
                   aria-expanded={emojiPickerOpen}
-                  disabled={isUploading}
+                  disabled={composerDisabled}
                 >
                   <span aria-hidden>🙂</span>
                 </button>
@@ -2208,15 +2416,15 @@ function ChatInner() {
                       e.currentTarget.form?.requestSubmit();
                     }
                   }}
-                  placeholder="Напишите сообщение…"
-                  className="max-h-28 min-h-11 w-full resize-none rounded-2xl border border-black/10 bg-white px-4 py-2.5 text-base leading-snug outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] sm:text-sm"
-                  disabled={isUploading}
+                  placeholder="Сообщение..."
+                  className="max-h-28 min-h-10 w-full min-w-0 resize-none rounded-2xl border border-black/10 bg-white px-3 py-2 text-base leading-snug outline-none placeholder:text-ellipsis focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:cursor-not-allowed disabled:bg-black/[0.02] disabled:text-black/45 sm:px-4 sm:py-2.5 sm:text-sm md:min-h-11"
+                  disabled={composerDisabled}
                 />
               </div>
               <button
                 type="submit"
-                className="inline-flex h-11 shrink-0 items-center justify-center rounded-2xl bg-orange-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-orange-600 sm:px-5"
-                disabled={isUploading}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-base text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 md:h-11 md:w-auto md:rounded-2xl md:px-5 md:text-sm md:font-semibold"
+                disabled={composerDisabled}
                 aria-label="Отправить"
               >
                 <span className="sm:hidden" aria-hidden>
@@ -2225,6 +2433,8 @@ function ChatInner() {
                 <span className="hidden sm:inline">{isUploading ? "Загрузка…" : "Отправить"}</span>
               </button>
             </form>
+              </>
+            ) : null}
 
             {messageActionsTarget && !isEveryoneDeleted(messageActionsTarget) ? (
               <>
@@ -2393,6 +2603,14 @@ function ChatInner() {
             peerDisplayHint={rtcPeerHint}
             onClose={endRtcCall}
           />
+          <BlockPeerModal
+            open={blockModalOpen}
+            busy={blockBusy}
+            onClose={() => {
+              if (!blockBusy) setBlockModalOpen(false);
+            }}
+            onConfirm={() => void blockPeerUser()}
+          />
           <DeleteMessageModal
             open={Boolean(deleteModal)}
             busy={deleteBusy}
@@ -2410,6 +2628,68 @@ function ChatInner() {
             targetId={listingId}
           />
         </main>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BlockPeerModal({
+  open,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !busy) onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, busy, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[94] flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="block-peer-title"
+      onMouseDown={(e) => {
+        if (!busy && e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="relative w-full max-w-md rounded-3xl border border-black/10 bg-white p-6 shadow-xl">
+        <h2 id="block-peer-title" className="text-lg font-semibold tracking-tight">
+          Заблокировать пользователя?
+        </h2>
+        <p className="mt-2 text-sm text-black/60">
+          Вы больше не сможете обмениваться сообщениями и звонками с этим пользователем.
+        </p>
+        <div className="mt-5 grid gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            className="inline-flex h-11 items-center justify-center rounded-2xl bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+          >
+            Заблокировать
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onClose}
+            className="inline-flex h-11 items-center justify-center rounded-2xl border border-black/15 bg-white px-4 text-sm font-semibold text-black/70 hover:bg-black/5"
+          >
+            Отмена
+          </button>
         </div>
       </div>
     </div>

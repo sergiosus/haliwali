@@ -1,5 +1,21 @@
 import nodemailer from "nodemailer";
 import { isDebugAuthServer } from "./debugAuth";
+import {
+  buildOtpFromHeader,
+  isMailRuGroupDomain,
+  logOtpEmailAccepted,
+  logOtpEmailError,
+  logOtpEmailMailRuGroup,
+  logOtpEmailProvider,
+  logOtpEmailRejected,
+  logOtpEmailResponse,
+  logOtpEmailStart,
+  readOtpFromAlignmentLog,
+  readOtpSmtpProviderLog,
+  recipientDomainFromAddress,
+  shouldSuppressOtpEmailDeliveryFailure,
+  summarizeSendMailResult,
+} from "./otpEmailDeliveryLog";
 
 type SendEmailArgs = {
   to: string;
@@ -36,10 +52,7 @@ function smtpConfig() {
 }
 
 function fromField(): string {
-  const address = (process.env.SMTP_FROM ?? "").trim() || "no-reply@haliwali.local";
-  const name = (process.env.SMTP_FROM_NAME ?? "").trim();
-  // Nodemailer `from` accepts "Name <email>" or "email".
-  return name ? `${name} <${address}>` : address;
+  return buildOtpFromHeader();
 }
 
 export async function sendEmail(
@@ -52,6 +65,7 @@ export async function sendEmail(
   if (!to) throw new Error("BAD_TO");
 
   const dbg = isDebugAuthServer();
+  const recipientDomain = recipientDomainFromAddress(to);
   if (dbg) {
     console.log("[OTP_SEND] smtp env presence", {
       hostPresent: Boolean((process.env.SMTP_HOST ?? "").trim()),
@@ -64,46 +78,73 @@ export async function sendEmail(
   }
 
   const startedAt = Date.now();
-  const safeTo = to.includes("@")
-    ? `${to.split("@")[0]?.slice(0, 2) ?? ""}***@${to.split("@")[1]}`
-    : "***";
+  const fromHeader = fromField();
+  logOtpEmailStart(recipientDomain);
+  logOtpEmailProvider(readOtpSmtpProviderLog(), readOtpFromAlignmentLog(fromHeader));
 
   if (dbg) {
     console.log("[email][smtp] start", {
-      to: safeTo,
+      recipientDomain,
       subjectLen: subject.length,
       textLen: text.length,
     });
   }
 
   try {
-    if (dbg) console.log("[OTP_SEND] sendMail:before", { to: safeTo });
+    if (dbg) console.log("[OTP_SEND] sendMail:before", { recipientDomain });
     const transporter = nodemailer.createTransport(smtpConfig());
     const info = await transporter.sendMail({
-      from: fromField(),
+      from: fromHeader,
       to,
       subject,
       text,
       ...(html ? { html } : {}),
     });
 
-    const messageId = typeof (info as { messageId?: unknown })?.messageId === "string" ? info.messageId : undefined;
+    const result = summarizeSendMailResult(info);
+    logOtpEmailResponse(result);
+    if (result.rejectedCount > 0) logOtpEmailRejected(result);
+    if (result.acceptedCount > 0) logOtpEmailAccepted(result);
+
+    if (isMailRuGroupDomain(recipientDomain)) {
+      logOtpEmailMailRuGroup(recipientDomain, result.acceptedCount > 0);
+    }
+
+    if (shouldSuppressOtpEmailDeliveryFailure(recipientDomain, result)) {
+      const messageId = result.messageId || undefined;
+      if (dbg) {
+        console.log("[email][smtp] sent", {
+          recipientDomain,
+          messageIdLen: messageId?.length ?? 0,
+          elapsedMs: Date.now() - startedAt,
+          suppressedDeliveryFailure: true,
+        });
+      }
+      return { ok: true, status: "sent", ...(messageId ? { messageId } : {}) };
+    }
+
+    if (result.acceptedCount === 0) {
+      throw new Error("SMTP did not accept email");
+    }
+
+    const messageId = result.messageId || undefined;
     if (dbg) {
       console.log("[email][smtp] sent", {
-        to: safeTo,
+        recipientDomain,
         messageIdLen: messageId?.length ?? 0,
         elapsedMs: Date.now() - startedAt,
       });
     }
     return { ok: true, status: "sent", ...(messageId ? { messageId } : {}) };
   } catch (e) {
-    console.error("[email][smtp] failed", {
-      to: safeTo,
+    logOtpEmailError({
+      stage: "send-mail",
       name: e instanceof Error ? e.name : undefined,
       message: e instanceof Error ? e.message : String(e),
-      elapsedMs: Date.now() - startedAt,
-      ...(dbg && typeof (e as { code?: unknown })?.code !== "undefined" ? { code: (e as { code?: unknown }).code } : {}),
-      ...(dbg && e instanceof Error && e.stack ? { stack: e.stack } : {}),
+      code: (e as { code?: unknown }).code,
+      command: (e as { command?: unknown }).command,
+      response: (e as { response?: unknown }).response,
+      responseCode: (e as { responseCode?: unknown }).responseCode,
     });
     throw e;
   }

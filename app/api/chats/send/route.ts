@@ -4,6 +4,7 @@ import {
   readChatPrivateFileMeta,
 } from "../../../lib/serverChatPrivateFiles";
 import { publicChatMessageSenderLabel } from "../../../lib/serverChatParticipantLabel";
+import { chatUserBlockedForbidden } from "../../../lib/serverChatUserBlock";
 import { appendListingChatMessage, buildListingConversationId } from "../../../lib/serverListingChatsStore";
 import { getListingById } from "../../../lib/serverListingsStore";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
@@ -68,6 +69,9 @@ export async function POST(req: Request) {
 
   const conversationId = buildListingConversationId(listing.id, ownerId, buyerId);
   const recipientId = uid === ownerId ? buyerId : ownerId;
+
+  const blockedForbidden = await chatUserBlockedForbidden(uid, recipientId);
+  if (blockedForbidden) return blockedForbidden;
 
   const listingTitle = (listing.title ?? "").trim() || "Объявление";
 

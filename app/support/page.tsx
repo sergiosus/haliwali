@@ -52,8 +52,11 @@ const CATEGORY_OPTIONS: { value: string; label: string }[] = [
   { value: "other", label: "Другое" },
 ];
 
-function userStatusRu(status: string): "Открыто" | "Закрыто" {
-  return supportAppealClosedForUser(status) ? "Закрыто" : "Открыто";
+function userStatusRu(status: string): "Открыто" | "В работе" | "Ожидает ответа" | "Закрыто" {
+  if (supportAppealClosedForUser(status)) return "Закрыто";
+  if (status === "in_progress") return "В работе";
+  if (status === "open") return "Ожидает ответа";
+  return "Открыто";
 }
 
 function fmtDate(ts: number) {
@@ -65,6 +68,15 @@ function fmtDate(ts: number) {
     minute: "2-digit",
   });
 }
+
+const supportInboxShellClass =
+  "mt-6 overflow-hidden rounded-3xl border border-black/10 bg-white shadow-sm";
+const supportInboxGridClass =
+  "grid grid-cols-1 lg:grid-cols-[minmax(280px,34%)_minmax(0,1fr)] lg:items-stretch";
+const supportHistoryListClass =
+  "max-h-[min(42vh,380px)] space-y-1 overflow-y-auto p-2 lg:max-h-[min(64vh,580px)]";
+const supportPanelClass =
+  "flex min-h-[min(56vh,560px)] min-w-0 flex-col lg:min-h-[min(64vh,580px)]";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; json: T; status: number }> {
   const r = await fetch(path, {
@@ -98,8 +110,10 @@ export default function SupportPage() {
   const [replyBusy, setReplyBusy] = useState(false);
 
   const [toast, setToast] = useState<string | null>(null);
+  const createThemeRef = useRef<HTMLInputElement>(null);
 
   const authed = auth.status === "ready" && Boolean(auth.userId?.trim());
+  const showCreatePanel = createMode || !selectedId;
 
   useEffect(() => {
     createModeRef.current = createMode;
@@ -262,7 +276,11 @@ export default function SupportPage() {
     createModeRef.current = true;
     setCreateMode(true);
     setSelectedId(null);
+    setDetail(null);
     setToast(null);
+    window.requestAnimationFrame(() => {
+      createThemeRef.current?.focus();
+    });
   }
 
   return (
@@ -275,10 +293,23 @@ export default function SupportPage() {
           ← Назад в кабинет
         </Link>
 
-        <h1 className="mt-6 text-2xl font-semibold tracking-tight">Поддержка</h1>
-        <p className="mt-2 max-w-xl text-sm text-black/60">
-          Все обращения и ответы поддержки сохраняются здесь — в одном диалоге.
-        </p>
+        <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Поддержка</h1>
+            <p className="mt-2 max-w-xl text-sm text-black/60">
+              Все обращения и ответы поддержки сохраняются здесь.
+            </p>
+          </div>
+          {authed ? (
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex h-11 w-full shrink-0 items-center justify-center rounded-xl bg-[#ff7a00] px-4 text-sm font-semibold text-white hover:brightness-95 sm:w-auto"
+            >
+              + Новое обращение
+            </button>
+          ) : null}
+        </div>
 
         {toast ? (
           <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50/90 px-3 py-2 text-sm text-orange-950">
@@ -299,33 +330,17 @@ export default function SupportPage() {
             </Link>
           </div>
         ) : (
-          <div className="mt-8 flex flex-col gap-6 lg:flex-row lg:items-start">
-            {/* Список обращений */}
-            <aside className="w-full shrink-0 lg:max-w-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-black/70">Обращения</h2>
-                <button
-                  type="button"
-                  onClick={openCreate}
-                  className="h-9 rounded-xl bg-[#ff7a00] px-3 text-xs font-semibold text-white hover:brightness-95"
-                >
-                  Новое обращение
-                </button>
+          <div className={supportInboxShellClass}>
+            <div className={supportInboxGridClass}>
+            <aside className="min-w-0 border-b border-black/[0.06] bg-black/[0.015] lg:border-b-0 lg:border-r">
+              <div className="border-b border-black/[0.06] px-4 py-3.5">
+                <h2 className="text-sm font-semibold text-black/85">История обращений</h2>
               </div>
-              <div className="mt-3 max-h-[min(52vh,480px)] space-y-2 overflow-y-auto rounded-2xl border border-black/10 bg-white p-2 shadow-sm">
+              <div className={supportHistoryListClass}>
                 {listLoading ? (
                   <div className="px-3 py-6 text-center text-sm text-black/55">Загрузка списка…</div>
                 ) : appeals.length === 0 ? (
-                  <div className="space-y-3 px-3 py-6 text-center text-sm text-black/65">
-                    <p>У вас пока нет обращений.</p>
-                    <button
-                      type="button"
-                      onClick={openCreate}
-                      className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-black/15 bg-white text-sm font-semibold text-black hover:bg-black/[0.03]"
-                    >
-                      Создать обращение
-                    </button>
-                  </div>
+                  <div className="px-3 py-8 text-center text-sm text-black/65">У вас пока нет обращений</div>
                 ) : (
                   appeals.map((a) => {
                     const active = !createMode && selectedId === a.id;
@@ -341,23 +356,50 @@ export default function SupportPage() {
                         }}
                         className={[
                           "flex w-full flex-col gap-1 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors",
-                          active ? "border-[#ff7a00]/55 bg-orange-500/[0.07]" : "border-transparent hover:bg-black/[0.03]",
+                          active
+                            ? "border-[#ff7a00]/35 border-l-[3px] border-l-[#ff7a00] bg-orange-500/[0.08] shadow-sm"
+                            : "border-transparent border-l-[3px] border-l-transparent hover:bg-black/[0.03]",
                         ].join(" ")}
                       >
-                        <div className="flex flex-wrap items-center gap-1 text-xs text-black/50">
-                          <span className="font-medium text-black/70">{a.type}</span>
-                          <span className="text-black/35">·</span>
-                          <span className={a.status === "closed" ? "text-black/55" : "text-emerald-700"}>
-                            {userStatusRu(a.status)}
-                          </span>
-                          <span className="text-black/35">·</span>
-                          <span title={fmtDate(a.updatedAt)}>{fmtDate(a.updatedAt)}</span>
-                        </div>
-                        <div className="truncate font-semibold text-black/90" title={a.subject}>
-                          {a.subject}
-                        </div>
-                        <div className="line-clamp-2 text-xs text-black/55" title={a.preview}>
-                          {a.preview || "Без сообщений"}
+                        <div className="flex items-start gap-2">
+                          <span
+                            className={[
+                              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                              active ? "bg-[#ff7a00]" : "bg-black/15",
+                            ].join(" ")}
+                            aria-hidden
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1 text-xs text-black/50">
+                              <span className="font-medium text-black/70">{a.type}</span>
+                              <span className="text-black/35">·</span>
+                              <span
+                                className={
+                                  a.status === "closed"
+                                    ? "text-black/55"
+                                    : a.status === "in_progress"
+                                      ? "text-amber-700"
+                                      : "text-emerald-700"
+                                }
+                              >
+                                {userStatusRu(a.status)}
+                              </span>
+                              <span className="text-black/35">·</span>
+                              <span title={fmtDate(a.updatedAt)}>{fmtDate(a.updatedAt)}</span>
+                              {a.messageCount > 0 ? (
+                                <>
+                                  <span className="text-black/35">·</span>
+                                  <span>{a.messageCount} сообщ.</span>
+                                </>
+                              ) : null}
+                            </div>
+                            <div className="truncate font-semibold text-black/90" title={a.subject}>
+                              {a.subject}
+                            </div>
+                            <div className="line-clamp-2 text-xs text-black/55" title={a.preview}>
+                              {a.preview || "Без сообщений"}
+                            </div>
+                          </div>
                         </div>
                       </button>
                     );
@@ -366,20 +408,18 @@ export default function SupportPage() {
               </div>
             </aside>
 
-            {/* Диалог / форма создания */}
-            <section className="min-h-[320px] min-w-0 flex-1">
-              {createMode ? (
+            <section className={supportPanelClass}>
+              {showCreatePanel ? (
                 <form
                   onSubmit={(e) => void onCreateAppeal(e)}
-                  className="space-y-4 rounded-2xl border border-black/10 bg-white p-5 shadow-sm"
+                  className="flex flex-1 flex-col gap-6 px-5 py-6 sm:px-7 sm:py-7"
                 >
-                  <h2 className="text-lg font-semibold tracking-tight">Новое обращение</h2>
                   <label className="block text-sm font-medium text-black/80">
                     Тип обращения
                     <select
                       value={category}
                       onChange={(e) => setCategory(e.target.value)}
-                      className="mt-1.5 w-full rounded-xl border border-black/15 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]"
+                      className="mt-2.5 w-full rounded-xl border border-black/15 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]"
                     >
                       {CATEGORY_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>
@@ -392,11 +432,12 @@ export default function SupportPage() {
                   <label className="block text-sm font-medium text-black/80">
                     Тема
                     <input
+                      ref={createThemeRef}
                       type="text"
                       value={theme}
                       onChange={(e) => setTheme(e.target.value)}
                       placeholder="Кратко, о чём речь"
-                      className="mt-1.5 w-full rounded-xl border border-black/15 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]"
+                      className="mt-2.5 w-full rounded-xl border border-black/15 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]"
                     />
                   </label>
 
@@ -406,13 +447,40 @@ export default function SupportPage() {
                       required
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
-                      rows={5}
+                      rows={7}
                       placeholder="Опишите проблему или вопрос"
-                      className="mt-1.5 w-full resize-y rounded-xl border border-black/15 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]"
+                      className="mt-2.5 w-full resize-y rounded-xl border border-black/15 px-3 py-3 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]"
                     />
                   </label>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-black/[0.06] pt-5">
+                    <button
+                      type="button"
+                      disabled
+                      title="Вложения к обращению пока недоступны"
+                      className="inline-flex h-10 items-center gap-2 rounded-xl border border-black/12 bg-white px-3 text-sm font-medium text-black/45"
+                      aria-label="Прикрепить файл"
+                    >
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
+                      </svg>
+                      Вложение
+                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    {appeals.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreateMode(false);
+                          createModeRef.current = false;
+                          setToast(null);
+                          void refreshAppeals();
+                        }}
+                        className="inline-flex h-11 items-center justify-center rounded-xl border border-black/15 px-4 text-sm font-semibold text-black/80 hover:bg-black/[0.03]"
+                      >
+                        Отмена
+                      </button>
+                    ) : null}
                     <button
                       type="submit"
                       disabled={createBusy}
@@ -420,39 +488,17 @@ export default function SupportPage() {
                     >
                       {createBusy ? "Отправка…" : "Отправить обращение"}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCreateMode(false);
-                        createModeRef.current = false;
-                        setToast(null);
-                        void refreshAppeals();
-                      }}
-                      className="inline-flex h-11 items-center justify-center rounded-xl border border-black/15 px-4 text-sm font-semibold text-black/80 hover:bg-black/[0.03]"
-                    >
-                      Отмена
-                    </button>
+                    </div>
                   </div>
                 </form>
-              ) : appeals.length === 0 && !listLoading ? (
-                <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-black/15 bg-white p-10 text-center">
-                  <p className="max-w-md text-sm text-black/65">У вас пока нет обращений.</p>
-                  <button
-                    type="button"
-                    onClick={openCreate}
-                    className="inline-flex h-11 items-center justify-center rounded-xl bg-[#ff7a00] px-5 text-sm font-semibold text-white hover:brightness-95"
-                  >
-                    Создать обращение
-                  </button>
-                </div>
               ) : detailLoading ? (
-                <div className="rounded-2xl border border-black/10 bg-white p-8 text-center text-sm text-black/55 shadow-sm">
+                <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-sm text-black/55">
                   Загрузка переписки…
                 </div>
               ) : detailError ? (
-                <div className="rounded-2xl border border-red-200 bg-red-50/80 p-6 text-sm text-red-900">{detailError}</div>
+                <div className="m-5 rounded-2xl border border-red-200 bg-red-50/80 p-6 text-sm text-red-900">{detailError}</div>
               ) : detail ? (
-                <div className="flex min-h-[320px] flex-col rounded-2xl border border-black/10 bg-white shadow-sm">
+                <div className="flex min-h-0 flex-1 flex-col">
                   <header className="border-b border-black/[0.06] px-5 py-4">
                     <div className="text-xs font-medium text-black/50">{supportCategoryLabelRu(detail.category)}</div>
                     <div className="mt-1 text-lg font-semibold text-black">
@@ -462,7 +508,11 @@ export default function SupportPage() {
                       <span
                         className={[
                           "rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                          detail.status === "closed" ? "bg-black/[0.06] text-black/65" : "bg-emerald-500/15 text-emerald-800",
+                          detail.status === "closed"
+                            ? "bg-black/[0.06] text-black/65"
+                            : detail.status === "in_progress"
+                              ? "bg-amber-500/15 text-amber-900"
+                              : "bg-emerald-500/15 text-emerald-800",
                         ].join(" ")}
                       >
                         {userStatusRu(detail.status)}
@@ -471,7 +521,7 @@ export default function SupportPage() {
                     </div>
                   </header>
 
-                  <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 max-h-[min(52vh,480px)]">
+                  <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-black/[0.02] px-4 py-4">
                     {detail.messages.map((m) => {
                       const kind = inferredSupportSenderType({
                         role: m.role,
@@ -484,7 +534,7 @@ export default function SupportPage() {
                             className={[
                               "max-w-[min(94%,560px)] rounded-2xl border px-3 py-2.5 text-sm",
                               staff
-                                ? "border-black/10 bg-black/[0.03] text-black/90"
+                                ? "border-black/10 bg-white text-black/90 shadow-sm"
                                 : "border-[#ff7a00]/35 bg-orange-500/[0.08] text-black/90",
                             ].join(" ")}
                           >
@@ -501,7 +551,7 @@ export default function SupportPage() {
                   </div>
 
                   {!supportAppealClosedForUser(detail.status) ? (
-                    <div className="border-t border-black/[0.06] px-4 py-3">
+                    <div className="shrink-0 border-t border-black/[0.06] bg-white px-4 py-3">
                       <label className="block text-xs font-semibold uppercase tracking-wide text-black/45">
                         Ваш ответ
                         <textarea
@@ -512,36 +562,30 @@ export default function SupportPage() {
                           className="mt-2 w-full resize-y rounded-xl border border-black/12 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[rgba(255,122,0,0.22)]"
                         />
                       </label>
-                      <button
-                        type="button"
-                        disabled={replyBusy || !reply.trim()}
-                        onClick={() => void onSendFollowUp()}
-                        className="mt-3 inline-flex h-11 min-w-[160px] items-center justify-center rounded-xl bg-[#ff7a00] px-4 text-sm font-semibold text-white hover:brightness-95 disabled:pointer-events-none disabled:opacity-45"
-                      >
-                        {replyBusy ? "Отправка…" : "Отправить"}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="border-t border-black/[0.06] px-4 py-4 text-center text-sm text-black/55">
-                      Это обращение закрыто. Чтобы продолжить диалог с поддержкой, создайте новое обращение.
-                      <div className="mt-3">
+                      <div className="mt-3 flex justify-end">
                         <button
                           type="button"
-                          onClick={openCreate}
-                          className="inline-flex h-10 items-center justify-center rounded-xl border border-black/15 bg-white px-4 text-xs font-semibold text-black hover:bg-black/[0.03]"
+                          disabled={replyBusy || !reply.trim()}
+                          onClick={() => void onSendFollowUp()}
+                          className="inline-flex h-11 min-w-[140px] items-center justify-center rounded-xl bg-[#ff7a00] px-4 text-sm font-semibold text-white hover:brightness-95 disabled:pointer-events-none disabled:opacity-45"
                         >
-                          Создать обращение
+                          {replyBusy ? "Отправка…" : "Отправить"}
                         </button>
                       </div>
+                    </div>
+                  ) : (
+                    <div className="shrink-0 border-t border-black/[0.06] px-4 py-4 text-center text-sm text-black/55">
+                      Это обращение закрыто. Чтобы продолжить диалог с поддержкой, нажмите «+ Новое обращение» вверху страницы.
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="rounded-2xl border border-black/10 bg-white p-8 text-center text-sm text-black/55 shadow-sm">
+                <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-sm text-black/55">
                   Выберите обращение в списке слева.
                 </div>
               )}
             </section>
+            </div>
           </div>
         )}
       </main>

@@ -2152,7 +2152,7 @@ function ChatInner() {
             ) : null}
 
             <form
-              className="flex w-full min-w-0 items-end gap-1.5 md:gap-2"
+              className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:items-end md:gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (isUploading || chatIsBlocked) return;
@@ -2353,78 +2353,80 @@ function ChatInner() {
                   setSelectedFilePreviewUrl(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
                 }}
               />
-              <button
-                type="button"
-                className={chatComposerIconBtnClass}
-                onClick={() => fileInputRef.current?.click()}
-                aria-label="Прикрепить файл"
+              <textarea
+                ref={inputRef}
+                value={text}
+                rows={2}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="Сообщение..."
+                className="max-h-32 min-h-14 w-full min-w-0 resize-none rounded-2xl border border-black/10 bg-white px-3 py-2.5 text-base leading-snug outline-none placeholder:text-ellipsis focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:cursor-not-allowed disabled:bg-black/[0.02] disabled:text-black/45 md:order-3 md:max-h-28 md:min-h-11 md:flex-1 md:px-4 md:py-2.5 md:text-sm"
                 disabled={composerDisabled}
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
-                </svg>
-              </button>
-              <div className="relative shrink-0" ref={emojiPickerWrapRef}>
-                <button
-                  type="button"
-                  className={chatComposerIconBtnClass}
-                  onClick={() => setEmojiPickerOpen((o) => !o)}
-                  aria-label="Смайлы"
-                  aria-expanded={emojiPickerOpen}
-                  disabled={composerDisabled}
-                >
-                  <span aria-hidden>🙂</span>
-                </button>
-                {emojiPickerOpen ? (
-                  <div
-                    className="absolute bottom-full left-0 z-[60] mb-1.5 w-[min(100vw-2rem,220px)] rounded-xl border border-black/10 bg-white p-2 shadow-lg"
-                    role="listbox"
-                    aria-label="Выбор смайла"
+              />
+              <div className="flex items-center justify-between gap-2 md:contents">
+                <div className="flex items-center gap-1.5 md:contents">
+                  <button
+                    type="button"
+                    className={`${chatComposerIconBtnClass} md:order-1`}
+                    onClick={() => fileInputRef.current?.click()}
+                    aria-label="Прикрепить файл"
+                    disabled={composerDisabled}
                   >
-                    <div className="grid grid-cols-7 gap-0.5">
-                      {CHAT_QUICK_EMOJIS.map((emo) => (
-                        <button
-                          key={emo}
-                          type="button"
-                          className="grid h-8 w-8 place-items-center rounded-lg text-lg leading-none hover:bg-black/[0.06]"
-                          onClick={() => insertEmojiAtCursor(emo)}
-                          aria-label={emo}
-                        >
-                          {emo}
-                        </button>
-                      ))}
-                    </div>
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
+                    </svg>
+                  </button>
+                  <div className="relative shrink-0 md:order-2" ref={emojiPickerWrapRef}>
+                    <button
+                      type="button"
+                      className={chatComposerIconBtnClass}
+                      onClick={() => setEmojiPickerOpen((o) => !o)}
+                      aria-label="Смайлы"
+                      aria-expanded={emojiPickerOpen}
+                      disabled={composerDisabled}
+                    >
+                      <span aria-hidden>🙂</span>
+                    </button>
+                    {emojiPickerOpen ? (
+                      <div
+                        className="absolute bottom-full left-0 z-[60] mb-1.5 w-[min(100vw-2rem,220px)] rounded-xl border border-black/10 bg-white p-2 shadow-lg"
+                        role="listbox"
+                        aria-label="Выбор смайла"
+                      >
+                        <div className="grid grid-cols-7 gap-0.5">
+                          {CHAT_QUICK_EMOJIS.map((emo) => (
+                            <button
+                              key={emo}
+                              type="button"
+                              className="grid h-8 w-8 place-items-center rounded-lg text-lg leading-none hover:bg-black/[0.06]"
+                              onClick={() => insertEmojiAtCursor(emo)}
+                              aria-label={emo}
+                            >
+                              {emo}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-              <div className="min-w-0 flex-1">
-                <textarea
-                  ref={inputRef}
-                  value={text}
-                  rows={1}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      e.currentTarget.form?.requestSubmit();
-                    }
-                  }}
-                  placeholder="Сообщение..."
-                  className="max-h-28 min-h-10 w-full min-w-0 resize-none rounded-2xl border border-black/10 bg-white px-3 py-2 text-base leading-snug outline-none placeholder:text-ellipsis focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:cursor-not-allowed disabled:bg-black/[0.02] disabled:text-black/45 sm:px-4 sm:py-2.5 sm:text-sm md:min-h-11"
+                </div>
+                <button
+                  type="submit"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-base text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 md:order-4 md:h-11 md:w-auto md:rounded-2xl md:px-5 md:text-sm md:font-semibold"
                   disabled={composerDisabled}
-                />
+                  aria-label="Отправить"
+                >
+                  <span className="md:hidden" aria-hidden>
+                    ➤
+                  </span>
+                  <span className="hidden md:inline">{isUploading ? "Загрузка…" : "Отправить"}</span>
+                </button>
               </div>
-              <button
-                type="submit"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-base text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 md:h-11 md:w-auto md:rounded-2xl md:px-5 md:text-sm md:font-semibold"
-                disabled={composerDisabled}
-                aria-label="Отправить"
-              >
-                <span className="sm:hidden" aria-hidden>
-                  ➤
-                </span>
-                <span className="hidden sm:inline">{isUploading ? "Загрузка…" : "Отправить"}</span>
-              </button>
             </form>
               </>
             ) : null}

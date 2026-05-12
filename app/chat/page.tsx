@@ -9,7 +9,6 @@ import { useAuth } from "../lib/auth";
 import type { Listing } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { FAST_REPLY_BADGE_LABEL, formatLastSeenRu } from "../lib/trustUi";
-import { ReportModal } from "../components/ReportModal";
 import { WebRtcCallModal } from "../components/WebRtcCallModal";
 import { pingPresenceThrottled } from "../lib/clientPresencePing";
 import { mergeAllDeletions } from "../lib/chatMessageMerge";
@@ -389,8 +388,6 @@ function ChatInner() {
     fastReply: boolean;
     activeListingCount: number;
   } | null>(null);
-  const [reportOpen, setReportOpen] = useState(false);
-
   const { findById, listings } = useListingsStore();
   const localListing = useMemo(() => {
     if (!listingId) return null;
@@ -1728,7 +1725,7 @@ function ChatInner() {
 
         <main className="flex min-h-0 flex-1 flex-col pb-0 md:pb-16">
           {adLoading ? (
-            <div className="mb-4 cursor-default rounded-3xl border border-black/10 bg-white p-5">
+            <div className="mb-3 shrink-0 cursor-default rounded-3xl border border-black/10 bg-white p-5 md:mb-4">
               <div className="h-3 w-24 rounded bg-black/10" />
               <div className="mt-4 flex gap-4">
                 <div className="h-[72px] w-[96px] shrink-0 rounded-2xl bg-black/10" />
@@ -1740,7 +1737,7 @@ function ChatInner() {
               </div>
             </div>
           ) : displayAd ? (
-            <div className="mb-4 cursor-default rounded-3xl border border-black/10 bg-white p-5">
+            <div className="mb-3 shrink-0 cursor-default rounded-3xl border border-black/10 bg-white p-5 md:mb-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold uppercase tracking-wide text-black/40">Объявление</div>
@@ -1795,13 +1792,6 @@ function ChatInner() {
                         </span>
                       ) : null}
                     </div>
-                    <button
-                      type="button"
-                      className="inline-flex h-10 w-full shrink-0 items-center justify-center rounded-2xl border border-black/15 bg-white px-3 text-sm font-medium text-black/70 hover:bg-black/5 sm:ml-auto sm:w-auto"
-                      onClick={() => setReportOpen(true)}
-                    >
-                      Пожаловаться
-                    </button>
                   </div>
                 ) : null}
               </div>
@@ -1814,7 +1804,7 @@ function ChatInner() {
           ) : null}
 
           {showOwnerPeerPicker ? (
-            <div className="mb-4 rounded-3xl border border-black/10 bg-white p-5">
+            <div className="mb-3 shrink-0 rounded-3xl border border-black/10 bg-white p-5 md:mb-4">
               <div className="text-sm font-semibold text-black/85">Выберите диалог</div>
               <div className="mt-1 text-sm text-black/55">По этому объявлению несколько переписок.</div>
               <div className="mt-4 grid gap-2">
@@ -1839,7 +1829,7 @@ function ChatInner() {
             </div>
           ) : null}
 
-          <div className="mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white md:mb-0 md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white md:mb-0 md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
               <div className="text-lg font-semibold tracking-tight">Чат</div>
               <div className="flex shrink-0 items-center gap-2">
@@ -1893,7 +1883,7 @@ function ChatInner() {
               </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
-              <div className="mt-auto flex flex-col gap-2 pb-1">
+              <div className="mt-auto flex flex-col gap-2 pb-0">
               {visibleMsgs.length > 0 ? (
                 visibleMsgs.map((m) => {
                   const isTom = isEveryoneDeleted(m);
@@ -2055,7 +2045,7 @@ function ChatInner() {
               </div>
             </div>
 
-            <div className="sticky bottom-0 z-10 shrink-0 border-t border-black/10 bg-white px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-3 md:static md:z-auto">
+            <div className="mt-auto shrink-0 border-t border-black/10 bg-white px-2 pt-1.5 pb-[max(0.25rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-3 md:static md:z-auto">
             {chatIsBlocked ? (
               <div className="mb-1 flex items-center justify-between gap-2 rounded-xl border border-black/10 bg-black/[0.03] px-3 py-2 text-sm text-black/65">
                 <span>Пользователь заблокирован</span>
@@ -2620,12 +2610,6 @@ function ChatInner() {
             }}
             onDeleteOnlyMe={() => void executeMessageDeletion("me")}
             onDeleteEveryone={() => void executeMessageDeletion("everyone")}
-          />
-          <ReportModal
-            open={reportOpen}
-            onClose={() => setReportOpen(false)}
-            targetType="listing"
-            targetId={listingId}
           />
         </main>
         </div>

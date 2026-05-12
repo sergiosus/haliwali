@@ -35,11 +35,14 @@ import {
 } from "../lib/getPublicUserName";
 import { formatListingCardAuthor, LISTING_AUTHOR_FALLBACK_LABEL } from "../lib/listingCardAuthorDisplay";
 
-/** Mobile: full viewport column; desktop: centered shell with bottom padding. */
+/** Mobile: fill space between site header/footer; desktop keeps centered shell padding. */
 const chatPageShellOuterClass =
-  "flex min-h-[100dvh] w-full flex-1 flex-col px-3 pt-3 pb-0 md:min-h-0 md:px-4 md:pt-6 md:pb-14";
+  "flex min-h-0 w-full flex-1 flex-col px-3 pt-3 pb-2 md:min-h-0 md:flex-none md:px-4 md:pt-6 md:pb-14";
 /** Inner column grows on mobile so the chat card can fill space above the composer. */
 const chatPageShellInnerClass = "mx-auto flex w-full max-w-[920px] min-h-0 flex-1 flex-col";
+/** Mobile messenger panel height; desktop keeps capped card sizing. */
+const chatCardShellClass =
+  "flex min-h-[max(520px,calc(100dvh-17rem))] flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none";
 const chatComposerIconBtnClass =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white text-black/70 hover:bg-black/[0.03] md:h-11 md:w-11 md:rounded-2xl";
 
@@ -1716,7 +1719,7 @@ function ChatInner() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-black/[0.03] text-black">
+    <div className="flex min-h-0 flex-1 flex-col bg-black/[0.03] text-black">
       <div className={chatPageShellOuterClass}>
         <div className={chatPageShellInnerClass}>
         <header className="shrink-0 py-3 md:py-4">
@@ -1829,7 +1832,7 @@ function ChatInner() {
             </div>
           ) : null}
 
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white md:mb-0 md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none">
+          <div className={chatCardShellClass}>
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
               <div className="text-lg font-semibold tracking-tight">Чат</div>
               <div className="flex shrink-0 items-center gap-2">

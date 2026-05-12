@@ -757,7 +757,8 @@ function AccountPageInner() {
               </div>
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="mt-2 border-b border-black/10 pb-2">
+              <div className="flex flex-nowrap gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-wrap">
               <TabButton label="Мои объявления" active={mainTab === "ads"} onClick={() => setMainTab("ads")} />
               <TabButton label="Избранное" active={mainTab === "favorites"} onClick={() => setMainTab("favorites")} />
               <TabButton
@@ -773,6 +774,7 @@ function AccountPageInner() {
               >
                 Поддержка
               </Link>
+              </div>
             </div>
 
             <div className="mt-3">
@@ -1220,13 +1222,16 @@ function AccountPageInner() {
                 )
               ) : (
                 <>
-                  <div className="flex flex-wrap gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="mt-3 rounded-2xl border border-black/10 bg-black/[0.02] px-3 py-2.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Статус объявлений</div>
+                    <div className="mt-2 flex flex-nowrap gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] md:flex-wrap [&::-webkit-scrollbar]:hidden">
                     <TabButton label={`Все (${mineLive.length})`} active={statusTab === "all"} onClick={() => setStatusTab("all")} />
                     <TabButton label={`На проверке (${pending.length})`} active={statusTab === "pending"} onClick={() => setStatusTab("pending")} />
                     <TabButton label={`Опубликованные (${published.length})`} active={statusTab === "published"} onClick={() => setStatusTab("published")} />
                     <TabButton label={`Отклонённые (${rejected.length})`} active={statusTab === "rejected"} onClick={() => setStatusTab("rejected")} />
                     <TabButton label={`Корзина (${mineTrash.length})`} active={statusTab === "trash"} onClick={() => setStatusTab("trash")} />
                     <TabButton label={`Архив (${mineArchive.length})`} active={statusTab === "archive"} onClick={() => setStatusTab("archive")} />
+                    </div>
                   </div>
 
                   <div className="mt-2">

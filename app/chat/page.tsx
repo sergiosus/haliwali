@@ -428,7 +428,7 @@ function ChatInner() {
 
   const [msgs, setMsgs] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const emojiPickerWrapRef = useRef<HTMLDivElement | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -468,6 +468,7 @@ function ChatInner() {
   const [editDraft, setEditDraft] = useState<{
     messageId: string;
   } | null>(null);
+  const [messageActionsTargetId, setMessageActionsTargetId] = useState<string | null>(null);
 
   const [outgoingRingOpen, setOutgoingRingOpen] = useState(false);
   const [outgoingCallId, setOutgoingCallId] = useState<string | null>(null);
@@ -1193,6 +1194,27 @@ function ChatInner() {
     });
   }, [msgs, currentSenderId]);
 
+  const messageActionsTarget = useMemo(() => {
+    if (!messageActionsTargetId) return null;
+    return visibleMsgs.find((m) => m.id === messageActionsTargetId) ?? null;
+  }, [messageActionsTargetId, visibleMsgs]);
+
+  useEffect(() => {
+    if (!messageActionsTargetId) return;
+    if (!messageActionsTarget || isEveryoneDeleted(messageActionsTarget)) {
+      queueMicrotask(() => setMessageActionsTargetId(null));
+    }
+  }, [messageActionsTarget, messageActionsTargetId]);
+
+  useEffect(() => {
+    if (!messageActionsTargetId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setMessageActionsTargetId(null);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [messageActionsTargetId]);
+
   useEffect(() => {
     if (!replyDraft) return;
     const t = msgs.find((m) => m.id === replyDraft.messageId);
@@ -1682,8 +1704,8 @@ function ChatInner() {
             </div>
           ) : null}
 
-          <div className="rounded-3xl border border-black/10 bg-white p-5">
-            <div className="flex items-center justify-between gap-3">
+          <div className="flex max-h-[min(82dvh,760px)] min-h-[min(72dvh,640px)] flex-col overflow-hidden rounded-3xl border border-black/10 bg-white">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
               <div className="text-lg font-semibold tracking-tight">Чат</div>
               <button
                 type="button"
@@ -1693,28 +1715,29 @@ function ChatInner() {
                 Позвонить
               </button>
             </div>
-            <div className="mt-4 grid gap-2">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+              <div className="flex flex-col gap-2">
               {visibleMsgs.length > 0 ? (
                 visibleMsgs.map((m) => {
                   const isTom = isEveryoneDeleted(m);
+                  const isOwn = m.senderId === currentSenderId;
                   return (
+                    <div key={m.id} className={["flex w-full", isOwn ? "justify-end" : "justify-start"].join(" ")}>
                     <div
-                      key={m.id}
                       ref={(el) => {
                         msgRefs.current[m.id] = el;
                       }}
                       className={[
-                        "group max-w-[70%] rounded-2xl border p-3 text-sm",
+                        "group relative max-w-[min(88%,340px)] rounded-2xl border px-3 py-2.5 text-sm shadow-sm",
                         isTom
-                          ? `${m.senderId === currentSenderId ? "ml-auto" : "mr-auto"} border-black/[0.08] bg-black/[0.02]`
-                          : [
-                              "border-black/10",
-                              m.senderId === currentSenderId ? "ml-auto bg-orange-50/60" : "mr-auto bg-black/[0.03]",
-                            ].join(" "),
+                          ? "border-black/[0.08] bg-black/[0.02]"
+                          : isOwn
+                            ? "border-orange-100 bg-orange-50/80"
+                            : "border-black/10 bg-black/[0.03]",
                       ].join(" ")}
                     >
-                      <div className="flex items-center justify-between gap-2 text-xs text-black/50">
-                        <div className="min-w-0 truncate">
+                      <div className="flex items-start justify-between gap-2 text-xs text-black/50">
+                        <div className="min-w-0 flex-1">
                           <span className="font-medium text-black/65">
                             {messageHeaderName(m)}
                           </span>
@@ -1725,47 +1748,57 @@ function ChatInner() {
                           ) : null}
                         </div>
                         {!isTom ? (
-                          <div className="shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                          <>
                             <button
                               type="button"
-                              className="rounded px-1.5 py-0.5 text-[12px] text-black/55 hover:text-black"
-                              onClick={() => {
-                                setEditDraft(null);
-                                setReplyDraft({
-                                  messageId: m.id,
-                                  senderLabel: messageHeaderName(m),
-                                  text: m.type === "text" ? (m.text ?? "") : undefined,
-                                  fileName: m.type === "file" ? (m.fileName ?? "Файл") : undefined,
-                                });
-                                inputRef.current?.focus();
-                              }}
+                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-base leading-none text-black/55 hover:bg-black/[0.05] md:hidden"
+                              aria-label="Действия с сообщением"
+                              onClick={() => setMessageActionsTargetId(m.id)}
                             >
-                              Ответить
+                              ⋯
                             </button>
-                            {m.type === "text" && m.senderId && m.senderId === currentSenderId ? (
+                            <div className="hidden shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 md:flex">
                               <button
                                 type="button"
-                                className="ml-2 rounded px-1.5 py-0.5 text-[12px] text-black/55 hover:text-black"
+                                className="rounded px-1.5 py-0.5 text-[12px] text-black/55 hover:text-black"
                                 onClick={() => {
-                                  setReplyDraft(null);
-                                  setEditDraft({ messageId: m.id });
-                                  setText((m.text ?? "").toString());
+                                  setEditDraft(null);
+                                  setReplyDraft({
+                                    messageId: m.id,
+                                    senderLabel: messageHeaderName(m),
+                                    text: m.type === "text" ? (m.text ?? "") : undefined,
+                                    fileName: m.type === "file" ? (m.fileName ?? "Файл") : undefined,
+                                  });
                                   inputRef.current?.focus();
                                 }}
                               >
-                                Редактировать
+                                Ответить
                               </button>
-                            ) : null}
-                            {m.senderId && m.senderId === currentSenderId ? (
-                              <button
-                                type="button"
-                                className="ml-2 rounded px-1.5 py-0.5 text-[12px] text-black/55 hover:text-black"
-                                onClick={() => setDeleteModal({ messageId: m.id })}
-                              >
-                                Удалить
-                              </button>
-                            ) : null}
-                          </div>
+                              {m.type === "text" && m.senderId && m.senderId === currentSenderId ? (
+                                <button
+                                  type="button"
+                                  className="rounded px-1.5 py-0.5 text-[12px] text-black/55 hover:text-black"
+                                  onClick={() => {
+                                    setReplyDraft(null);
+                                    setEditDraft({ messageId: m.id });
+                                    setText((m.text ?? "").toString());
+                                    inputRef.current?.focus();
+                                  }}
+                                >
+                                  Редактировать
+                                </button>
+                              ) : null}
+                              {m.senderId && m.senderId === currentSenderId ? (
+                                <button
+                                  type="button"
+                                  className="rounded px-1.5 py-0.5 text-[12px] text-black/55 hover:text-black"
+                                  onClick={() => setDeleteModal({ messageId: m.id })}
+                                >
+                                  Удалить
+                                </button>
+                              ) : null}
+                            </div>
+                          </>
                         ) : null}
                       </div>
 
@@ -1834,6 +1867,7 @@ function ChatInner() {
                         <div className="mt-1 text-black/80 whitespace-pre-wrap">{m.text}</div>
                       )}
                     </div>
+                    </div>
                   );
                 })
               ) : (
@@ -1841,10 +1875,12 @@ function ChatInner() {
                   Пока нет сообщений. Напишите первым.
                 </div>
               )}
+              </div>
             </div>
 
+            <div className="sticky bottom-0 shrink-0 border-t border-black/10 bg-white px-3 py-3 sm:px-4">
             {selectedFile ? (
-              <div className="mt-4 rounded-2xl border border-black/10 bg-black/[0.02] p-3">
+              <div className="mb-3 rounded-2xl border border-black/10 bg-black/[0.02] p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-semibold uppercase tracking-wide text-black/40">Вложение</div>
@@ -1870,14 +1906,14 @@ function ChatInner() {
                 </div>
               </div>
             ) : null}
-            {fileError ? <div className="mt-3 text-sm text-red-600">{fileError}</div> : null}
-            {sendError ? <div className="mt-3 text-sm text-red-600">{sendError}</div> : null}
+            {fileError ? <div className="mb-2 text-sm text-red-600">{fileError}</div> : null}
+            {sendError ? <div className="mb-2 text-sm text-red-600">{sendError}</div> : null}
             {callRejectedBanner ? (
-              <div className="mt-3 text-sm text-black/70">{callRejectedBanner}</div>
+              <div className="mb-2 text-sm text-black/70">{callRejectedBanner}</div>
             ) : null}
 
             {replyDraft ? (
-              <div className="mt-4 rounded-2xl border border-black/10 bg-black/[0.02] px-3 py-2">
+              <div className="mb-3 rounded-2xl border border-black/10 bg-black/[0.02] px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-semibold uppercase tracking-wide text-black/40">Ответ</div>
@@ -1904,7 +1940,7 @@ function ChatInner() {
             ) : null}
 
             {editDraft ? (
-              <div className="mt-4 rounded-2xl border border-black/10 bg-black/[0.02] px-3 py-2">
+              <div className="mb-3 rounded-2xl border border-black/10 bg-black/[0.02] px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-semibold uppercase tracking-wide text-black/40">
@@ -1929,7 +1965,7 @@ function ChatInner() {
             ) : null}
 
             <form
-              className="mt-4 flex gap-2"
+              className="flex items-end gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (isUploading) return;
@@ -2160,22 +2196,106 @@ function ChatInner() {
                   </div>
                 ) : null}
               </div>
-              <input
-                ref={inputRef}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Напишите сообщение…"
-                className="h-11 w-full rounded-2xl border border-black/10 bg-white px-4 text-base outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] sm:text-sm"
-                disabled={isUploading}
-              />
+              <div className="min-w-0 flex-1">
+                <textarea
+                  ref={inputRef}
+                  value={text}
+                  rows={1}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      e.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  placeholder="Напишите сообщение…"
+                  className="max-h-28 min-h-11 w-full resize-none rounded-2xl border border-black/10 bg-white px-4 py-2.5 text-base leading-snug outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] sm:text-sm"
+                  disabled={isUploading}
+                />
+              </div>
               <button
                 type="submit"
-                className="inline-flex h-11 items-center justify-center rounded-2xl bg-orange-500 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-orange-600"
+                className="inline-flex h-11 shrink-0 items-center justify-center rounded-2xl bg-orange-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-orange-600 sm:px-5"
                 disabled={isUploading}
+                aria-label="Отправить"
               >
-                {isUploading ? "Загрузка…" : "Отправить"}
+                <span className="sm:hidden" aria-hidden>
+                  ➤
+                </span>
+                <span className="hidden sm:inline">{isUploading ? "Загрузка…" : "Отправить"}</span>
               </button>
             </form>
+
+            {messageActionsTarget && !isEveryoneDeleted(messageActionsTarget) ? (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-40 bg-black/35 md:hidden"
+                  aria-label="Закрыть меню"
+                  onClick={() => setMessageActionsTargetId(null)}
+                />
+                <div className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-black/10 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl md:hidden">
+                  <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-black/15" />
+                  <div className="grid gap-2">
+                    <button
+                      type="button"
+                      className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-black/10 bg-white text-sm font-semibold text-black/80"
+                      onClick={() => {
+                        setEditDraft(null);
+                        setReplyDraft({
+                          messageId: messageActionsTarget.id,
+                          senderLabel: messageHeaderName(messageActionsTarget),
+                          text: messageActionsTarget.type === "text" ? (messageActionsTarget.text ?? "") : undefined,
+                          fileName:
+                            messageActionsTarget.type === "file" ? (messageActionsTarget.fileName ?? "Файл") : undefined,
+                        });
+                        setMessageActionsTargetId(null);
+                        inputRef.current?.focus();
+                      }}
+                    >
+                      Ответить
+                    </button>
+                    {messageActionsTarget.type === "text" &&
+                    messageActionsTarget.senderId &&
+                    messageActionsTarget.senderId === currentSenderId ? (
+                      <button
+                        type="button"
+                        className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-black/10 bg-white text-sm font-semibold text-black/80"
+                        onClick={() => {
+                          setReplyDraft(null);
+                          setEditDraft({ messageId: messageActionsTarget.id });
+                          setText((messageActionsTarget.text ?? "").toString());
+                          setMessageActionsTargetId(null);
+                          inputRef.current?.focus();
+                        }}
+                      >
+                        Редактировать
+                      </button>
+                    ) : null}
+                    {messageActionsTarget.senderId && messageActionsTarget.senderId === currentSenderId ? (
+                      <button
+                        type="button"
+                        className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-sm font-semibold text-red-700"
+                        onClick={() => {
+                          setDeleteModal({ messageId: messageActionsTarget.id });
+                          setMessageActionsTargetId(null);
+                        }}
+                      >
+                        Удалить
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-black/10 bg-black/[0.03] text-sm font-semibold text-black/70"
+                      onClick={() => setMessageActionsTargetId(null)}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
+            </div>
           </div>
 
           {outgoingRingOpen ? (

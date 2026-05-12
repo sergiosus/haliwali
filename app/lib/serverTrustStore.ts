@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import { normalizeListingId } from "./listingId";
 import { getPool, usesPostgres } from "./pgPool";
+import { sanitizePgText, sanitizePgTextOrNull } from "./pgTextSanitize";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
 
 const REPLY_STATS_PATH = ".data/reply-stats.json";
@@ -122,13 +123,14 @@ export async function readListingViews(): Promise<ListingViewsDb> {
 }
 
 export async function incrementListingView(listingId: string): Promise<number> {
-  const id = (listingId ?? "").trim();
+  const id = sanitizePgText((listingId ?? "").trim(), "listing_id");
   if (!id) return 0;
   if (usesPostgres()) {
+    const fingerprint = sanitizePgText(`dev:${id}:${Date.now()}`, "viewer_fingerprint");
     await getPool().query(
       `INSERT INTO listing_view_events (listing_id, viewer_user_id, viewer_fingerprint)
        VALUES ($1, NULL, $2)`,
-      [id, `dev:${id}:${Date.now()}`],
+      [id, fingerprint],
     );
     const { rows } = await getPool().query<{ views_count: string }>(
       `SELECT COUNT(*)::text AS views_count

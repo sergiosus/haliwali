@@ -10,6 +10,7 @@ import {
   type ListingViewLocationHint,
 } from "./serverListingViews";
 import { getUserIdFromSessionCookie } from "./serverSession";
+import { sanitizePgText, sanitizePgTextOrNull } from "./pgTextSanitize";
 
 const VIEWER_COOKIE = "haliwali_vsid";
 const COOKIE_MAX = 60 * 60 * 24 * 400;
@@ -29,9 +30,12 @@ function viewerCookieOpts(maxAge: number) {
 function parseLocationHint(raw: unknown): ListingViewLocationHint {
   if (!raw || typeof raw !== "object") return {};
   const o = raw as Record<string, unknown>;
-  const city = typeof o.city === "string" ? o.city.trim().slice(0, 120) : "";
-  const region = typeof o.region === "string" ? o.region.trim().slice(0, 120) : "";
-  const country = typeof o.country === "string" ? o.country.trim().slice(0, 80) : "";
+  const city =
+    typeof o.city === "string" ? sanitizePgText(o.city, "location.city").trim().slice(0, 120) : "";
+  const region =
+    typeof o.region === "string" ? sanitizePgText(o.region, "location.region").trim().slice(0, 120) : "";
+  const country =
+    typeof o.country === "string" ? sanitizePgText(o.country, "location.country").trim().slice(0, 80) : "";
   return {
     ...(city ? { city } : {}),
     ...(region ? { region } : {}),
@@ -44,10 +48,10 @@ export async function handleRecordListingViewRequest(
   listingIdRaw: string,
   opts?: { location?: ListingViewLocationHint },
 ) {
-  const listingId = listingIdRaw.trim();
+  const listingId = sanitizePgText(listingIdRaw, "listing_id").trim();
   if (!listingId) return { status: 400 as const, body: { error: "BAD_REQUEST" } };
 
-  const ip = extractIp(req);
+  const ip = sanitizePgText(extractIp(req), "ip");
   const rl = await checkIpRateLimit({
     path: "listing_view",
     ip,
@@ -59,18 +63,18 @@ export async function handleRecordListingViewRequest(
   const listing = await getListingById(listingId);
   if (!listing) return { status: 404 as const, body: { error: "NOT_FOUND" } };
 
-  const ownerUserId = (listing.ownerId ?? "").trim();
-  const sessionUserId = ((await getUserIdFromSessionCookie()) ?? "").trim();
+  const ownerUserId = sanitizePgTextOrNull(listing.ownerId, "owner_user_id") ?? "";
+  const sessionUserId = sanitizePgTextOrNull(await getUserIdFromSessionCookie(), "viewer_user_id") ?? "";
   const admin = await adminPrivilegesActive();
   const skipCount = Boolean(admin || (sessionUserId && ownerUserId && sessionUserId === ownerUserId));
 
   const jar = await cookies();
-  let anonymousViewerId = jar.get(VIEWER_COOKIE)?.value?.trim() ?? "";
+  let anonymousViewerId = sanitizePgTextOrNull(jar.get(VIEWER_COOKIE)?.value, "viewer_fingerprint") ?? "";
   if (!anonymousViewerId) anonymousViewerId = randomBytes(18).toString("hex");
 
   const location = opts?.location ?? {};
 
-  const userAgent = (req.headers.get("user-agent") ?? "").trim();
+  const userAgent = sanitizePgText(req.headers.get("user-agent") ?? "", "user_agent").trim();
   const result = await recordListingView({
     listingId,
     viewerUserId: sessionUserId || null,
@@ -94,5 +98,5 @@ export function applyListingViewViewerCookie(
   viewerId: string | null,
 ) {
   if (!viewerId) return;
-  res.cookies.set(VIEWER_COOKIE, viewerId, viewerCookieOpts(COOKIE_MAX));
+  res.cookies.set(VIEWER_COOKIE, sanitizePgText(viewerId, "viewer_fingerprint"), viewerCookieOpts(COOKIE_MAX));
 }

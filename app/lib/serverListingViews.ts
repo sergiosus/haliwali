@@ -3,11 +3,13 @@ import type { PoolClient } from "pg";
 import type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 import { getPool, usesPostgres } from "./pgPool";
 import { normalizeListingId } from "./listingId";
+import { sanitizePgText, sanitizePgTextOrNull } from "./pgTextSanitize";
 
 export type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 
 export const LISTING_VIEW_DEDUP_MS = 30 * 60 * 1000;
 const STATS_TIMEZONE = "Europe/Moscow";
+const LISTING_VIEW_DEDUP_SEP = "\u001E";
 
 function logListingViewDebug(payload: { listingId: string; incremented: boolean; skipped: boolean; count: number }) {
   console.log("[LISTING_VIEW]", payload);
@@ -30,19 +32,19 @@ export type RecordListingViewInput = {
   skipCount?: boolean;
 };
 
-function hashSensitiveValue(raw: string): string {
-  const v = (raw ?? "").trim();
+function hashSensitiveValue(raw: string, field?: string): string {
+  const v = sanitizePgText(raw, field).trim();
   if (!v) return "";
   const salt = process.env.ABUSE_LOG_SALT ?? "haliwali-abuse-log-salt";
   return createHash("sha256").update(`${salt}:${v}`).digest("hex").slice(0, 32);
 }
 
 export function hashListingViewIp(ip: string): string {
-  return hashSensitiveValue(ip);
+  return hashSensitiveValue(ip, "ip_hash");
 }
 
 export function hashListingViewUserAgent(userAgent: string): string {
-  return hashSensitiveValue(userAgent);
+  return hashSensitiveValue(userAgent, "user_agent_hash");
 }
 
 function moscowDayStartMs(nowMs: number): number {
@@ -105,6 +107,12 @@ export async function countListingViewsByIds(ids: string[]): Promise<Record<stri
   return out;
 }
 
+function buildListingViewDedupKey(viewerKey: string, listingId: string): string {
+  const viewer = sanitizePgText(viewerKey, "viewer_key");
+  const listing = sanitizePgText(listingId, "listing_id");
+  return `${viewer}${LISTING_VIEW_DEDUP_SEP}${listing}`;
+}
+
 async function insertViewEventPg(
   client: PoolClient,
   args: {
@@ -119,7 +127,13 @@ async function insertViewEventPg(
     `INSERT INTO listing_view_events
        (listing_id, viewer_user_id, viewer_fingerprint, ip_hash, user_agent_hash)
      VALUES ($1, $2, $3, $4, $5)`,
-    [args.listingId, args.viewerUserId, args.anonymousViewerId, args.ipHash, args.userAgentHash],
+    [
+      sanitizePgText(args.listingId, "listing_id"),
+      sanitizePgTextOrNull(args.viewerUserId, "viewer_user_id"),
+      sanitizePgTextOrNull(args.anonymousViewerId, "viewer_fingerprint"),
+      sanitizePgTextOrNull(args.ipHash, "ip_hash"),
+      sanitizePgTextOrNull(args.userAgentHash, "user_agent_hash"),
+    ],
   );
 }
 
@@ -128,7 +142,7 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
   incremented: boolean;
   skipped: boolean;
 }> {
-  const listingId = normalizeListingId(input.listingId);
+  const listingId = sanitizePgText(normalizeListingId(input.listingId), "listing_id");
   if (!listingId) return { count: 0, incremented: false, skipped: true };
 
   if (input.skipCount) {
@@ -141,13 +155,13 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
     return { count, incremented: false, skipped: true };
   }
 
-  const viewerUserId = (input.viewerUserId ?? "").trim() || null;
-  const anonymousViewerId = (input.anonymousViewerId ?? "").trim() || null;
+  const viewerUserId = sanitizePgTextOrNull(input.viewerUserId, "viewer_user_id");
+  const anonymousViewerId = sanitizePgTextOrNull(input.anonymousViewerId, "viewer_fingerprint");
   const viewerKey = viewerUserId ?? anonymousViewerId;
   if (!viewerKey) return { count: 0, incremented: false, skipped: true };
 
-  const ipHash = (input.ipHash ?? "").trim() || null;
-  const userAgentHash = (input.userAgentHash ?? "").trim() || null;
+  const ipHash = sanitizePgTextOrNull(input.ipHash, "ip_hash");
+  const userAgentHash = sanitizePgTextOrNull(input.userAgentHash, "user_agent_hash");
 
   if (!usesPostgres()) {
     const { maybeIncrementListingViewDev } = await import("./serverTrustStore");
@@ -157,7 +171,7 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
   }
 
   const now = Date.now();
-  const dedupKey = `${viewerKey}\0${listingId}`;
+  const dedupKey = buildListingViewDedupKey(viewerKey, listingId);
   const pool = getPool();
   const client = await pool.connect();
   try {
@@ -169,7 +183,13 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
        VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), to_timestamp($5 / 1000.0))
        ON CONFLICT (dedup_key) DO NOTHING
        RETURNING dedup_key`,
-      [dedupKey, listingId, viewerKey, now, expiresAt],
+      [
+        sanitizePgText(dedupKey, "dedup_key"),
+        sanitizePgText(listingId, "listing_id"),
+        sanitizePgText(viewerKey, "viewer_key"),
+        now,
+        expiresAt,
+      ],
     );
     const incremented = ins.rows.length > 0;
     if (incremented) {

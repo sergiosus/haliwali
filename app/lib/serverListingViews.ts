@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 import { getPool, usesPostgres } from "./pgPool";
 import { normalizeListingId } from "./listingId";
-import { sanitizePgText, sanitizePgTextOrNull } from "./pgTextSanitize";
+import { sanitizePgText, sanitizePgTextArray, sanitizePgTextOrNull } from "./pgTextSanitize";
 
 export type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 
@@ -68,13 +68,22 @@ function moscowDayStartMs(nowMs: number): number {
   return utcGuess - ((hh * 3600 + mm * 60 + ss) * 1000);
 }
 
+function bindListingViewSqlText(field: string, value: string | null | undefined): string {
+  return sanitizePgText(value, field);
+}
+
+function bindListingViewSqlTextOrNull(field: string, value: string | null | undefined): string | null {
+  return sanitizePgTextOrNull(value, field);
+}
+
 async function readAggregateCount(listingId: string, client?: PoolClient): Promise<number> {
   const runner = client ?? getPool();
+  const boundListingId = bindListingViewSqlText("listing_id", listingId);
   const { rows } = await runner.query<{ views_count: string }>(
     `SELECT COUNT(*)::text AS views_count
      FROM listing_view_events
      WHERE listing_id = $1`,
-    [listingId],
+    [boundListingId],
   );
   const n = Number(rows[0]?.views_count);
   return Number.isFinite(n) ? n : 0;
@@ -90,12 +99,13 @@ export async function countListingViewsByIds(ids: string[]): Promise<Record<stri
     for (const id of clean) out[id] = db[id] ?? 0;
     return out;
   }
+  const boundIds = sanitizePgTextArray(clean, "listing_id");
   const { rows } = await getPool().query<{ listing_id: string; views_count: string }>(
     `SELECT listing_id, COUNT(*)::text AS views_count
      FROM listing_view_events
      WHERE listing_id = ANY($1::text[])
      GROUP BY listing_id`,
-    [clean],
+    [boundIds],
   );
   const out: Record<string, number> = {};
   for (const id of clean) out[id] = 0;
@@ -123,17 +133,18 @@ async function insertViewEventPg(
     userAgentHash: string | null;
   },
 ): Promise<void> {
+  const params = [
+    bindListingViewSqlText("listing_id", args.listingId),
+    bindListingViewSqlTextOrNull("viewer_user_id", args.viewerUserId),
+    bindListingViewSqlTextOrNull("viewer_fingerprint", args.anonymousViewerId),
+    bindListingViewSqlTextOrNull("ip_hash", args.ipHash),
+    bindListingViewSqlTextOrNull("user_agent_hash", args.userAgentHash),
+  ];
   await client.query(
     `INSERT INTO listing_view_events
        (listing_id, viewer_user_id, viewer_fingerprint, ip_hash, user_agent_hash)
      VALUES ($1, $2, $3, $4, $5)`,
-    [
-      sanitizePgText(args.listingId, "listing_id"),
-      sanitizePgTextOrNull(args.viewerUserId, "viewer_user_id"),
-      sanitizePgTextOrNull(args.anonymousViewerId, "viewer_fingerprint"),
-      sanitizePgTextOrNull(args.ipHash, "ip_hash"),
-      sanitizePgTextOrNull(args.userAgentHash, "user_agent_hash"),
-    ],
+    params,
   );
 }
 
@@ -178,18 +189,19 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
     await client.query("BEGIN");
     await client.query(`DELETE FROM listing_view_dedup WHERE expires_at IS NOT NULL AND expires_at < now()`);
     const expiresAt = now + LISTING_VIEW_DEDUP_MS;
+    const dedupParams = [
+      bindListingViewSqlText("dedup_key", dedupKey),
+      bindListingViewSqlText("listing_id", listingId),
+      bindListingViewSqlText("viewer_key", viewerKey),
+      now,
+      expiresAt,
+    ];
     const ins = await client.query<{ dedup_key: string }>(
       `INSERT INTO listing_view_dedup (dedup_key, listing_id, viewer_key, created_at, expires_at)
        VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), to_timestamp($5 / 1000.0))
        ON CONFLICT (dedup_key) DO NOTHING
        RETURNING dedup_key`,
-      [
-        sanitizePgText(dedupKey, "dedup_key"),
-        sanitizePgText(listingId, "listing_id"),
-        sanitizePgText(viewerKey, "viewer_key"),
-        now,
-        expiresAt,
-      ],
+      dedupParams,
     );
     const incremented = ins.rows.length > 0;
     if (incremented) {
@@ -214,7 +226,7 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
 }
 
 export async function getListingViewStatsForOwner(listingId: string): Promise<ListingViewStatsPayload | null> {
-  const id = normalizeListingId(listingId);
+  const id = bindListingViewSqlText("listing_id", normalizeListingId(listingId));
   if (!id) return null;
   if (!usesPostgres()) return null;
 
@@ -226,6 +238,7 @@ export async function getListingViewStatsForOwner(listingId: string): Promise<Li
 
   const pool = getPool();
   const total = await readAggregateCount(id);
+  const statsTimezone = bindListingViewSqlText("stats.timezone", STATS_TIMEZONE);
 
   const { rows: windowRows } = await pool.query<{
     today: string;
@@ -240,7 +253,7 @@ export async function getListingViewStatsForOwner(listingId: string): Promise<Li
        COUNT(DISTINCT COALESCE(viewer_user_id, 'anon:' || viewer_fingerprint))::text AS unique_viewers
      FROM listing_view_events
      WHERE listing_id = $1`,
-    [id, todayStart, last7Start, last30Start],
+    [bindListingViewSqlText("listing_id", id), todayStart, last7Start, last30Start],
   );
   const w = windowRows[0];
   const today = Number(w?.today) || 0;
@@ -256,7 +269,7 @@ export async function getListingViewStatsForOwner(listingId: string): Promise<Li
      WHERE listing_id = $1 AND created_at >= to_timestamp($3 / 1000.0)
      GROUP BY 1
      ORDER BY 1 ASC`,
-    [id, STATS_TIMEZONE, dailyStart],
+    [bindListingViewSqlText("listing_id", id), statsTimezone, dailyStart],
   );
   const dailyMap = new Map<string, number>();
   for (const row of dailyRows) {

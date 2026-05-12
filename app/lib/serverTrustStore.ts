@@ -126,17 +126,18 @@ export async function incrementListingView(listingId: string): Promise<number> {
   const id = sanitizePgText((listingId ?? "").trim(), "listing_id");
   if (!id) return 0;
   if (usesPostgres()) {
-    const fingerprint = sanitizePgText(`dev:${id}:${Date.now()}`, "viewer_fingerprint");
+    const boundListingId = sanitizePgText(id, "listing_id");
+    const fingerprint = sanitizePgText(`dev:${boundListingId}:${Date.now()}`, "viewer_fingerprint");
     await getPool().query(
       `INSERT INTO listing_view_events (listing_id, viewer_user_id, viewer_fingerprint)
        VALUES ($1, NULL, $2)`,
-      [id, fingerprint],
+      [boundListingId, fingerprint],
     );
     const { rows } = await getPool().query<{ views_count: string }>(
       `SELECT COUNT(*)::text AS views_count
        FROM listing_view_events
        WHERE listing_id = $1`,
-      [id],
+      [boundListingId],
     );
     const n = Number(rows[0]?.views_count);
     return Number.isFinite(n) ? n : 0;

@@ -53,8 +53,8 @@ export async function handleRecordListingViewRequest(
 
   const ip = sanitizePgText(extractIp(req), "ip");
   const rl = await checkIpRateLimit({
-    path: "listing_view",
-    ip,
+    path: sanitizePgText("listing_view", "source"),
+    ip: sanitizePgText(ip, "ip"),
     limit: VIEW_IP_MAX,
     windowMs: VIEW_IP_WINDOW_MS,
   });
@@ -72,14 +72,19 @@ export async function handleRecordListingViewRequest(
   let anonymousViewerId = sanitizePgTextOrNull(jar.get(VIEWER_COOKIE)?.value, "viewer_fingerprint") ?? "";
   if (!anonymousViewerId) anonymousViewerId = randomBytes(18).toString("hex");
 
-  const location = opts?.location ?? {};
+  const locationRaw = opts?.location ?? {};
+  const location = {
+    ...(locationRaw.city ? { city: sanitizePgText(locationRaw.city, "city") } : {}),
+    ...(locationRaw.region ? { region: sanitizePgText(locationRaw.region, "region") } : {}),
+    ...(locationRaw.country ? { country: sanitizePgText(locationRaw.country, "country") } : {}),
+  };
 
   const userAgent = sanitizePgText(req.headers.get("user-agent") ?? "", "user_agent").trim();
   const result = await recordListingView({
-    listingId,
-    viewerUserId: sessionUserId || null,
-    anonymousViewerId: sessionUserId ? null : anonymousViewerId,
-    ownerUserId: ownerUserId || null,
+    listingId: sanitizePgText(listingId, "listing_id"),
+    viewerUserId: sessionUserId ? sanitizePgTextOrNull(sessionUserId, "viewer_user_id") : null,
+    anonymousViewerId: sessionUserId ? null : sanitizePgTextOrNull(anonymousViewerId, "viewer_fingerprint"),
+    ownerUserId: ownerUserId ? sanitizePgTextOrNull(ownerUserId, "owner_user_id") : null,
     location,
     ipHash: hashListingViewIp(ip),
     userAgentHash: userAgent ? hashListingViewUserAgent(userAgent) : null,

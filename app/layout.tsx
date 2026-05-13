@@ -1,11 +1,16 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { AuthBootstrap } from "./components/AuthBootstrap";
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
+import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 import { SiteHeader } from "./components/SiteHeader";
 import { SiteFooter } from "./components/SiteFooter";
 import { siteUrl } from "./lib/siteUrl";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  themeColor: "#FF7F50",
+};
 
 export const metadata: Metadata = {
   title: "Haliwali — задачи, услуги и товары в России",
@@ -41,7 +46,13 @@ export const metadata: Metadata = {
     description:
       "Размещайте задачи, предлагайте услуги, покупайте и продавайте товары по всей России без посредников.",
   },
-  icons: { icon: "/favicon.png" },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Haliwali",
+    statusBarStyle: "default",
+  },
+  icons: { icon: "/favicon.png", apple: "/icons/icon-192.png" },
 };
 
 export default function RootLayout({
@@ -66,6 +77,7 @@ export default function RootLayout({
         <div className="min-w-0 flex-1">{children}</div>
         <SiteFooter />
         <CookieConsentBanner />
+        <PwaInstallPrompt />
       </body>
     </html>
   );

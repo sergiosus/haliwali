@@ -10,15 +10,27 @@ import type { Listing } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { FAST_REPLY_BADGE_LABEL, formatLastSeenRu } from "../lib/trustUi";
 import { WebRtcCallModal } from "../components/WebRtcCallModal";
+import { ReportModal } from "../components/ReportModal";
+import {
+  ChatComposerMarketplace,
+  type PendingChatAttachment,
+} from "../components/chat/ChatComposerMarketplace";
+import { ChatVoicePlayer } from "../components/chat/ChatVoicePlayer";
+import { analyzeChatComposerSafety } from "../lib/chatSafety";
+import { formatChatPeerPresenceRu, CHAT_FAST_REPLY_HINT } from "../lib/chatPresenceUi";
+import type { ChatDealStatus } from "../lib/chatDealStatus";
+import { normalizeChatDealStatus } from "../lib/chatDealStatus";
+import {
+  chatUploadExtFromFileName,
+  isVoiceChatFileName,
+  normalizeChatUploadExt,
+  validateChatUploadClient,
+  type ChatUploadKind,
+} from "../lib/chatUploadConstraints";
 import { pingPresenceThrottled } from "../lib/clientPresencePing";
 import { mergeAllDeletions } from "../lib/chatMessageMerge";
 import type { MessageDeletionRow } from "../lib/serverChatMessageStore";
 import { fastReplyEligibleFromLocalChats } from "../lib/chatFastReply";
-import {
-  chatUploadExtFromFileName,
-  normalizeChatUploadExt,
-  validateChatUploadClient,
-} from "../lib/chatUploadConstraints";
 import { normalizeListingId } from "../lib/listingId";
 import { appendReturnUrlQuery, pathnameWithSearchSansReturn } from "../lib/returnNavigation";
 import { listingPath } from "../lib/seo";
@@ -69,6 +81,7 @@ type ChatMessage = {
   deletedAt?: number;
   deletedByUserId?: string;
   deletedForUserIds?: string[];
+  readAt?: number | null;
 };
 
 type ChatStore = Record<string, ChatMessage[]>;
@@ -110,6 +123,15 @@ const CHAT_SEND_FILE_FAIL_MESSAGE = "Не удалось отправить вл
 const CHAT_SEND_FILE_TIMEOUT_MESSAGE =
   "Превышено время ожидания при отправке вложения. Проверьте интернет и попробуйте снова.";
 const CHAT_USER_BLOCKED_MESSAGE = "Сообщение недоступно. Пользователь заблокирован.";
+
+function outgoingCallFailureMessage(data: { error?: string; message?: string }): string {
+  if (data.error === "USER_BLOCKED") return CHAT_USER_BLOCKED_MESSAGE;
+  if (data.error === "FORBIDDEN") return "Нельзя начать звонок.";
+  if (data.error === "UNAUTHORIZED") return "Войдите, чтобы звонить.";
+  if (data.error === "CALL_CREATE_FAILED") return "Не удалось создать звонок. Попробуйте позже.";
+  if (data.error === "BAD_REQUEST") return "Не удалось начать звонок. Обновите страницу.";
+  return "Не удалось начать звонок.";
+}
 
 function nextPollBackoffMs(failCount: number, capMs = 60_000, baseMs = 2000): number {
   const n = Math.min(Math.max(failCount, 1), 6);
@@ -264,6 +286,7 @@ function serverRowToChatMessage(sm: Record<string, unknown>, chatId: string): Ch
     replyToMessageId: typeof sm.replyToMessageId === "string" ? sm.replyToMessageId : undefined,
     replyToText: typeof sm.replyToText === "string" ? sm.replyToText : undefined,
     editedAt: typeof sm.editedAt === "string" ? sm.editedAt : undefined,
+    readAt: typeof sm.readAt === "number" ? sm.readAt : sm.readAt === null ? null : undefined,
   };
 }
 
@@ -447,6 +470,7 @@ function ChatInner() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   /** Один проброс localStorage→сервер на chatId за сессию (пустой GET, есть локальные сообщения). */
@@ -460,6 +484,8 @@ function ChatInner() {
   const loadPeersFailCountRef = useRef(0);
   const loadPeersBackoffUntilRef = useRef(0);
   const outgoingStatusFlightRef = useRef(false);
+  /** Bumped when outgoing call is cancelled so in-flight `/api/calls/start` cannot reopen the ring UI. */
+  const outgoingCallStartGenRef = useRef(0);
   const incomingPollFlightRef = useRef(false);
   const incomingPollFailCountRef = useRef(0);
   const incomingPollBackoffUntilRef = useRef(0);
@@ -482,6 +508,7 @@ function ChatInner() {
 
   const [outgoingRingOpen, setOutgoingRingOpen] = useState(false);
   const [outgoingCallId, setOutgoingCallId] = useState<string | null>(null);
+  const [outgoingCallError, setOutgoingCallError] = useState<string | null>(null);
   const [incomingCallInfo, setIncomingCallInfo] = useState<null | {
     callId: string;
     callerId: string;
@@ -507,6 +534,14 @@ function ChatInner() {
   const [blockBusy, setBlockBusy] = useState(false);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const chatMenuRef = useRef<HTMLDivElement | null>(null);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [, setDealStatus] = useState<ChatDealStatus>("new");
+  const [peerTyping, setPeerTyping] = useState(false);
+  const [safetyWarning, setSafetyWarning] = useState<ReturnType<typeof analyzeChatComposerSafety>>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([]);
+  const docInputRef = useRef<HTMLInputElement | null>(null);
+  const typingPulseRef = useRef(0);
+  const lastNotifiedMsgIdRef = useRef("");
 
   /** Владелец объявления: варианты диалогов по этому listingId (если в URL нет peerUserId). */
   const [ownerListingPeerOptions, setOwnerListingPeerOptions] = useState<
@@ -567,6 +602,17 @@ function ChatInner() {
       emptyLabel: "Собеседник",
     });
   }, [opponent.id, opponentPublic, msgs]);
+
+  const opponentPresenceLabel = useMemo(
+    () => formatChatPeerPresenceRu(opponentPublic?.lastSeenAt ?? null),
+    [opponentPublic?.lastSeenAt],
+  );
+
+  const opponentFastReplyHint = useMemo(() => {
+    if (!opponent.id || opponent.id === currentSenderId) return false;
+    if (opponentPublic?.fastReply) return true;
+    return fastReplyEligibleFromLocalChats(opponent.id);
+  }, [opponent.id, currentSenderId, opponentPublic?.fastReply]);
 
   /** Пустая строка — строку «Автор» не показываем; «Вы» — своя карточка. */
   const listingOwnerAuthorLabel = useMemo(() => {
@@ -774,6 +820,72 @@ function ChatInner() {
     return `${listingId}::${ownerId}::${buyer}`;
   }, [listingId, listingOwnerId, buyerIdResolved]);
 
+  useEffect(() => {
+    setSafetyWarning(analyzeChatComposerSafety(text));
+  }, [text]);
+
+  /** One browser notification permission prompt per tab session (only when tab hidden later). */
+  useEffect(() => {
+    if (!chatId || typeof Notification === "undefined") return;
+    if (Notification.permission !== "default") return;
+    try {
+      if (sessionStorage.getItem("haliwali_chat_notif_asked") === "1") return;
+      sessionStorage.setItem("haliwali_chat_notif_asked", "1");
+    } catch {
+      return;
+    }
+    void Notification.requestPermission().catch(() => {});
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!chatId || !auth.userId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch(`/api/chats/${encodeURIComponent(chatId)}/deal-status`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!r.ok || cancelled) return;
+        const j = (await r.json()) as { dealStatus?: string };
+        if (!cancelled) setDealStatus(normalizeChatDealStatus(j.dealStatus));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, auth.userId]);
+
+  useEffect(() => {
+    if (!chatId || !auth.userId) return;
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      void fetch(`/api/chats/${encodeURIComponent(chatId)}/typing`, { credentials: "include", cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j && typeof j === "object" && "peerTyping" in j) setPeerTyping(Boolean((j as { peerTyping?: boolean }).peerTyping));
+        })
+        .catch(() => {});
+    };
+    tick();
+    const tid = window.setInterval(tick, 3000);
+    return () => window.clearInterval(tid);
+  }, [chatId, auth.userId]);
+
+  useEffect(() => {
+    if (!chatId || !text.trim()) return;
+    const now = Date.now();
+    if (now - typingPulseRef.current < 2000) return;
+    typingPulseRef.current = now;
+    void fetch(`/api/chats/${encodeURIComponent(chatId)}/typing`, {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    }).catch(() => {});
+  }, [chatId, text]);
+
   const refreshPeerBlockStatus = useCallback(async () => {
     const peerUserId = opponent.id.trim();
     if (!auth.userId || !peerUserId || peerUserId === auth.userId) {
@@ -869,8 +981,9 @@ function ChatInner() {
     }
   }, [blockBusy, opponent.id, refreshPeerBlockStatus]);
 
-  const beginOutgoingCall = useCallback(async () => {
+  const beginOutgoingCall = useCallback(async (opts?: { retry?: boolean }) => {
     if (typeof window === "undefined") return;
+    if (outgoingRingOpen && !opts?.retry) return;
     setSendError(null);
     if (chatIsBlocked) {
       setSendError(CHAT_USER_BLOCKED_MESSAGE);
@@ -884,48 +997,76 @@ function ChatInner() {
       );
       return;
     }
-    const participantIds = [currentSenderId, opponent.id].filter(Boolean);
-    const res = await fetch("/api/calls/start", {
-      method: "POST",
-      credentials: "include",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chatId,
-        participantIds,
-        callerDisplayName: outboundSenderNameForApi,
-      }),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      call?: { callId?: string };
-      error?: string;
-    };
-    if (!res.ok || !data.ok || !data.call?.callId) {
-      if (data.error === "USER_BLOCKED") {
-        setSendError(CHAT_USER_BLOCKED_MESSAGE);
-        void refreshPeerBlockStatus();
-      } else {
-        setSendError(data.error === "FORBIDDEN" ? "Нельзя начать звонок." : "Не удалось начать звонок.");
-      }
-      return;
-    }
-    setOutgoingCallId(data.call.callId);
+    const startGen = ++outgoingCallStartGenRef.current;
+    setOutgoingCallId(null);
+    setOutgoingCallError(null);
     setOutgoingRingOpen(true);
+    const ownerId = listingOwnerId.trim();
+    const buyer = buyerIdResolved.trim();
+    const participantIds =
+      ownerId && buyer ? [ownerId, buyer] : [currentSenderId, opponent.id].filter(Boolean);
+    try {
+      const res = await fetch("/api/calls/start", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId,
+          participantIds,
+          callerDisplayName: outboundSenderNameForApi,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        call?: { callId?: string };
+        error?: string;
+        message?: string;
+      };
+      if (startGen !== outgoingCallStartGenRef.current) return;
+      const newCallId = data.call?.callId;
+      const callStarted = res.ok && data.ok === true && Boolean(newCallId);
+      if (!callStarted) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[haliwali calls/start]", {
+            status: res.status,
+            error: data.error,
+            message: data.message,
+            chatId,
+            participantIds,
+          });
+        }
+        if (data.error === "USER_BLOCKED") void refreshPeerBlockStatus();
+        setOutgoingCallError(outgoingCallFailureMessage(data));
+        return;
+      }
+      setOutgoingCallError(null);
+      setOutgoingCallId(newCallId!);
+    } catch (e) {
+      if (startGen !== outgoingCallStartGenRef.current) return;
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[haliwali calls/start] network", { chatId, participantIds, e });
+      }
+      setOutgoingCallError("Не удалось начать звонок.");
+    }
   }, [
     chatId,
     chatIsBlocked,
     opponent.id,
     currentSenderId,
     listingOwnerId,
+    buyerIdResolved,
     outboundSenderNameForApi,
     refreshPeerBlockStatus,
+    outgoingRingOpen,
   ]);
 
   async function cancelOutgoingCall() {
+    outgoingCallStartGenRef.current += 1;
     const id = outgoingCallId;
     setOutgoingRingOpen(false);
     setOutgoingCallId(null);
+    setOutgoingCallError(null);
     if (!id) return;
     await fetch("/api/calls/cancel", {
       method: "POST",
@@ -1326,6 +1467,23 @@ function ChatInner() {
     });
   }, [msgs, currentSenderId]);
 
+  useEffect(() => {
+    if (!visibleMsgs.length || typeof document === "undefined") return;
+    const last = visibleMsgs[visibleMsgs.length - 1];
+    if (!last || last.senderId === currentSenderId || last.id === lastNotifiedMsgIdRef.current) return;
+    if (document.visibilityState === "visible") return;
+    lastNotifiedMsgIdRef.current = last.id;
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      try {
+        const body =
+          last.type === "text" ? (last.text ?? "").slice(0, 120) : last.type === "file" ? "Вложение" : "Сообщение";
+        new Notification(opponentLabel || "Новое сообщение", { body, tag: `chat-${chatId}` });
+      } catch {
+        /* noop */
+      }
+    }
+  }, [visibleMsgs, currentSenderId, opponentLabel, chatId]);
+
   const messageActionsTarget = useMemo(() => {
     if (!messageActionsTargetId) return null;
     return visibleMsgs.find((m) => m.id === messageActionsTargetId) ?? null;
@@ -1580,10 +1738,15 @@ function ChatInner() {
     };
   }, [incomingCallInfo?.callId]);
 
-  async function uploadChatFile(file: File, conversationChatId: string): Promise<{ url: string }> {
+  async function uploadChatFile(
+    file: File,
+    conversationChatId: string,
+    kind: ChatUploadKind = "image",
+  ): Promise<{ url: string }> {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("chatId", conversationChatId);
+    fd.append("kind", kind);
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHAT_UPLOAD_FETCH_TIMEOUT_MS);
     let res: Response;
@@ -1839,14 +2002,20 @@ function ChatInner() {
           ) : null}
 
           <div className={chatCardShellClass}>
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
-              <div className="text-lg font-semibold tracking-tight">Чат</div>
+            <div className="flex shrink-0 flex-col border-b border-black/10">
+            <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-black">{opponentLabel}</div>
+                <div className="mt-0.5 text-xs text-black/50">{opponentPresenceLabel}</div>
+              </div>
               <div className="flex shrink-0 items-center gap-2">
-                {!chatIsBlocked ? (
+                {opponent.id && !showOwnerPeerPicker && !chatIsBlocked ? (
                   <button
                     type="button"
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
                     onClick={() => void beginOutgoingCall()}
-                    className="inline-flex h-9 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-black/80 hover:bg-black/[0.03]"
+                    disabled={outgoingRingOpen}
+                    aria-label="Позвонить"
                   >
                     Позвонить
                   </button>
@@ -1864,6 +2033,16 @@ function ChatInner() {
                     </button>
                     {chatMenuOpen ? (
                       <div className="absolute right-0 top-full z-50 mt-1.5 w-[min(16rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white py-1 shadow-lg">
+                        <button
+                          type="button"
+                          className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-black/80 hover:bg-black/[0.03]"
+                          onClick={() => {
+                            setChatMenuOpen(false);
+                            setReportModalOpen(true);
+                          }}
+                        >
+                          Пожаловаться
+                        </button>
                         {peerBlock.blockedByMe ? (
                           <button
                             type="button"
@@ -1890,6 +2069,10 @@ function ChatInner() {
                   </div>
                 ) : null}
               </div>
+            </div>
+            {peerTyping ? (
+              <div className="border-b border-black/5 px-4 py-1 text-xs text-black/45">печатает…</div>
+            ) : null}
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
               <div className="mt-auto flex flex-col gap-2 pb-0">
@@ -1919,6 +2102,11 @@ function ChatInner() {
                           </span>
                           <span className="mx-2 text-black/25">·</span>
                           {formatChatMessageTime(m.createdAt)}
+                          {isOwn && !isTom && m.readAt ? (
+                            <span className="ml-1 text-[10px] text-orange-600/80" title="Прочитано">
+                              ✓✓
+                            </span>
+                          ) : null}
                           {isTom ? null : m.editedAt ? (
                             <span className="ml-2 text-[11px] text-black/45">изменено</span>
                           ) : null}
@@ -2000,12 +2188,15 @@ function ChatInner() {
                         <div className="mt-1 text-sm italic text-black/40">Сообщение удалено</div>
                       ) : m.type === "file" ? (
                         <div className="mt-1">
-                          {m.fileUrl && isImageExt(m.fileName ?? "") ? (
+                          {m.fileUrl && isVoiceChatFileName(m.fileName) ? (
+                            <ChatVoicePlayer src={m.fileUrl} label="Голосовое сообщение" />
+                          ) : m.fileUrl && isImageExt(m.fileName ?? "") ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={m.fileUrl}
                               alt={m.fileName ?? "файл"}
                               className="max-w-full rounded-xl border border-black/10"
+                              loading="lazy"
                             />
                           ) : (
                             <div className="flex items-center gap-2">
@@ -2076,6 +2267,19 @@ function ChatInner() {
             ) : null}
             {!chatIsBlocked ? (
               <>
+            <ChatComposerMarketplace
+              disabled={composerDisabled}
+              safetyWarning={safetyWarning}
+              pending={pendingAttachments}
+              uploadProgress={uploadProgress}
+              onRemovePending={(id) => {
+                setPendingAttachments((prev) => {
+                  const row = prev.find((p) => p.id === id);
+                  if (row?.previewUrl) URL.revokeObjectURL(row.previewUrl);
+                  return prev.filter((p) => p.id !== id);
+                });
+              }}
+            />
             {selectedFile ? (
               <div className="mb-3 rounded-2xl border border-black/10 bg-black/[0.02] p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -2210,67 +2414,99 @@ function ChatInner() {
                     return;
                   }
 
-                  if (selectedFile) {
-                    if (!selectedFile.name) return;
+                  const attachmentBatch: PendingChatAttachment[] = [
+                    ...pendingAttachments,
+                    ...(selectedFile
+                      ? [
+                          {
+                            id: "selected-file",
+                            file: selectedFile,
+                            kind: "image" as const,
+                            previewUrl: selectedFilePreviewUrl,
+                          },
+                        ]
+                      : []),
+                  ];
+
+                  if (attachmentBatch.length > 0) {
                     if (isUploading || chatFileUploadLockRef.current) return;
                     chatFileUploadLockRef.current = true;
                     setIsUploading(true);
+                    setUploadProgress({ current: 0, total: attachmentBatch.length });
                     try {
-                      const uploaded = await uploadChatFile(selectedFile, chatId);
-                      const sendController = new AbortController();
-                      const sendTimeoutId = window.setTimeout(() => sendController.abort(), CHAT_SEND_FETCH_TIMEOUT_MS);
-                      let res: Response;
-                      try {
-                        res = await fetch("/api/chats/send", {
-                          method: "POST",
-                          credentials: "include",
-                          cache: "no-store",
-                          headers: { "Content-Type": "application/json" },
-                          signal: sendController.signal,
-                          body: JSON.stringify({
-                            listingId,
-                            type: "file",
-                            fileUrl: uploaded.url,
-                            fileName: selectedFile.name,
-                            text: "",
-                            peerUserId: senderId === listingOwnerId ? buyerIdResolved : undefined,
-                            senderName,
-                            replyToMessageId: replyDraft?.messageId,
-                            replyToText: replyDraft
-                              ? `${replyDraft.senderLabel}: ${replyDraft.fileName ?? (replyDraft.text ?? "")}`.trim()
-                              : undefined,
-                          }),
-                        });
-                      } catch (sendErr) {
-                        const msg = sendErr instanceof Error ? sendErr.message : String(sendErr);
-                        const isAbort =
-                          (sendErr instanceof DOMException && sendErr.name === "AbortError") || /abort/i.test(msg);
-                        throw new Error(isAbort ? CHAT_SEND_FILE_TIMEOUT_MESSAGE : CHAT_SEND_FILE_FAIL_MESSAGE);
-                      } finally {
-                        window.clearTimeout(sendTimeoutId);
-                      }
-                      const data = (await res.json().catch(() => ({}))) as {
-                        ok?: boolean;
-                        message?: Record<string, unknown>;
-                        error?: string;
-                      };
-                      if (!res.ok || !data.ok || !data.message) {
-                        if (data.error === "USER_BLOCKED") {
-                          setFileError(CHAT_USER_BLOCKED_MESSAGE);
-                          void refreshPeerBlockStatus();
-                        } else {
-                          setFileError(CHAT_SEND_FILE_FAIL_MESSAGE);
+                      let nextMsgs = msgs;
+                      const replyPayload = replyDraft
+                        ? {
+                            replyToMessageId: replyDraft.messageId,
+                            replyToText: `${replyDraft.senderLabel}: ${replyDraft.fileName ?? (replyDraft.text ?? "")}`.trim(),
+                          }
+                        : {};
+                      for (let i = 0; i < attachmentBatch.length; i += 1) {
+                        const row = attachmentBatch[i]!;
+                        if (!row.file.name) continue;
+                        setUploadProgress({ current: i + 1, total: attachmentBatch.length });
+                        const uploaded = await uploadChatFile(row.file, chatId, row.kind);
+                        const sendController = new AbortController();
+                        const sendTimeoutId = window.setTimeout(
+                          () => sendController.abort(),
+                          CHAT_SEND_FETCH_TIMEOUT_MS,
+                        );
+                        let res: Response;
+                        try {
+                          res = await fetch("/api/chats/send", {
+                            method: "POST",
+                            credentials: "include",
+                            cache: "no-store",
+                            headers: { "Content-Type": "application/json" },
+                            signal: sendController.signal,
+                            body: JSON.stringify({
+                              listingId,
+                              type: "file",
+                              fileUrl: uploaded.url,
+                              fileName: row.file.name,
+                              text: i === attachmentBatch.length - 1 ? t : "",
+                              peerUserId: senderId === listingOwnerId ? buyerIdResolved : undefined,
+                              senderName,
+                              ...replyPayload,
+                            }),
+                          });
+                        } catch (sendErr) {
+                          const msg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+                          const isAbort =
+                            (sendErr instanceof DOMException && sendErr.name === "AbortError") || /abort/i.test(msg);
+                          throw new Error(isAbort ? CHAT_SEND_FILE_TIMEOUT_MESSAGE : CHAT_SEND_FILE_FAIL_MESSAGE);
+                        } finally {
+                          window.clearTimeout(sendTimeoutId);
                         }
-                        return;
+                        const data = (await res.json().catch(() => ({}))) as {
+                          ok?: boolean;
+                          message?: Record<string, unknown>;
+                          error?: string;
+                        };
+                        if (!res.ok || !data.ok || !data.message) {
+                          if (data.error === "USER_BLOCKED") {
+                            setFileError(CHAT_USER_BLOCKED_MESSAGE);
+                            void refreshPeerBlockStatus();
+                          } else {
+                            setFileError(CHAT_SEND_FILE_FAIL_MESSAGE);
+                          }
+                          return;
+                        }
+                        const nextMsg = serverRowToChatMessage(data.message, chatId);
+                        nextMsgs = [...nextMsgs, nextMsg];
+                        void registerOutboundMessage(nextMsg.id, nextMsg.createdAt);
                       }
-                      const nextMsg = serverRowToChatMessage(data.message, chatId);
-                      persistMessages([...msgs, nextMsg]);
+                      persistMessages(nextMsgs);
                       void pingPresenceThrottled({ force: true });
-                      void registerOutboundMessage(nextMsg.id, nextMsg.createdAt);
                       if (typeof window !== "undefined") {
                         window.dispatchEvent(new CustomEvent("haliwali-chats-updated"));
                       }
-
+                      setPendingAttachments((prev) => {
+                        prev.forEach((p) => {
+                          if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+                        });
+                        return [];
+                      });
                       setText("");
                       setReplyDraft(null);
                       clearSelectedFile();
@@ -2283,6 +2519,7 @@ function ChatInner() {
                     } finally {
                       chatFileUploadLockRef.current = false;
                       setIsUploading(false);
+                      setUploadProgress(null);
                     }
                     return;
                   }
@@ -2336,31 +2573,56 @@ function ChatInner() {
               }}
             >
               <input
-                ref={fileInputRef}
+                ref={docInputRef}
                 type="file"
                 className="hidden"
-                accept=".jpg,.jpeg,.png,.webp"
+                accept=".pdf,application/pdf"
                 disabled={composerDisabled}
                 onChange={(e) => {
                   const file = e.target.files?.[0] ?? null;
-                  if (!file) {
-                    clearSelectedFile();
-                    return;
-                  }
-
-                  const check = validateChatUploadClient(file);
+                  e.target.value = "";
+                  if (!file) return;
+                  const check = validateChatUploadClient(file, "document");
                   if (!check.ok) {
                     setFileError(check.message);
-                    if (selectedFilePreviewUrl) URL.revokeObjectURL(selectedFilePreviewUrl);
-                    setSelectedFile(null);
-                    setSelectedFilePreviewUrl(null);
                     return;
                   }
-
                   setFileError(null);
-                  if (selectedFilePreviewUrl) URL.revokeObjectURL(selectedFilePreviewUrl);
-                  setSelectedFile(file);
-                  setSelectedFilePreviewUrl(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
+                  setPendingAttachments((prev) => [
+                    ...prev,
+                    { id: `pending-${Date.now()}`, file, kind: "document", previewUrl: null },
+                  ]);
+                }}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                multiple
+                disabled={composerDisabled}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  if (!files.length) return;
+                  setFileError(null);
+                  const nextRows: PendingChatAttachment[] = [];
+                  for (const file of files) {
+                    const check = validateChatUploadClient(file);
+                    if (!check.ok) {
+                      setFileError(check.message);
+                      continue;
+                    }
+                    nextRows.push({
+                      id: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                      file,
+                      kind: "image",
+                      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+                    });
+                  }
+                  if (nextRows.length) {
+                    setPendingAttachments((prev) => [...prev, ...nextRows]);
+                  }
                 }}
               />
               <textarea
@@ -2575,7 +2837,7 @@ function ChatInner() {
             >
               <div className="w-full max-w-md rounded-3xl border border-black/10 bg-white p-6 shadow-xl">
                 <h2 id="outgoing-call-title" className="text-lg font-semibold tracking-tight">
-                  Звоним пользователю…
+                  {outgoingCallId ? "Звоним пользователю…" : "Соединение…"}
                 </h2>
                 {opponent.id.trim() ? (
                   <p className="mt-2 text-sm text-black/60">
@@ -2587,7 +2849,24 @@ function ChatInner() {
                     })}
                   </p>
                 ) : null}
-                <div className="mt-5">
+                {outgoingCallError ? (
+                  <p className="mt-3 text-sm text-red-600" role="alert">
+                    {outgoingCallError}
+                  </p>
+                ) : null}
+                <div className="mt-5 grid gap-2">
+                  {outgoingCallError ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOutgoingCallError(null);
+                        void beginOutgoingCall({ retry: true });
+                      }}
+                      className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-600"
+                    >
+                      Повторить
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => void cancelOutgoingCall()}
@@ -2659,7 +2938,15 @@ function ChatInner() {
             role={rtcRole}
             peerUserId={rtcPeerUserId}
             peerDisplayHint={rtcPeerHint}
+            chatId={chatId}
+            displayName={buildSenderNameForApi(currentSenderId)}
             onClose={endRtcCall}
+          />
+          <ReportModal
+            open={reportModalOpen}
+            targetType="user"
+            targetId={opponent.id}
+            onClose={() => setReportModalOpen(false)}
           />
           <BlockPeerModal
             open={blockModalOpen}

@@ -14,8 +14,8 @@ const nextConfig: NextConfig = {
       "form-action 'self'",
       "img-src 'self' data: blob: https://*.maps.yandex.net https://*.yandex.ru https://yastatic.net",
       "style-src 'self' 'unsafe-inline' https://yastatic.net",
-      `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"} https://api-maps.yandex.ru https://yastatic.net`,
-      "script-src-elem 'self' 'unsafe-inline' https://api-maps.yandex.ru https://yastatic.net",
+      `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"} https://api-maps.yandex.ru https://yastatic.net https://meet.jit.si https://mc.yandex.ru`,
+      "script-src-elem 'self' 'unsafe-inline' https://api-maps.yandex.ru https://yastatic.net https://meet.jit.si https://mc.yandex.ru",
       // Jitsi websocket + related domains + Yandex Maps tiles/API
       [
         "connect-src 'self'",

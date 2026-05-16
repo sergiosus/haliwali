@@ -18,6 +18,7 @@ function storedMsgToApi(m: import("../../../lib/serverListingChatsStore").Stored
     replyToMessageId: m.replyToMessageId,
     replyToText: m.replyToText,
     editedAt: m.editedAt,
+    ...(m.readAt != null ? { readAt: m.readAt } : {}),
   };
 }
 

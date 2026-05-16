@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { fileTypeFromBuffer } from "file-type";
 import {
+  CHAT_DOC_MIME_SET,
   CHAT_UPLOAD_MAX_BYTES,
   CHAT_UPLOAD_MIME_SET,
+  CHAT_VOICE_MAX_BYTES,
+  CHAT_VOICE_MIME_SET,
+  type ChatUploadKind,
   chatUploadExtFromMime,
 } from "../../../lib/chatUploadConstraints";
 import {
@@ -46,24 +50,35 @@ export async function POST(req: Request) {
       if (blockedForbidden) return blockedForbidden;
     }
 
+    const kindRaw = typeof form.get("kind") === "string" ? (form.get("kind") as string).trim() : "image";
+    const kind: ChatUploadKind =
+      kindRaw === "voice" ? "voice" : kindRaw === "document" ? "document" : "image";
+
     const file = form.get("file");
     if (!file || !(file instanceof File)) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
     const size = typeof file.size === "number" ? file.size : 0;
-    if (!size || size > CHAT_UPLOAD_MAX_BYTES) {
+    const maxBytes = kind === "voice" ? CHAT_VOICE_MAX_BYTES : CHAT_UPLOAD_MAX_BYTES;
+    if (!size || size > maxBytes) {
       return NextResponse.json({ error: "File too large" }, { status: 413 });
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
     const ft = await fileTypeFromBuffer(buf);
     const mime = ft?.mime ?? "";
-    if (!CHAT_UPLOAD_MIME_SET.has(mime)) return NextResponse.json({ error: "Invalid file type" }, { status: 415 });
+    const allowed =
+      kind === "voice" ? CHAT_VOICE_MIME_SET : kind === "document" ? CHAT_DOC_MIME_SET : CHAT_UPLOAD_MIME_SET;
+    if (!allowed.has(mime)) return NextResponse.json({ error: "Invalid file type" }, { status: 415 });
     const ext = chatUploadExtFromMime(mime);
     if (!ext) return NextResponse.json({ error: "Invalid file type" }, { status: 415 });
 
     const fileId = randomUUID();
+    const originalName =
+      kind === "voice" && !file.name.toLowerCase().startsWith("voice.")
+        ? `voice.${ext}`
+        : file.name;
 
     // TODO(VPS): integrate antivirus scanning (e.g., ClamAV) and quarantine on detection.
     await savePrivateChatFile({
@@ -73,7 +88,7 @@ export async function POST(req: Request) {
       ext,
       mime,
       fileId,
-      originalName: file.name,
+      originalName,
       sizeBytes: size,
     });
 

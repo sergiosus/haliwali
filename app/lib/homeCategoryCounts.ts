@@ -1,6 +1,7 @@
 "use client";
 
-import { homeCategoryGridSections } from "./directory";
+import { homeCategoryGridSections } from "./categories";
+import { homeParentSlugForListing, canonicalCategorySlugForListing } from "./categoryLegacyMap";
 import type { Listing } from "./listingModel";
 import { dedupeListingsById, isListingPubliclyListed } from "./listingModel";
 
@@ -17,12 +18,21 @@ export function computeHomeCategoryCounts(
     for (const link of section.links) {
       counts[link.slug] = 0;
     }
+    for (const group of section.groups) {
+      for (const child of group.links) {
+        counts[child.slug] = 0;
+      }
+    }
   }
 
   for (const l of visible) {
-    const slug = (l.categorySlug ?? "").trim();
-    if (slug && Object.prototype.hasOwnProperty.call(counts, slug)) {
-      counts[slug] = (counts[slug] ?? 0) + 1;
+    const leaf = canonicalCategorySlugForListing(l);
+    const parentSlug = homeParentSlugForListing(l);
+    if (parentSlug && Object.prototype.hasOwnProperty.call(counts, parentSlug)) {
+      counts[parentSlug] = (counts[parentSlug] ?? 0) + 1;
+    }
+    if (leaf && leaf !== parentSlug && Object.prototype.hasOwnProperty.call(counts, leaf)) {
+      counts[leaf] = (counts[leaf] ?? 0) + 1;
     }
   }
 

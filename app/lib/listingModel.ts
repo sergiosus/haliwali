@@ -1,4 +1,11 @@
-import { categoryToSlug, productCategories, serviceCategories, taskCategories } from "./categories";
+import {
+  CATEGORY_OTHER_LABEL,
+  categoryToSlug,
+  productCategories,
+  serviceCategories,
+  taskCategories,
+} from "./categories";
+import { normalizeLegacyCategoryName } from "./categoryLegacyMap";
 import {
   normalizeRussiaLocationLookupKey,
   resolveRussiaCityRegionDisplay,
@@ -177,36 +184,20 @@ function migrateListingShape(x: unknown): unknown {
 
   const normalizedCategoryName = (() => {
     if (!categoryName) return "";
+    const mapped = normalizeLegacyCategoryName(categoryName, type);
     if (type === "service") {
-      // If a category is already one of our fixed service categories, keep it.
-      // (We only normalize legacy/renamed categories below.)
       const allowed = new Set(serviceCategories as readonly string[]);
-      if (allowed.has(categoryName)) return categoryName;
-      if (["Ремонт и бытовые услуги", "Строительство и ремонт", "Ремонт"].includes(categoryName))
-        return "Ремонт и строительство";
-      if (["Компьютеры и электроника", "Компьютеры"].includes(categoryName))
-        return "Компьютеры и техника";
-      if (categoryName === "Перевозки и доставка") return "Перевозки и доставка";
-      if (categoryName === "Красота и здоровье") return "Красота и здоровье";
-      if (categoryName === "Обучение") return "Обучение";
-      if (categoryName === "Авто") return "Авто услуги";
-      if (categoryName === "Уборка") return "Уборка";
-      return "Другое";
+      return allowed.has(mapped) ? mapped : CATEGORY_OTHER_LABEL;
     }
-
     if (type === "task") {
       const allowed = new Set(taskCategories as readonly string[]);
-      if (allowed.has(categoryName)) return categoryName;
-      if (["Доставка", "Перевозки и доставка"].includes(categoryName)) return "Доставка";
-      return "Другое";
+      return allowed.has(mapped) ? mapped : CATEGORY_OTHER_LABEL;
     }
-
     if (type === "product_sell" || type === "product_buy") {
       const allowed = new Set(productCategories as readonly string[]);
-      return allowed.has(categoryName) ? categoryName : "Другое";
+      return allowed.has(mapped) ? mapped : CATEGORY_OTHER_LABEL;
     }
-
-    return categoryName;
+    return mapped;
   })();
 
   const categorySlug =

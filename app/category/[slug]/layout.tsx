@@ -1,15 +1,6 @@
 import type { Metadata } from "next";
-import { categoryToSlug, productCategories, serviceCategories, taskCategories } from "../../lib/categories";
+import { categoryTitleFromSlug } from "../../lib/categoryDirectory";
 import { siteUrl } from "../../lib/siteUrl";
-
-function categoryTitleFromSlug(slug: string): string | null {
-  const s = (slug ?? "").trim();
-  if (!s) return null;
-  for (const t of taskCategories) if (categoryToSlug(t, "task") === s) return t;
-  for (const t of serviceCategories) if (categoryToSlug(t, "service") === s) return t;
-  for (const t of productCategories) if (categoryToSlug(t, "product_sell") === s) return t;
-  return null;
-}
 
 export async function generateMetadata(props: {
   params: Promise<{ slug: string }>;

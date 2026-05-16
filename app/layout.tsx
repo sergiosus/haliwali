@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { AuthBootstrap } from "./components/AuthBootstrap";
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
+import { YandexMetrika } from "./components/YandexMetrika";
 import { SiteHeader } from "./components/SiteHeader";
 import { SiteFooter } from "./components/SiteFooter";
 import { siteUrl } from "./lib/siteUrl";
@@ -78,6 +79,7 @@ export default function RootLayout({
         <SiteFooter />
         <CookieConsentBanner />
         <PwaInstallPrompt />
+        <YandexMetrika />
       </body>
     </html>
   );

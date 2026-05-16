@@ -11,6 +11,7 @@
     "import:locations": "node scripts/import-locations-to-db.mjs"
   },
   "dependencies": {
+    "@jitsi/react-sdk": "^1.4.4",
     "bcryptjs": "^3.0.3",
     "file-type": "^21.3.4",
     "next": "16.2.4",

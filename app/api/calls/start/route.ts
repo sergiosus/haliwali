@@ -1,20 +1,19 @@
 import { NextResponse } from "next/server";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
 import { getUserIdFromSessionCookie } from "../../../lib/serverSession";
-import { readUsersDb } from "../../../lib/serverUsersStore";
+import { fetchStoredUserById } from "../../../lib/serverUsersStore";
 import { createCall, findActiveOrPendingCall } from "../../../lib/serverCallsStore";
 import { chatUserBlockedForbidden } from "../../../lib/serverChatUserBlock";
+import {
+  isListingConversationParticipant,
+  parseListingConversationId,
+} from "../../../lib/serverListingChatsStore";
 import path from "node:path";
 
 export const runtime = "nodejs";
 
 const USERS_PATH = path.join(process.cwd(), ".data", "verified-users.json");
-
-function parseChatParticipantsFromChatId(chatId: string): string[] {
-  const parts = chatId.split("::").map((x) => x.trim()).filter(Boolean);
-  // expected: listingId::userA::userB (listingId can contain hyphens; user ids can contain hyphens)
-  return parts.slice(1);
-}
+const isDev = process.env.NODE_ENV === "development";
 
 export async function POST(req: Request) {
   const csrf = denyIfMutationOriginForbidden(req);
@@ -35,21 +34,38 @@ export async function POST(req: Request) {
   // Must include caller.
   if (!participantIds.includes(userId)) return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
-  // Verify the userId is a chat participant based on chatId structure (client chat id format).
-  const chatParticipants = parseChatParticipantsFromChatId(chatId);
-  if (chatParticipants.length >= 2 && !chatParticipants.includes(userId)) {
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  const parsedChat = parseListingConversationId(chatId);
+  if (!parsedChat) {
+    if (isDev) console.warn("[calls/start] invalid chatId", { chatId });
+    return NextResponse.json({ ok: false, error: "BAD_REQUEST", message: "invalid chatId" }, { status: 400 });
+  }
+  if (!isListingConversationParticipant(userId, chatId)) {
+    if (isDev) console.warn("[calls/start] caller not in chat", { chatId, userId });
+    return NextResponse.json({ ok: false, error: "FORBIDDEN", message: "not a chat participant" }, { status: 403 });
   }
 
-  // Verify all participants exist as server users (prevents arbitrary ids).
-  const usersDb = await readUsersDb(USERS_PATH);
-  for (const pid of participantIds) {
-    if (!pid) return NextResponse.json({ error: "BAD_REQUEST" }, { status: 400 });
-    if (!usersDb.usersById[pid]) return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  const allowedParticipantIds = new Set([parsedChat.ownerId, parsedChat.buyerId]);
+  const uniqueParticipantIds = [...new Set(participantIds.filter(Boolean))];
+  if (uniqueParticipantIds.length !== 2) {
+    return NextResponse.json(
+      { ok: false, error: "BAD_REQUEST", message: "participantIds must be owner and buyer" },
+      { status: 400 },
+    );
+  }
+  for (const pid of uniqueParticipantIds) {
+    if (!allowedParticipantIds.has(pid)) {
+      if (isDev) console.warn("[calls/start] participant not in chat", { chatId, pid });
+      return NextResponse.json({ ok: false, error: "FORBIDDEN", message: "participant not in chat" }, { status: 403 });
+    }
     if (pid !== userId) {
       const blockedForbidden = await chatUserBlockedForbidden(userId, pid);
       if (blockedForbidden) return blockedForbidden;
     }
+  }
+  const caller = await fetchStoredUserById(USERS_PATH, userId);
+  if (!caller) {
+    if (isDev) console.warn("[calls/start] caller not in users store", { userId });
+    return NextResponse.json({ ok: false, error: "FORBIDDEN", message: "caller not found" }, { status: 403 });
   }
 
   // Reuse an existing non-expired pending/active call for this chat if caller is a participant.
@@ -69,16 +85,24 @@ export async function POST(req: Request) {
   const callerDisplayName =
     typeof body.callerDisplayName === "string" ? body.callerDisplayName.trim().slice(0, 120) : "";
 
-  const call = await createCall({
-    chatId,
-    callerId: userId,
-    participantIds,
-    ...(callerDisplayName ? { callerDisplayName } : {}),
-  });
+  try {
+    const call = await createCall({
+      chatId,
+      callerId: userId,
+      participantIds,
+      ...(callerDisplayName ? { callerDisplayName } : {}),
+    });
 
-  return NextResponse.json({
-    ok: true,
-    call: { callId: call.callId, roomToken: call.roomToken, status: call.status, expiresAt: call.expiresAt },
-  });
+    return NextResponse.json({
+      ok: true,
+      call: { callId: call.callId, roomToken: call.roomToken, status: call.status, expiresAt: call.expiresAt },
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (isDev) {
+      console.error("[calls/start] createCall failed", { chatId, userId, message });
+    }
+    return NextResponse.json({ ok: false, error: "CALL_CREATE_FAILED", message }, { status: 500 });
+  }
 }
 

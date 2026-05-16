@@ -30,7 +30,15 @@ import {
 } from "./lib/directory";
 import { computeHomeCategoryCounts } from "./lib/homeCategoryCounts";
 import { haystackNormalizedMatchesListingSearch, matchesListingQuery } from "./lib/search";
-import { categoryToSlug, productCategories, serviceCategories, taskCategories } from "./lib/categories";
+import {
+  categoryToSlug,
+  homeGroupChildLinks,
+  homeGroupHasExpandableChildren,
+  productCategories,
+  serviceCategories,
+  taskCategories,
+  type HomeCategoryGroup,
+} from "./lib/categories";
 import { CityCombobox } from "./components/CityCombobox";
 import { ListingLocationSection } from "./components/ListingLocationSection";
 import { CompactListingCard } from "./components/CompactListingCard";
@@ -96,7 +104,12 @@ function isHomeGridColumnHeading(s: string): s is HomeGridColumnHeading {
 function isHomeSectionWithColumnHeading(section: {
   heading: string;
   links: { label: string; slug: string }[];
-}): section is { heading: HomeGridColumnHeading; links: { label: string; slug: string }[] } {
+  groups: HomeCategoryGroup[];
+}): section is {
+  heading: HomeGridColumnHeading;
+  links: { label: string; slug: string }[];
+  groups: HomeCategoryGroup[];
+} {
   return isHomeGridColumnHeading(section.heading);
 }
 
@@ -178,16 +191,22 @@ function HaliwaliLanding() {
   const uniqueListings = useMemo(() => dedupeListingsById(listings), [listings]);
 
   const homeCategoryGridFiltered = useMemo(() => {
+    const q = normalizeQuery(directorySearch);
     return homeCategoryGridSections
-      .map((section) => ({
-        heading: section.heading,
-        links: section.links.filter((link) => {
-          if (!getDirectoryItemBySlug(link.slug)) return false;
-          const row = getDirectoryItemBySlug(link.slug);
-          const haystack = normalizeQuery(`${link.label} ${row?.title ?? ""}`);
-          return haystackNormalizedMatchesListingSearch(haystack, directorySearch);
-        }),
-      }))
+      .map((section) => {
+        if (!q) {
+          return { heading: section.heading, links: section.links, groups: section.groups };
+        }
+        const groups = section.groups.filter((g) => {
+          const parentHay = normalizeQuery(g.title);
+          if (haystackNormalizedMatchesListingSearch(parentHay, directorySearch)) return true;
+          return g.links.some((c) =>
+            haystackNormalizedMatchesListingSearch(normalizeQuery(c.label), directorySearch),
+          );
+        });
+        const links = groups.map((g) => ({ label: g.title, slug: g.parentSlug }));
+        return { heading: section.heading, links, groups };
+      })
       .filter((s) => s.links.length > 0);
   }, [directorySearch]);
 
@@ -199,9 +218,7 @@ function HaliwaliLanding() {
       const { counts: c } = computeHomeCategoryCounts(uniqueListings, {
         listingLocationFilter: (l) => listingMatchesSearchScope(l, scope),
       });
-      for (const link of section.links) {
-        out[link.slug] = c[link.slug] ?? 0;
-      }
+      Object.assign(out, c);
     }
     return out;
   }, [uniqueListings, homeCategoryGridFiltered, browseScopeForColumn]);
@@ -546,7 +563,7 @@ function HaliwaliLanding() {
                 <HomeCategorySectionCard
                   key={section.heading}
                   heading={col}
-                  links={section.links}
+                  groups={section.groups}
                   counts={categoryCounts}
                   countsLoading={categoryCountsLoading}
                   browseLocationLabel={homepageToolbarBrowseStatusLine(browseScopeForColumn(col))}
@@ -637,7 +654,7 @@ function HaliwaliLanding() {
 
 function HomeCategorySectionCard({
   heading,
-  links,
+  groups,
   counts,
   countsLoading,
   browseLocationLabel,
@@ -646,7 +663,7 @@ function HomeCategorySectionCard({
   onLocationSyncToAllChange,
 }: {
   heading: HomeGridColumnHeading;
-  links: { label: string; slug: string }[];
+  groups: HomeCategoryGroup[];
   counts: Record<string, number> | null;
   countsLoading: boolean;
   browseLocationLabel: string;
@@ -654,6 +671,7 @@ function HomeCategorySectionCard({
   locationSyncToAll: boolean;
   onLocationSyncToAllChange: (next: boolean) => void;
 }) {
+  const [expandedParentSlug, setExpandedParentSlug] = useState<string | null>(null);
   const headingHref =
     heading === "Задачи" ? "/tasks"
     : heading === "Услуги" ? "/services"
@@ -708,26 +726,92 @@ function HomeCategorySectionCard({
         </div>
       </div>
 
-      <nav className="mt-0 border-t border-black/10 pt-3 flex flex-col gap-1.5" aria-label={heading}>
-        {links.map((link, idx) => (
-          <Link
-            key={`${heading}-${link.slug}-${idx}`}
-            href={`/category/${link.slug}`}
-            className="group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-[15px] font-medium leading-[1.25] text-gray-800 transition-colors hover:bg-gray-50"
-          >
-            <span className="min-w-0">
-              <span className={((counts?.[link.slug] ?? 0) === 0 ? "text-gray-700/80" : "text-gray-800").trim()}>
-                {link.label}
-              </span>{" "}
-              <span className="text-[13px] text-gray-400">
-                ({countsLoading || !counts ? "..." : String(counts[link.slug] ?? 0)})
-              </span>
-            </span>
-            <span className="shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden>
-              →
-            </span>
-          </Link>
-        ))}
+      <nav className="mt-0 flex flex-col gap-1 border-t border-black/10 pt-3" aria-label={heading}>
+        {groups.map((group) => {
+          const expandable = homeGroupHasExpandableChildren(group);
+          const children = homeGroupChildLinks(group);
+          const expanded = expandedParentSlug === group.parentSlug;
+          const parentCount = countsLoading || !counts ? "..." : String(counts[group.parentSlug] ?? 0);
+
+          return (
+            <div key={`${heading}-${group.parentSlug}`} className="flex flex-col gap-1">
+              {expandable ?
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  onClick={() =>
+                    setExpandedParentSlug(expanded ? null : group.parentSlug)
+                  }
+                  className={[
+                    "group flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-[15px] font-medium leading-[1.25] transition-colors",
+                    expanded ? "bg-gray-100 text-gray-900" : "text-gray-800 hover:bg-gray-50",
+                  ].join(" ")}
+                >
+                  <span className="min-w-0">
+                    <span
+                      className={
+                        (counts?.[group.parentSlug] ?? 0) === 0 ? "text-gray-700/80" : "text-gray-800"
+                      }
+                    >
+                      {group.title}
+                    </span>{" "}
+                    <span className="text-[13px] font-normal text-gray-400">({parentCount})</span>
+                  </span>
+                  <span
+                    className="shrink-0 text-[13px] text-gray-400 transition-transform"
+                    aria-hidden
+                    style={{ transform: expanded ? "rotate(90deg)" : undefined }}
+                  >
+                    ›
+                  </span>
+                </button>
+              : <Link
+                  href={`/category/${group.parentSlug}`}
+                  className="group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-[15px] font-medium leading-[1.25] text-gray-800 transition-colors hover:bg-gray-50"
+                >
+                  <span className="min-w-0">
+                    <span
+                      className={
+                        (counts?.[group.parentSlug] ?? 0) === 0 ? "text-gray-700/80" : "text-gray-800"
+                      }
+                    >
+                      {group.title}
+                    </span>{" "}
+                    <span className="text-[13px] text-gray-400">({parentCount})</span>
+                  </span>
+                  <span
+                    className="shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100"
+                    aria-hidden
+                  >
+                    →
+                  </span>
+                </Link>
+              }
+              {expandable && expanded ?
+                <div
+                  className="ml-2 flex flex-col gap-0.5 border-l border-black/6 pb-1 pl-3.5"
+                  role="group"
+                  aria-label={group.title}
+                >
+                  {children.map((child) => {
+                    const childCount =
+                      countsLoading || !counts ? "..." : String(counts[child.slug] ?? 0);
+                    return (
+                      <Link
+                        key={`${group.parentSlug}-${child.slug}`}
+                        href={`/category/${child.slug}`}
+                        className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md py-0.5 pr-2 pl-1.5 text-left text-[14px] font-normal leading-[1.3] text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-800"
+                      >
+                        <span className="min-w-0 truncate">{child.label}</span>
+                        <span className="shrink-0 text-[13px] text-gray-400">({childCount})</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              : null}
+            </div>
+          );
+        })}
       </nav>
     </div>
   );

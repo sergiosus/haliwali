@@ -1,68 +1,10 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import AdminClient from "./AdminClient";
 import AdminLoginForm from "./AdminLoginForm";
-import {
-  adminRateLimitOk,
-  clearAdminCookie,
-  createAdminSession,
-  destroyCurrentAdminSessionsFromCookies,
-  getAdminPageView,
-  setAdminCookie,
-} from "../lib/serverAdminSession";
-import { invalidateCurrentUserSessionCookie } from "../lib/serverSession";
-import { getAdminPassword } from "@/app/lib/admin-password";
-import { isDebugAuthServer } from "@/app/lib/debugAuth";
+import AdminLogoutButton from "./AdminLogoutButton";
+import { getAdminPageView } from "../lib/serverAdminSession";
 
-async function login(formData: FormData) {
-  "use server";
-  if (process.env.NODE_ENV === "production") {
-    redirect("/admin");
-  }
-
-  const okRate = await adminRateLimitOk();
-  if (!okRate) {
-    redirect("/admin?rate=1");
-  }
-
-  const jar = await cookies();
-
-  const password = String(formData.get("password") ?? "");
-
-  if (!getAdminPassword()) {
-    if (isDebugAuthServer()) {
-      console.log("[admin-auth] login", { success: false, reason: "no_password_config" });
-    }
-    redirect("/admin?nocfg=1");
-  }
-
-  const okPwd = password === getAdminPassword();
-  if (!okPwd) {
-    if (isDebugAuthServer()) {
-      console.log("[admin-auth] login", { success: false, reason: "bad_password" });
-    }
-    redirect("/admin?error=1");
-  }
-
-  const { token, maxAgeSec } = await createAdminSession();
-  await setAdminCookie(jar, token, maxAgeSec);
-
-  if (isDebugAuthServer()) {
-    console.log("[admin-auth] login", { success: true });
-  }
-
-  redirect("/admin");
-}
-
-async function logout() {
-  "use server";
-  await invalidateCurrentUserSessionCookie();
-  const jar = await cookies();
-  await destroyCurrentAdminSessionsFromCookies();
-  await clearAdminCookie(jar);
-  redirect("/admin");
-}
+export const dynamic = "force-dynamic";
 
 export default async function AdminPage({
   searchParams,
@@ -84,16 +26,7 @@ export default async function AdminPage({
             <div className="font-semibold tracking-tight">Админка Haliwali</div>
             <div className="text-sm text-black/60">Модерация задач, услуг и товаров</div>
           </div>
-          {view === "dashboard" ? (
-            <form action={logout}>
-              <button
-                type="submit"
-                className="h-10 rounded-full border border-black/20 bg-white px-4 text-sm font-semibold text-black hover:bg-black/5"
-              >
-                Выйти
-              </button>
-            </form>
-          ) : null}
+          {view === "dashboard" ? <AdminLogoutButton /> : null}
         </header>
 
         <main className="pb-16">
@@ -132,7 +65,7 @@ export default async function AdminPage({
                 Введите пароль администратора (только для локальной разработки).
               </div>
 
-              <AdminLoginForm action={login} error={error} rate={rate} nocfg={nocfg} />
+              <AdminLoginForm error={error} rate={rate} nocfg={nocfg} />
               {process.env.NODE_ENV !== "production" ? (
                 <div className="mt-4 text-xs text-black/50">
                   Первый вход: задайте <code className="rounded bg-black/5 px-1">ADMIN_PASSWORD</code> в окружении. После смены пароля в панели он сохраняется в{" "}

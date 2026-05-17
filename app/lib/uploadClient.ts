@@ -1,6 +1,14 @@
 "use client";
 
-import { prepareListingPhotoFileForUpload } from "./uploadImagePrepare";
+import {
+  LISTING_PHOTO_ALLOWED_EXTS,
+  LISTING_PHOTO_ALLOWED_MIMES,
+  LISTING_PHOTO_MAX_BYTES,
+} from "./listingPhotoLimits";
+import {
+  ListingPhotoPrepareError,
+  prepareListingPhotoFileForUpload,
+} from "./uploadImagePrepare";
 
 export type UploadFailReason =
   | "network_error"
@@ -25,9 +33,8 @@ export function isUploadFail(x: unknown): x is UploadFail {
   return o.kind === "upload" && typeof o.message === "string";
 }
 
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const ALLOWED_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const ALLOWED_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"]);
+const ALLOWED_MIMES = new Set<string>(LISTING_PHOTO_ALLOWED_MIMES);
+const ALLOWED_EXTS = new Set<string>(LISTING_PHOTO_ALLOWED_EXTS);
 
 /** Default user-facing copy for opaque network / transport failures. */
 const USER_MSG_UPLOAD_GENERIC =
@@ -73,14 +80,19 @@ export async function uploadFiles(files: File[]) {
     try {
       prepared = await prepareListingPhotoFileForUpload(file);
     } catch (e) {
-      const tag = e instanceof Error ? e.message : "";
-      if (tag === "oversized_before_prepare" || tag === "still_too_large_after_prepare") {
+      if (e instanceof ListingPhotoPrepareError) {
         throwUploadFail(
-          "file_too_large",
-          "Файл больше 5 МБ даже после сжатия. Выберите другое фото или уменьшите его в галерее.",
+          e.code === "unsupported_type" ? "unsupported_type" : "file_too_large",
+          e.message,
         );
       }
       devUploadWarn("prepare_failed", { index: i, error: String(e) });
+      if (file.size > LISTING_PHOTO_MAX_BYTES) {
+        throwUploadFail(
+          "file_too_large",
+          "Файл больше 5 МБ. Выберите фото меньшего размера или сожмите его перед загрузкой.",
+        );
+      }
       prepared = file;
     }
 
@@ -98,10 +110,10 @@ export async function uploadFiles(files: File[]) {
     if (!prepared.size) {
       throwUploadFail("unsupported_type", "Фото не удалось загрузить. Проверьте формат и размер файла.");
     }
-    if (prepared.size > MAX_UPLOAD_BYTES) {
+    if (prepared.size > LISTING_PHOTO_MAX_BYTES) {
       throwUploadFail(
         "file_too_large",
-        "Файл больше 5 МБ. Выберите фото меньшего размера или сожмите его перед загрузкой.",
+        "Файл больше 5 МБ даже после сжатия. Выберите другое фото или уменьшите его в галерее.",
       );
     }
 

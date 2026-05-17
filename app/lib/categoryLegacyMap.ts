@@ -9,42 +9,56 @@ function listingKind(type: string): ListingKind {
   return "task";
 }
 
-/** Old stored category titles → new canonical titles (exact user taxonomy). */
+/** Old stored category titles → new canonical titles. */
 const LEGACY_TASK_NAME: Record<string, string> = {
   Доставка: "доставка",
   "Курьерские поручения": "курьер",
-  "Компьютерная помощь": "настройка ПК",
+  "Компьютерная помощь": "настроить ПК",
   "Нужен мастер": "поиск исполнителя",
-  "Ремонт техники": "ремонт техники",
+  "Ремонт техники": "починить технику",
   "Ремонт и строительство": "сантехника",
   Перевозки: "переезд",
-  "Помощь по дому": "помощь по дому",
+  "Помощь по дому": "мелкий ремонт",
   Уборка: "уборка",
-  "Разовые задания": "разовые поручения",
-  "Срочно сегодня": "разовые поручения",
-  "Удалённые задачи": "разовые поручения",
-  "Организация мероприятий": "Другое",
+  "сборка мебели": "собрать мебель",
+  "настройка ПК": "настроить ПК",
+  "ремонт техники": "починить технику",
+  "подработка и работа": "подработка",
+  "разовые поручения": "разнорабочий",
+  "Разовые задания": "разнорабочий",
+  "Срочно сегодня": "разнорабочий",
+  "Удалённые задачи": "разнорабочий",
+  "Организация мероприятий": "помощь на мероприятиях",
   "Фото и видео задачи": "Другое",
-  "Подработка и смены": "подработка и работа",
-  "Мероприятия и организация": "Другое",
+  "Подработка и смены": "подработка",
+  "Мероприятия и организация": "помощь на мероприятиях",
   "Офис и документы": "Другое",
   "Помощь с авто": "найти авто",
+  "Перевозки и доставка": "доставка",
+  "Компьютеры и техника": "настроить ПК",
+  "Аренда и поиск": "поиск аренды",
   Другое: "Другое",
 };
 
 const LEGACY_SERVICE_NAME: Record<string, string> = {
-  Автоуслуги: "автоуслуги",
+  Автоуслуги: "автосервис",
   Бухгалтерия: "бухгалтерия",
   "Компьютеры и техника": "компьютеры",
   Уборка: "уборка",
   "Перевозки и доставка": "доставка",
   Перевозки: "доставка",
   "Красота и здоровье": "парикмахер",
-  "Юридические услуги": "юруслуги",
-  "Недвижимость услуги": "аренда недвижимости",
-  "Недвижимость и аренда": "аренда недвижимости",
+  "Юридические услуги": "юрист",
+  юруслуги: "юрист",
+  "Недвижимость услуги": "аренда жилья",
+  "Недвижимость и аренда": "аренда жилья",
+  "аренда недвижимости": "аренда жилья",
+  "сдаю жильё": "аренда жилья",
+  "коммерческая аренда": "коммерческая недвижимость",
+  "бизнес-услуги": "маркетинг",
+  прокат: "Другое",
   Обучение: "репетиторы",
-  "Реклама и дизайн": "сайты",
+  "Реклама и дизайн": "дизайн",
   "Фото и видео": "фото",
   "Ремонт бытовой техники": "ремонт техники",
   "Ремонт и строительство": "ремонт квартир",
@@ -54,10 +68,12 @@ const LEGACY_SERVICE_NAME: Record<string, string> = {
   Ремонт: "ремонт квартир",
   "Компьютеры и электроника": "компьютеры",
   Компьютеры: "компьютеры",
-  "Авто услуги": "автоуслуги",
-  Авто: "автоуслуги",
-  "Риелторы и жильё": "сдаю жильё",
-  "Коммерческая аренда": "коммерческая аренда",
+  "Авто услуги": "автосервис",
+  Авто: "автосервис",
+  "Риелторы и жильё": "риелтор",
+  "Перевозки и авто": "доставка",
+  "Бизнес и аренда": "бухгалтерия",
+  автоуслуги: "автосервис",
   Другое: "Другое",
 };
 
@@ -66,81 +82,115 @@ const LEGACY_PRODUCT_NAME: Record<string, string> = {
   Бесплатно: "Другое",
   "Телефоны и гаджеты": "телефоны",
   Электроника: "техника",
-  "Ноутбуки и компьютеры": "компьютеры",
+  "Ноутбуки и компьютеры": "ноутбуки",
   "Бытовая техника": "техника",
   Комплектующие: "запчасти",
   Инструменты: "инструменты",
   "Мебель и дом": "мебель",
   "Одежда и обувь": "одежда",
-  Животные: "животные",
+  "Одежда и дети": "одежда",
+  Животные: "товары для животных",
   "Спорт и отдых": "спорт",
-  "Детские товары": "детские товары",
+  "детские товары": "детская одежда",
+  "Детские товары": "игрушки",
   Запчасти: "запчасти",
   "Шины и диски": "шины",
   "Автозапчасти и шины": "шины",
   "Квартиры и дома": "квартиры",
+  коммерческая: "квартиры",
   Авто: "автомобили",
+  "Авто и запчасти": "автомобили",
+  "Хобби и животные": "спорт",
+  отдых: "туризм",
   Другое: "Другое",
 };
 
-/** Old category URL slugs → new canonical slugs (for counts + canonical browse). */
+/** Old category URL slugs → new canonical slugs. */
 export const LEGACY_SLUG_TO_CANONICAL: Record<string, string> = {
-  // tasks
+  // tasks — leaves
   dostavka: "zadachi-dostavka",
   "zadachi-kurerskie-porucheniya": "zadachi-kurer",
-  "zadachi-kompyuternaya-pomoshch": "zadachi-nastroyka-pk",
+  "zadachi-kompyuternaya-pomoshch": "zadachi-nastroit-pk",
+  "zadachi-nastroyka-pk": "zadachi-nastroit-pk",
   "nuzhen-master": "zadachi-poisk-ispolnitelya",
-  "zadachi-remont-tehniki": "zadachi-remont-tehniki",
+  "zadachi-remont-tehniki": "zadachi-pochinit-tehniku",
   "zadachi-remont-i-stroitelstvo": "zadachi-santehnika",
   "zadachi-perevozki": "zadachi-pereezd",
-  "pomosh-po-domu": "zadachi-pomosh-po-domu",
+  "zadachi-sborka-mebeli": "zadachi-sobrat-mebel",
+  "pomosh-po-domu": "zadachi-melkiy-remont",
+  "zadachi-pomosh-po-domu": "zadachi-melkiy-remont",
   "zadachi-uborka": "zadachi-uborka",
-  "razovye-zadaniya": "zadachi-razovye-porucheniya",
-  "srochno-segodnya": "zadachi-razovye-porucheniya",
-  "udalennye-zadachi": "zadachi-razovye-porucheniya",
-  "zadachi-organizatsiya-meropriyatiy": "zadachi-drugoe",
+  "razovye-zadaniya": "zadachi-raznorabochiy",
+  "zadachi-razovye-porucheniya": "zadachi-raznorabochiy",
+  "srochno-segodnya": "zadachi-raznorabochiy",
+  "udalennye-zadachi": "zadachi-raznorabochiy",
+  "zadachi-organizatsiya-meropriyatiy": "zadachi-pomosh-na-meropriyatiyah",
   "zadachi-foto-i-video": "zadachi-drugoe",
-  "podrabotka-i-smeny": "zadachi-podrabotka-i-rabota",
-  "meropriyatiya-i-organizatsiya": "zadachi-drugoe",
+  "podrabotka-i-smeny": "zadachi-podrabotka",
+  "zadachi-podrabotka-i-rabota": "zadachi-podrabotka",
+  "meropriyatiya-i-organizatsiya": "zadachi-pomosh-na-meropriyatiyah",
   "ofis-i-dokumenty": "zadachi-drugoe",
   "pomoshch-s-avto": "zadachi-nayti-avto",
   "zadachi-drugoe": "zadachi-drugoe",
-  // services
-  "avto-uslugi": "uslugi-avtouslugi",
+  // tasks — parents
+  "zadachi-perevozki-i-dostavka": "zadachi-dostavka-i-perevozki",
+  "zadachi-kompyutery-i-tehnika": "zadachi-tehnika-i-it",
+  "zadachi-arenda-i-poisk": "zadachi-arenda",
+  // services — leaves
+  "avto-uslugi": "uslugi-avtoservis",
+  "uslugi-avtouslugi": "uslugi-avtoservis",
   buhgalteriya: "uslugi-buhgalteriya",
   "kompyutery-i-tehnika": "uslugi-kompyutery",
   uborka: "uslugi-uborka",
   "krasota-i-zdorove": "uslugi-parikmacher",
   "perevozki-i-dostavka": "uslugi-dostavka",
-  "yuridicheskie-uslugi": "uslugi-yuruslugi",
-  "rieltory-i-zhile": "uslugi-arenda-nedvizhimosti",
+  "yuridicheskie-uslugi": "uslugi-yurist",
+  "uslugi-yuruslugi": "uslugi-yurist",
+  "rieltory-i-zhile": "uslugi-rieltor",
+  "uslugi-arenda-nedvizhimosti": "uslugi-arenda-zhilya",
+  "uslugi-sdayu-zhilyo": "uslugi-arenda-zhilya",
+  "uslugi-kommercheskaya-arenda": "uslugi-kommercheskaya-nedvizhimost",
+  "uslugi-biznes-uslugi": "uslugi-marketing",
+  "uslugi-prokat": "uslugi-drugoe",
   obuchenie: "uslugi-repetitory",
-  "reklama-i-dizayn": "uslugi-sayty",
+  "reklama-i-dizayn": "uslugi-dizayn",
   "foto-i-video": "uslugi-foto",
   "remont-bytovoy-tehniki": "uslugi-remont-tehniki",
   "remont-i-stroitelstvo": "uslugi-remont-kvartir",
   repetitory: "uslugi-repetitory",
   "uslugi-drugoe": "uslugi-drugoe",
-  // products
+  // services — parents
+  "uslugi-perevozki-i-avto": "uslugi-avtouslugi-i-perevozki",
+  "uslugi-biznes-i-arenda": "uslugi-biznes-i-dokumenty",
+  "uslugi-nedvizhimost-i-arenda": "uslugi-nedvizhimost",
+  // products — leaves
   "telefony-i-gadzhety": "tovary-telefony",
   "bytovaya-tehnika": "tovary-tehnika",
   "mebel-i-dom": "tovary-mebel",
   "odezhda-i-obuv": "tovary-odezhda",
   avto: "tovary-avtomobili",
-  zhivotnye: "tovary-zhivotnye",
+  zhivotnye: "tovary-tovary-dlya-zhivotnyh",
+  "tovary-zhivotnye": "tovary-tovary-dlya-zhivotnyh",
   besplatno: "tovary-drugoe",
   "kvartiry-i-doma": "tovary-kvartiry",
+  "tovary-kommercheskaya": "tovary-kvartiry",
   "sport-i-otdyh": "tovary-sport",
-  "detskie-tovary": "tovary-detskie-tovary",
+  "tovary-otdyh": "tovary-turizm",
+  "detskie-tovary": "tovary-detskaya-odezhda",
+  "tovary-detskie-tovary": "tovary-igrushki",
   "avtozapchasti-i-shiny": "tovary-shiny",
   elektronika: "tovary-tehnika",
-  "noutbuki-i-kompyutery": "tovary-kompyutery",
+  "noutbuki-i-kompyutery": "tovary-noutbuki",
   komplektuyushchie: "tovary-zapchasti",
   avtotovary: "tovary-zapchasti",
   zapchasti: "tovary-zapchasti",
   "shiny-i-diski": "tovary-shiny",
   instrumenty: "tovary-instrumenty",
   "tovary-drugoe": "tovary-drugoe",
+  // products — parents
+  "tovary-odezhda-i-deti": "tovary-odezhda-i-aksessuary",
+  "tovary-avto-i-zapchasti": "tovary-avto-i-transport",
+  "tovary-hobbi-i-zhivotnye": "tovary-hobbi-i-otdyh",
 };
 
 export function normalizeLegacyCategoryName(categoryName: string, type: string): string {
@@ -164,7 +214,8 @@ export function canonicalCategorySlugForListing(
   }
   const name = normalizeLegacyCategoryName(listing.categoryName ?? "", listing.type);
   if (!name) return "";
-  return categoryToSlug(name, listingKind(listing.type));
+  const slug = categoryToSlug(name, listingKind(listing.type));
+  return LEGACY_SLUG_TO_CANONICAL[slug] ?? slug;
 }
 
 /** Homepage parent slug used for counts and parent category browse. */
@@ -173,7 +224,11 @@ export function homeParentSlugForListing(
 ): string {
   const leaf = canonicalCategorySlugForListing(listing);
   if (!leaf) return "";
-  return homeParentSlugForLeafSlug(leaf) ?? leaf;
+  const parent = homeParentSlugForLeafSlug(leaf);
+  if (parent) return parent;
+  const mappedParent = LEGACY_SLUG_TO_CANONICAL[leaf];
+  if (mappedParent) return homeParentSlugForLeafSlug(mappedParent) ?? mappedParent;
+  return leaf;
 }
 
 export function listingMatchesDirectoryCategorySlug(

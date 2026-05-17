@@ -1,29 +1,19 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { jitsiRoomNameForChatId } from "../lib/jitsiRoomName";
+import {
+  type JitsiMeetExternalApi,
+  loadJitsiExternalApi,
+} from "../lib/loadJitsiExternalApi";
+import { JITSI_DOMAIN, jitsiRoomNameForChatId } from "../lib/jitsiRoomName";
 
-type JitsiMeetExternalApi = {
-  dispose: () => void;
-  executeCommand: (name: string, ...args: unknown[]) => void;
-  addListener: (event: string, handler: (payload?: unknown) => void) => void;
-  on?: (event: string, handler: (payload?: unknown) => void) => void;
-};
-
-const JitsiMeeting = dynamic(
-  () => import("@jitsi/react-sdk").then((mod) => mod.JitsiMeeting),
-  { ssr: false },
-);
-
-const JITSI_DOMAIN = "meet.jit.si";
 const CONNECT_TIMEOUT_MS = 45_000;
 
-/** Client defaults: no prejoin, no lobby UI, audio-only, anonymous-friendly. */
 const JITSI_CONFIG: Record<string, unknown> = {
   prejoinPageEnabled: false,
   prejoinConfig: { enabled: false },
   startAudioOnly: true,
+  startWithAudioMuted: false,
   startWithVideoMuted: true,
   requireDisplayName: false,
   enableLobbyChat: false,
@@ -36,14 +26,8 @@ const JITSI_CONFIG: Record<string, unknown> = {
   hideLobbyButton: true,
   autoKnockLobby: false,
   enableInsecureRoomNameWarning: false,
-  lobby: {
-    autoKnock: false,
-    enableChat: false,
-  },
-  securityUi: {
-    hideLobbyButton: true,
-    disableLobbyPassword: true,
-  },
+  lobby: { autoKnock: false, enableChat: false },
+  securityUi: { hideLobbyButton: true, disableLobbyPassword: true },
 };
 
 const JITSI_INTERFACE: Record<string, unknown> = {
@@ -66,8 +50,8 @@ const JITSI_ANTI_LOBBY_OVERWRITE: Record<string, unknown> = {
   securityUi: { hideLobbyButton: true, disableLobbyPassword: true },
 };
 
-function devLog(step: string, data?: unknown) {
-  if (process.env.NODE_ENV !== "development") return;
+/** Temporary diagnostics for Jitsi integration (remove when stable). */
+function jitsiDiag(step: string, data?: unknown) {
   if (data !== undefined) console.info(`[haliwali jitsi] ${step}`, data);
   else console.info(`[haliwali jitsi] ${step}`);
 }
@@ -102,6 +86,16 @@ function disableLobbyOnApi(api: JitsiMeetExternalApi | null) {
   }
 }
 
+function applyIframePermissions(container: HTMLElement | null) {
+  if (!container) return;
+  const iframe = container.querySelector("iframe");
+  if (!(iframe instanceof HTMLIFrameElement)) return;
+  iframe.style.width = "100%";
+  iframe.style.height = "100%";
+  iframe.setAttribute("allow", "microphone; camera; fullscreen; display-capture; autoplay");
+  jitsiDiag("iframe_src", iframe.src || "(empty)");
+}
+
 export function WebRtcCallModal({
   open,
   callId,
@@ -121,19 +115,20 @@ export function WebRtcCallModal({
   displayName?: string;
   onClose: () => void;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const apiRef = useRef<JitsiMeetExternalApi | null>(null);
   const joinedRef = useRef(false);
-  const listenersWiredRef = useRef(false);
   const [status, setStatus] = useState<"connecting" | "connected" | "failed">("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [apiLoaded, setApiLoaded] = useState(false);
 
-  const roomName = jitsiRoomNameForChatId(chatId, callId);
+  const roomName = jitsiRoomNameForChatId(chatId);
   const display = (displayName ?? "").trim() || "Участник";
 
   const fail = useCallback((message: string) => {
     setStatus("failed");
     setError(message);
-    devLog("failed", message);
+    jitsiDiag("failed", message);
   }, []);
 
   const hangUp = useCallback(() => {
@@ -148,16 +143,12 @@ export function WebRtcCallModal({
       /* noop */
     }
     apiRef.current = null;
-    listenersWiredRef.current = false;
     joinedRef.current = false;
     window.setTimeout(() => onClose(), 300);
   }, [onClose]);
 
   const wireApi = useCallback(
     (api: JitsiMeetExternalApi) => {
-      if (listenersWiredRef.current) return;
-      listenersWiredRef.current = true;
-
       const on = (event: string, handler: (payload?: unknown) => void) => {
         if (typeof api.on === "function") api.on(event, handler);
         else api.addListener(event, handler);
@@ -168,17 +159,17 @@ export function WebRtcCallModal({
         setError(null);
         setStatus("connected");
         disableLobbyOnApi(api);
-        devLog("videoConferenceJoined");
+        jitsiDiag("videoConferenceJoined");
+      });
+      on("participantJoined", (payload) => {
+        jitsiDiag("participantJoined", payload);
       });
       on("participantRoleChanged", (payload) => {
         const roleName =
           payload && typeof payload === "object" && "role" in payload
             ? String((payload as { role?: string }).role ?? "")
             : "";
-        if (roleName === "moderator") {
-          disableLobbyOnApi(api);
-          devLog("participantRoleChanged", { role: roleName });
-        }
+        if (roleName === "moderator") disableLobbyOnApi(api);
       });
       on("micError", (payload) => {
         const msg =
@@ -188,6 +179,7 @@ export function WebRtcCallModal({
         fail(msg ? `Микрофон: ${msg}` : "Нет доступа к микрофону в Jitsi.");
       });
       on("errorOccurred", (payload) => {
+        jitsiDiag("errorOccurred", payload);
         if (isMembersOnlyError(payload)) {
           disableLobbyOnApi(api);
           fail("Комната недоступна: включён режим ожидания модератора или lobby.");
@@ -200,6 +192,7 @@ export function WebRtcCallModal({
         fail("Не удалось установить аудиосоединение.");
       });
       on("readyToClose", () => {
+        jitsiDiag("readyToClose", { joined: joinedRef.current });
         if (joinedRef.current) hangUp();
         else fail("Сессия Jitsi завершена до подключения.");
       });
@@ -215,17 +208,95 @@ export function WebRtcCallModal({
         /* noop */
       }
       apiRef.current = null;
-      listenersWiredRef.current = false;
       joinedRef.current = false;
+      setApiLoaded(false);
       setStatus("connecting");
       setError(null);
+      if (containerRef.current) containerRef.current.innerHTML = "";
       return;
     }
 
     setStatus("connecting");
     setError(null);
-    devLog("open", { domain: JITSI_DOMAIN, roomName });
-  }, [open, roomName]);
+    joinedRef.current = false;
+
+    jitsiDiag("init", {
+      domain: JITSI_DOMAIN,
+      roomName,
+      expectedRoomUrl: `https://${JITSI_DOMAIN}/${roomName}`,
+    });
+
+    let cancelled = false;
+    const iframePoll = window.setInterval(() => {
+      if (cancelled) return;
+      applyIframePermissions(containerRef.current);
+    }, 400);
+
+    void (async () => {
+      try {
+        await loadJitsiExternalApi(JITSI_DOMAIN);
+        if (cancelled) return;
+        setApiLoaded(true);
+        jitsiDiag("api_loaded", { yes: true });
+
+        const parentNode = containerRef.current;
+        if (!parentNode) {
+          fail("Не удалось открыть окно звонка.");
+          return;
+        }
+        parentNode.innerHTML = "";
+
+        const ApiCtor = window.JitsiMeetExternalAPI;
+        if (!ApiCtor) {
+          jitsiDiag("api_loaded", { yes: false });
+          fail("Jitsi API не загрузился. Проверьте доступ к meet.haliwali.ru.");
+          return;
+        }
+
+        const api = new ApiCtor(JITSI_DOMAIN, {
+          roomName,
+          parentNode,
+          width: "100%",
+          height: "100%",
+          lang: "ru",
+          configOverwrite: JITSI_CONFIG,
+          interfaceConfigOverwrite: JITSI_INTERFACE,
+          userInfo: { displayName: display },
+        });
+
+        if (cancelled) {
+          try {
+            api.dispose();
+          } catch {
+            /* noop */
+          }
+          return;
+        }
+
+        apiRef.current = api;
+        wireApi(api);
+        disableLobbyOnApi(api);
+        jitsiDiag("api_ready", { domain: JITSI_DOMAIN, roomName });
+        window.setTimeout(() => applyIframePermissions(parentNode), 0);
+      } catch (e) {
+        if (cancelled) return;
+        jitsiDiag("api_loaded", { yes: false, error: String(e) });
+        fail("Не удалось загрузить Jitsi. Проверьте интернет и meet.haliwali.ru.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(iframePoll);
+      try {
+        apiRef.current?.dispose();
+      } catch {
+        /* noop */
+      }
+      apiRef.current = null;
+      if (containerRef.current) containerRef.current.innerHTML = "";
+    };
+  }, [open, roomName, display, wireApi, fail]);
 
   useEffect(() => {
     if (!open || status !== "connecting") return;
@@ -235,25 +306,18 @@ export function WebRtcCallModal({
     return () => window.clearTimeout(tid);
   }, [open, status, fail]);
 
-  useEffect(() => {
-    return () => {
-      try {
-        apiRef.current?.dispose();
-      } catch {
-        /* noop */
-      }
-      apiRef.current = null;
-    };
-  }, []);
-
   if (!open) return null;
 
+  void callId;
   void role;
   void peerUserId;
 
   const peerLabel = (peerDisplayHint ?? "").trim() || "Собеседник";
   const statusLine =
-    status === "connected" ? "Разговор" : status === "failed" ? "Ошибка подключения" : "Подключение…";
+    status === "connected" ? "Разговор"
+    : status === "failed" ? "Ошибка подключения"
+    : apiLoaded ? "Подключение…"
+    : "Загрузка Jitsi…";
 
   return (
     <div
@@ -282,37 +346,7 @@ export function WebRtcCallModal({
           <p className="shrink-0 border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
         ) : null}
 
-        <div className="h-[60vh] w-full md:h-[420px]">
-          <JitsiMeeting
-            domain={JITSI_DOMAIN}
-            roomName={roomName}
-            lang="ru"
-            userInfo={{ displayName: display, email: "" }}
-            configOverwrite={JITSI_CONFIG}
-            interfaceConfigOverwrite={JITSI_INTERFACE}
-            onApiReady={(externalApi) => {
-              const api = externalApi as JitsiMeetExternalApi;
-              apiRef.current = api;
-              devLog("api_ready");
-              wireApi(api);
-              disableLobbyOnApi(api);
-            }}
-            onReadyToClose={() => {
-              if (joinedRef.current) hangUp();
-              else fail("Сессия Jitsi завершена до подключения.");
-            }}
-            getIFrameRef={(parentNode) => {
-              parentNode.style.width = "100%";
-              parentNode.style.height = "100%";
-              const iframe = parentNode.querySelector("iframe");
-              if (iframe instanceof HTMLIFrameElement) {
-                iframe.style.width = "100%";
-                iframe.style.height = "100%";
-                iframe.setAttribute("allow", "microphone; camera; display-capture; autoplay");
-              }
-            }}
-          />
-        </div>
+        <div ref={containerRef} className="h-[60vh] w-full md:h-[420px]" />
       </div>
     </div>
   );

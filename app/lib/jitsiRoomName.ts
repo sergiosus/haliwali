@@ -1,8 +1,16 @@
-/** Jitsi room id: Haliwali-{chatId} or Haliwali-{chatId}-{callId} for a fresh room per call. */
-export function jitsiRoomNameForChatId(chatId: string, callId?: string): string {
-  const base = (chatId ?? "").trim() || "unknown";
-  const safeChat = base.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 96);
-  const safeCall = (callId ?? "").trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 32);
-  if (safeCall) return `Haliwali-${safeChat}-${safeCall}`;
-  return `Haliwali-${safeChat}`;
+/** Self-hosted Jitsi host (domain only — no protocol). */
+export const JITSI_DOMAIN = "meet.haliwali.ru";
+
+/**
+ * Jitsi room id: `Haliwali-{sanitizedChatId}` — ASCII only, no user ids in the name.
+ */
+export function jitsiRoomNameForChatId(chatId: string): string {
+  const safe =
+    (chatId ?? "")
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "")
+      .slice(0, 96) || "unknown";
+  return `Haliwali-${safe}`;
 }

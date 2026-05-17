@@ -44,6 +44,10 @@ import { ListingLocationSection } from "./components/ListingLocationSection";
 import { CompactListingCard } from "./components/CompactListingCard";
 import { appendReturnUrlQuery } from "./lib/returnNavigation";
 import { listingPath } from "./lib/seo";
+import {
+  listingPhotoPrepareUserMessage,
+  prepareListingPhotoForPicker,
+} from "./lib/uploadImagePrepare";
 import { uploadFiles } from "./lib/uploadClient";
 import { isValidPhone, PHONE_VALIDATION_MESSAGE } from "./lib/identity";
 import { isUserVerified } from "./lib/users";
@@ -2331,7 +2335,7 @@ function PhotoPicker({
         className="sr-only"
         tabIndex={-1}
         aria-hidden
-        onChange={(e) => {
+        onChange={async (e) => {
           const files = Array.from(e.target.files ?? []);
           if (files.length === 0) return;
 
@@ -2341,13 +2345,14 @@ function PhotoPicker({
           if (files.length > remaining) setError("Максимум 10 фото");
 
           try {
-            setPhotos((prev) => [
-              ...prev,
-              ...nextFiles.map((file) => ({ file, previewUrl: URL.createObjectURL(file) })),
-            ]);
+            const prepared: Array<{ file: File; previewUrl: string }> = [];
+            for (const file of nextFiles) {
+              const p = await prepareListingPhotoForPicker(file);
+              prepared.push({ file: p.file, previewUrl: p.objectUrl });
+            }
+            setPhotos((prev) => [...prev, ...prepared]);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : "";
-            setError(msg || "Неподдерживаемый формат изображения");
+            setError(listingPhotoPrepareUserMessage(err));
           }
 
           e.currentTarget.value = "";

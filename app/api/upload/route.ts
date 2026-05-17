@@ -3,13 +3,13 @@ import path from "path";
 import fs from "fs/promises";
 import { randomUUID } from "node:crypto";
 import { fileTypeFromBuffer } from "file-type";
+import { LISTING_PHOTO_ALLOWED_MIMES, LISTING_PHOTO_MAX_BYTES } from "../../lib/listingPhotoLimits";
 import { denyIfMutationOriginForbidden } from "../../lib/serverCsrf";
 import { getUserIdFromSessionCookie } from "../../lib/serverSession";
 
 export const runtime = "nodejs";
 
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const ALLOWED_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ALLOWED_MIMES = new Set<string>(LISTING_PHOTO_ALLOWED_MIMES);
 
 function extFromMime(mime: string) {
   if (mime === "image/jpeg") return "jpg";
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
 
-  if (!file.size || file.size > MAX_UPLOAD_BYTES) {
+  if (!file.size || file.size > LISTING_PHOTO_MAX_BYTES) {
     return NextResponse.json({ error: "File too large" }, { status: 413 });
   }
 

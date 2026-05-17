@@ -10,6 +10,10 @@ import { moderateListing } from "../../lib/moderation";
 import { categoryToSlug, productCategories } from "../../lib/categories";
 import { russianCities } from "../../lib/directory";
 import { ListingLocationSection } from "../../components/ListingLocationSection";
+import {
+  listingPhotoPrepareUserMessage,
+  prepareListingPhotoForPicker,
+} from "../../lib/uploadImagePrepare";
 import { uploadFiles } from "../../lib/uploadClient";
 import { ConsentCheckbox } from "../../components/ConsentCheckbox";
 import { OkModal } from "../../components/OkModal";
@@ -531,7 +535,7 @@ function FilePhotoPicker({
         className="sr-only"
         tabIndex={-1}
         aria-hidden
-        onChange={(e) => {
+        onChange={async (e) => {
           const picked = Array.from(e.target.files ?? []);
           if (picked.length === 0) return;
           setError(null);
@@ -540,9 +544,19 @@ function FilePhotoPicker({
           const nextFiles = picked.slice(0, remaining);
           if (picked.length > remaining) setError("Максимум 10 фото");
 
-          const nextPreviews = nextFiles.map((f) => URL.createObjectURL(f));
-          setFiles([...files, ...nextFiles]);
-          setPreviews([...previews, ...nextPreviews]);
+          try {
+            const preparedFiles: File[] = [];
+            const nextPreviews: string[] = [];
+            for (const f of nextFiles) {
+              const p = await prepareListingPhotoForPicker(f);
+              preparedFiles.push(p.file);
+              nextPreviews.push(p.objectUrl);
+            }
+            setFiles([...files, ...preparedFiles]);
+            setPreviews([...previews, ...nextPreviews]);
+          } catch (err) {
+            setError(listingPhotoPrepareUserMessage(err));
+          }
           e.currentTarget.value = "";
         }}
       />

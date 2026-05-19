@@ -721,7 +721,7 @@ export function LocationModal({
   const [apiCityRows, setApiCityRows] = useState<SettlementRecord[]>([]);
   const [apiCityError, setApiCityError] = useState<string>("");
 
-  // Debounced query to /api/cities (PostgreSQL).
+  // Debounced query to /api/cities (PostgreSQL); EN-layout → RU variant when user types Latin.
   useEffect(() => {
     if (!open) return;
     const q = qTrim;
@@ -730,12 +730,22 @@ export function LocationModal({
       setApiCityRows([]);
       return;
     }
+    const variants = buildSearchVariants(q);
+    const primary = variants[0] ?? q;
+    const fallback = variants.length > 1 ? variants[1]! : null;
     let cancelled = false;
     const t = setTimeout(() => {
-      void fetchCitiesApi(q)
+      void fetchCitiesApi(primary)
         .then((rows) => {
           if (cancelled) return;
-          setApiCityRows(rows);
+          if (rows.length > 0 || !fallback) {
+            setApiCityRows(rows);
+            return;
+          }
+          return fetchCitiesApi(fallback).then((altRows) => {
+            if (cancelled) return;
+            setApiCityRows(altRows);
+          });
         })
         .catch(() => {
           if (cancelled) return;
@@ -841,7 +851,7 @@ export function LocationModal({
 
   const suggestions = useMemo(() => {
     const rows: { key: string; line: string; scope: SearchScopeLocation }[] = [];
-    if (qTrim.length < 2) return rows;
+    if (!allowSuggestDropdown || qTrim.length < 2) return rows;
     if (suggestionsDismissed) return rows;
 
     const byNameRegion = new Set<string>();
@@ -937,7 +947,7 @@ export function LocationModal({
     }
 
     return rows.filter((x) => x.scope.type !== "country").slice(0, 8);
-  }, [qTrim, suggestionsDismissed, apiCityRows]);
+  }, [allowSuggestDropdown, qTrim, suggestionsDismissed, apiCityRows]);
 
   /**
    * Map initial / prop-sync center: radius anchor coords or persisted selection; «Вся Россия» → whole Russia view.
@@ -1521,9 +1531,6 @@ export function LocationModal({
                   setChosenScope(null);
                   setSuggestionsDismissed(false);
                 }}
-                onFocus={(e) => {
-                  if (e.nativeEvent.isTrusted) setAllowSuggestDropdown(true);
-                }}
                 placeholder="Город или регион"
                 className="h-10 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)]"
               />
@@ -1536,6 +1543,42 @@ export function LocationModal({
               </button>
             </div>
 
+            {allowSuggestDropdown && qTrim.length >= 2 && !suggestionsDismissed ?
+              suggestions.length > 0 ?
+                <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-xl border border-black/[0.10] bg-white p-1 shadow-lg">
+                  {suggestions.slice(0, 8).map((s) => (
+                    <button
+                      key={s.key}
+                      type="button"
+                      className="flex w-full cursor-pointer rounded-lg px-2 py-1.5 text-left text-sm text-black/85 hover:bg-black/[0.03]"
+                      onClick={() => {
+                        if (
+                          (s.scope.type === "city" || s.scope.type === "settlement") &&
+                          typeof s.scope.lat === "number" &&
+                          Number.isFinite(s.scope.lat) &&
+                          typeof s.scope.lng === "number" &&
+                          Number.isFinite(s.scope.lng)
+                        ) {
+                          applySuggestionSettlement({
+                            name: (s.scope.label ?? "").trim(),
+                            region: (s.scope.region ?? s.scope.parentName ?? "").trim(),
+                            lat: s.scope.lat,
+                            lng: s.scope.lng,
+                          });
+                          return;
+                        }
+                        setSuggestionsDismissed(true);
+                        applyPick(s.scope);
+                      }}
+                    >
+                      {s.line}
+                    </button>
+                  ))}
+                </div>
+              : <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-xl border border-black/[0.10] bg-white px-2 py-1 text-sm text-black/50 shadow-lg">
+                  Ничего не найдено
+                </div>
+            : null}
           </div>
 
           {hideMapPreview ?

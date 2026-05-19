@@ -17,7 +17,7 @@ import type { Listing, ProductListing, ServiceListing, TaskListing } from "./lib
 import {
   dedupeListingsById,
   generateEditToken,
-  isPublicStatus,
+  isListingPubliclyListed,
   useListingsStore,
 } from "./lib/listings";
 import { extractListingPhotos, listingDealStatusBadgeRu } from "./lib/listingCardMeta";
@@ -29,7 +29,14 @@ import {
   russianCities,
 } from "./lib/directory";
 import { computeHomeCategoryCounts } from "./lib/homeCategoryCounts";
-import { haystackNormalizedMatchesListingSearch, matchesListingQuery } from "./lib/search";
+import {
+  hasActiveSearchQuery,
+  haystackNormalizedMatchesListingSearch,
+  listingMatchesSearchQuery,
+  normalizeGlobalSearchQuery,
+  scoreListingSearch,
+  searchDebugLog,
+} from "./lib/search";
 import {
   categoryToSlug,
   homeGroupChildLinks,
@@ -68,6 +75,7 @@ import {
   modalCurrentSelectionPartsFromScope,
   normalizeSearchScope,
 } from "./lib/searchScopeLocation";
+import { useSearchScope } from "./lib/useStoredCity";
 import {
   LOCATION_MESSAGES,
   type SelectedLocation,
@@ -174,6 +182,7 @@ function HaliwaliLanding() {
 
   const searchParams = useSearchParams();
   const directorySearch = searchParams.get("q") ?? "";
+  const headerSearchScope = useSearchScope();
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [locationModalInitialScope, setLocationModalInitialScope] = useState<BrowseLocationScope | null>(null);
   const [activeLocationColumn, setActiveLocationColumn] = useState<HomeGridColumnHeading | null>(null);
@@ -206,7 +215,7 @@ function HaliwaliLanding() {
   const uniqueListings = useMemo(() => dedupeListingsById(listings), [listings]);
 
   const homeCategoryGridFiltered = useMemo(() => {
-    const q = normalizeQuery(directorySearch);
+    const q = hasActiveSearchQuery(directorySearch);
     return homeCategoryGridSections
       .map((section) => {
         if (!q) {
@@ -240,22 +249,39 @@ function HaliwaliLanding() {
   const categoryCountsLoading = false;
 
   const publishedSearchResults = useMemo(() => {
-    if (!normalizeQuery(directorySearch)) return EMPTY_SEARCH_RESULTS;
+    if (!hasActiveSearchQuery(directorySearch)) return EMPTY_SEARCH_RESULTS;
     if (!loaded) return [];
+    const scope = normalizeSearchScope(headerSearchScope);
     return uniqueListings
-      .filter((l) => isPublicStatus(l.status))
-      .filter((l) =>
-        listingMatchesSearchScope(l, normalizeSearchScope(browseScopeForColumn(homeListingColumnHeading(l)))),
-      )
-      .filter((l) => matchesListingQuery(l, directorySearch))
+      .filter((l) => isListingPubliclyListed(l))
+      .filter((l) => listingMatchesSearchScope(l, scope))
+      .filter((l) => listingMatchesSearchQuery(l, directorySearch))
       .sort((a, b) => {
+        const scoreDiff = scoreListingSearch(b, directorySearch) - scoreListingSearch(a, directorySearch);
+        if (scoreDiff !== 0) return scoreDiff;
         const av = isUserVerified(a.ownerId) ? 1 : 0;
         const bv = isUserVerified(b.ownerId) ? 1 : 0;
         if (av !== bv) return bv - av;
         return b.createdAt - a.createdAt;
       })
       .slice(0, 30);
-  }, [directorySearch, uniqueListings, loaded, browseScopeForColumn]);
+  }, [directorySearch, uniqueListings, loaded, headerSearchScope]);
+
+  const homeSearchHasCategoryHits = useMemo(() => {
+    if (!hasActiveSearchQuery(directorySearch)) return false;
+    return homeCategoryGridFiltered.some((section) => section.links.length > 0);
+  }, [directorySearch, homeCategoryGridFiltered]);
+
+  useEffect(() => {
+    if (!hasActiveSearchQuery(directorySearch)) return;
+    const n = normalizeGlobalSearchQuery(directorySearch);
+    searchDebugLog("homepage", {
+      raw: n.original,
+      variants: n.normalizedUniqueVariants,
+      listingCount: publishedSearchResults.length,
+      categoryHits: homeSearchHasCategoryHits,
+    });
+  }, [directorySearch, publishedSearchResults.length, homeSearchHasCategoryHits]);
 
   const { viewCounts, publicByUserId } = useCompactListingEnrichment(publishedSearchResults);
 
@@ -521,7 +547,7 @@ function HaliwaliLanding() {
       </header>
 
       <main className="mx-auto w-full min-w-0 max-w-full max-w-[1200px] px-4 pb-16 pt-2 sm:px-6 sm:pt-3">
-          {normalizeQuery(directorySearch) ? (
+          {hasActiveSearchQuery(directorySearch) ? (
             <section className="mb-4">
               <div className="rounded-3xl border border-black/10 bg-white p-5">
                 <div className="text-sm text-black/60">Результаты поиска</div>
@@ -540,9 +566,16 @@ function HaliwaliLanding() {
                           />
                         );
                       })
-                    ) : (
+                    ) : homeSearchHasCategoryHits ?
+                      <p className="text-sm text-black/55 md:col-span-2">
+                        Совпадения в категориях ниже — откройте раздел или уточните запрос.
+                      </p>
+                    : (
                       <div className="rounded-3xl border border-dashed border-black/15 bg-white p-6 md:col-span-2">
-                        <div className="text-sm text-black/70">Ничего не найдено</div>
+                        <p className="text-sm text-black/70">Ничего не найдено</p>
+                        <p className="mt-2 text-sm text-black/55">
+                          Попробуйте изменить запрос или выбрать Вся Россия
+                        </p>
                       </div>
                     )
                   ) : (

@@ -10,9 +10,52 @@ export type { ListingViewStatsPayload } from "./listingViewStatsTypes";
 export const LISTING_VIEW_DEDUP_MS = 30 * 60 * 1000;
 const STATS_TIMEZONE = "Europe/Moscow";
 const LISTING_VIEW_DEDUP_SEP = "\u001E";
+const LISTING_VIEW_EVENTS_MIGRATION = "db/migrations/20260519_listing_view_events_fix.sql";
+
+export function isListingViewEventsMissingError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const code = (e as { code?: string }).code;
+  if (code === "42P01") return true;
+  const msg = String((e as { message?: string }).message ?? "");
+  return msg.includes("listing_view_events") && msg.includes("does not exist");
+}
+
+export function warnListingViewsTableMissing(context: string): void {
+  if (process.env.NODE_ENV !== "development") return;
+  console.warn(
+    `[listing-views] ${context}: relation "listing_view_events" is missing. Apply ${LISTING_VIEW_EVENTS_MIGRATION} — returning safe zeros.`,
+  );
+}
+
+function zeroViewCountsForIds(ids: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const id of ids) {
+    const clean = String(id ?? "").trim();
+    if (clean) out[clean] = 0;
+  }
+  return out;
+}
+
+async function withListingViewEventsPg<T>(
+  context: string,
+  fallback: () => T,
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (isListingViewEventsMissingError(e)) {
+      warnListingViewsTableMissing(context);
+      return fallback();
+    }
+    throw e;
+  }
+}
 
 function logListingViewDebug(payload: { listingId: string; incremented: boolean; skipped: boolean; count: number }) {
-  console.log("[LISTING_VIEW]", payload);
+  if (process.env.NODE_ENV === "development") {
+    console.log("[LISTING_VIEW]", payload);
+  }
 }
 
 export type ListingViewLocationHint = {
@@ -79,14 +122,16 @@ function bindListingViewSqlTextOrNull(field: string, value: string | null | unde
 async function readAggregateCount(listingId: string, client?: PoolClient): Promise<number> {
   const runner = client ?? getPool();
   const boundListingId = bindListingViewSqlText("listing_id", listingId);
-  const { rows } = await runner.query<{ views_count: string }>(
-    `SELECT COUNT(*)::text AS views_count
-     FROM listing_view_events
-     WHERE listing_id = $1`,
-    [boundListingId],
-  );
-  const n = Number(rows[0]?.views_count);
-  return Number.isFinite(n) ? n : 0;
+  return withListingViewEventsPg("readAggregateCount", () => 0, async () => {
+    const { rows } = await runner.query<{ views_count: string }>(
+      `SELECT COUNT(*)::text AS views_count
+       FROM listing_view_events
+       WHERE listing_id = $1`,
+      [boundListingId],
+    );
+    const n = Number(rows[0]?.views_count);
+    return Number.isFinite(n) ? n : 0;
+  });
 }
 
 export async function countListingViewsByIds(ids: string[]): Promise<Record<string, number>> {
@@ -100,21 +145,23 @@ export async function countListingViewsByIds(ids: string[]): Promise<Record<stri
     return out;
   }
   const boundIds = sanitizePgTextArray(clean, "listing_id");
-  const { rows } = await getPool().query<{ listing_id: string; views_count: string }>(
-    `SELECT listing_id, COUNT(*)::text AS views_count
-     FROM listing_view_events
-     WHERE listing_id = ANY($1::text[])
-     GROUP BY listing_id`,
-    [boundIds],
-  );
-  const out: Record<string, number> = {};
-  for (const id of clean) out[id] = 0;
-  for (const row of rows) {
-    const id = String(row.listing_id ?? "").trim();
-    if (!id) continue;
-    out[id] = Number(row.views_count) || 0;
-  }
-  return out;
+  return withListingViewEventsPg("countListingViewsByIds", () => zeroViewCountsForIds(clean), async () => {
+    const { rows } = await getPool().query<{ listing_id: string; views_count: string }>(
+      `SELECT listing_id, COUNT(*)::text AS views_count
+       FROM listing_view_events
+       WHERE listing_id = ANY($1::text[])
+       GROUP BY listing_id`,
+      [boundIds],
+    );
+    const out: Record<string, number> = {};
+    for (const id of clean) out[id] = 0;
+    for (const row of rows) {
+      const id = String(row.listing_id ?? "").trim();
+      if (!id) continue;
+      out[id] = Number(row.views_count) || 0;
+    }
+    return out;
+  });
 }
 
 function buildListingViewDedupKey(viewerKey: string, listingId: string): string {
@@ -183,45 +230,65 @@ export async function recordListingView(input: RecordListingViewInput): Promise<
 
   const now = Date.now();
   const dedupKey = buildListingViewDedupKey(viewerKey, listingId);
-  const pool = getPool();
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    await client.query(`DELETE FROM listing_view_dedup WHERE expires_at IS NOT NULL AND expires_at < now()`);
-    const expiresAt = now + LISTING_VIEW_DEDUP_MS;
-    const dedupParams = [
-      bindListingViewSqlText("dedup_key", dedupKey),
-      bindListingViewSqlText("listing_id", listingId),
-      bindListingViewSqlText("viewer_key", viewerKey),
-      now,
-      expiresAt,
-    ];
-    const ins = await client.query<{ dedup_key: string }>(
-      `INSERT INTO listing_view_dedup (dedup_key, listing_id, viewer_key, created_at, expires_at)
-       VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), to_timestamp($5 / 1000.0))
-       ON CONFLICT (dedup_key) DO NOTHING
-       RETURNING dedup_key`,
-      dedupParams,
+    return await withListingViewEventsPg<{
+      count: number;
+      incremented: boolean;
+      skipped: boolean;
+    }>(
+      "recordListingView",
+      () => ({ count: 0, incremented: false, skipped: true }),
+      async () => {
+        const pool = getPool();
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(
+            `DELETE FROM listing_view_dedup WHERE expires_at IS NOT NULL AND expires_at < now()`,
+          );
+          const expiresAt = now + LISTING_VIEW_DEDUP_MS;
+          const dedupParams = [
+            bindListingViewSqlText("dedup_key", dedupKey),
+            bindListingViewSqlText("listing_id", listingId),
+            bindListingViewSqlText("viewer_key", viewerKey),
+            now,
+            expiresAt,
+          ];
+          const ins = await client.query<{ dedup_key: string }>(
+            `INSERT INTO listing_view_dedup (dedup_key, listing_id, viewer_key, created_at, expires_at)
+             VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), to_timestamp($5 / 1000.0))
+             ON CONFLICT (dedup_key) DO NOTHING
+             RETURNING dedup_key`,
+            dedupParams,
+          );
+          const incremented = ins.rows.length > 0;
+          if (incremented) {
+            await insertViewEventPg(client, {
+              listingId,
+              viewerUserId,
+              anonymousViewerId,
+              ipHash,
+              userAgentHash,
+            });
+          }
+          const count = await readAggregateCount(listingId, client);
+          await client.query("COMMIT");
+          logListingViewDebug({ listingId, incremented, skipped: false, count });
+          return { count, incremented, skipped: false };
+        } catch (e) {
+          await client.query("ROLLBACK");
+          throw e;
+        } finally {
+          client.release();
+        }
+      },
     );
-    const incremented = ins.rows.length > 0;
-    if (incremented) {
-      await insertViewEventPg(client, {
-        listingId,
-        viewerUserId,
-        anonymousViewerId,
-        ipHash,
-        userAgentHash,
-      });
-    }
-    const count = await readAggregateCount(listingId, client);
-    await client.query("COMMIT");
-    logListingViewDebug({ listingId, incremented, skipped: false, count });
-    return { count, incremented, skipped: false };
   } catch (e) {
-    await client.query("ROLLBACK");
+    if (isListingViewEventsMissingError(e)) {
+      warnListingViewsTableMissing("recordListingView");
+      return { count: 0, incremented: false, skipped: true };
+    }
     throw e;
-  } finally {
-    client.release();
   }
 }
 
@@ -230,6 +297,7 @@ export async function getListingViewStatsForOwner(listingId: string): Promise<Li
   if (!id) return null;
   if (!usesPostgres()) return null;
 
+  return withListingViewEventsPg("getListingViewStatsForOwner", () => null, async () => {
   const now = Date.now();
   const todayStart = moscowDayStartMs(now);
   const last7Start = now - 7 * 24 * 60 * 60 * 1000;
@@ -291,4 +359,5 @@ export async function getListingViewStatsForOwner(listingId: string): Promise<Li
     cities,
     daily,
   };
+  });
 }

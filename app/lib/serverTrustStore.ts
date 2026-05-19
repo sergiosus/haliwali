@@ -105,19 +105,28 @@ export function fastReplyEligible(stats: ReplyStatRow | undefined): boolean {
 
 export async function readListingViews(): Promise<ListingViewsDb> {
   if (usesPostgres()) {
-    const { rows } = await getPool().query<{ listing_id: string; views_count: string }>(
-      `SELECT listing_id, COUNT(*)::text AS views_count
-       FROM listing_view_events
-       GROUP BY listing_id`,
-    );
-    const out: ListingViewsDb = {};
-    for (const r of rows) {
-      const id = String(r.listing_id ?? "").trim();
-      if (!id) continue;
-      const n = Number(r.views_count);
-      out[id] = Number.isFinite(n) ? n : 0;
+    try {
+      const { rows } = await getPool().query<{ listing_id: string; views_count: string }>(
+        `SELECT listing_id, COUNT(*)::text AS views_count
+         FROM listing_view_events
+         GROUP BY listing_id`,
+      );
+      const out: ListingViewsDb = {};
+      for (const r of rows) {
+        const id = String(r.listing_id ?? "").trim();
+        if (!id) continue;
+        const n = Number(r.views_count);
+        out[id] = Number.isFinite(n) ? n : 0;
+      }
+      return out;
+    } catch (e) {
+      const { isListingViewEventsMissingError, warnListingViewsTableMissing } = await import("./serverListingViews");
+      if (isListingViewEventsMissingError(e)) {
+        warnListingViewsTableMissing("readListingViews");
+        return {};
+      }
+      throw e;
     }
-    return out;
   }
   return await readJson<ListingViewsDb>(LISTING_VIEWS_PATH, {});
 }
@@ -126,21 +135,30 @@ export async function incrementListingView(listingId: string): Promise<number> {
   const id = sanitizePgText((listingId ?? "").trim(), "listing_id");
   if (!id) return 0;
   if (usesPostgres()) {
-    const boundListingId = sanitizePgText(id, "listing_id");
-    const fingerprint = sanitizePgText(`dev:${boundListingId}:${Date.now()}`, "viewer_fingerprint");
-    await getPool().query(
-      `INSERT INTO listing_view_events (listing_id, viewer_user_id, viewer_fingerprint)
-       VALUES ($1, NULL, $2)`,
-      [boundListingId, fingerprint],
-    );
-    const { rows } = await getPool().query<{ views_count: string }>(
-      `SELECT COUNT(*)::text AS views_count
-       FROM listing_view_events
-       WHERE listing_id = $1`,
-      [boundListingId],
-    );
-    const n = Number(rows[0]?.views_count);
-    return Number.isFinite(n) ? n : 0;
+    try {
+      const boundListingId = sanitizePgText(id, "listing_id");
+      const fingerprint = sanitizePgText(`dev:${boundListingId}:${Date.now()}`, "viewer_fingerprint");
+      await getPool().query(
+        `INSERT INTO listing_view_events (listing_id, viewer_user_id, viewer_fingerprint)
+         VALUES ($1, NULL, $2)`,
+        [boundListingId, fingerprint],
+      );
+      const { rows } = await getPool().query<{ views_count: string }>(
+        `SELECT COUNT(*)::text AS views_count
+         FROM listing_view_events
+         WHERE listing_id = $1`,
+        [boundListingId],
+      );
+      const n = Number(rows[0]?.views_count);
+      return Number.isFinite(n) ? n : 0;
+    } catch (e) {
+      const { isListingViewEventsMissingError, warnListingViewsTableMissing } = await import("./serverListingViews");
+      if (isListingViewEventsMissingError(e)) {
+        warnListingViewsTableMissing("incrementListingView");
+        return 0;
+      }
+      throw e;
+    }
   }
   const db = await readListingViews();
   const next = (db[id] ?? 0) + 1;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { parseGlobalSearchScopeFromUrl } from "../../../lib/globalSearchScopeParams";
-import { globalSearchSuggest } from "../../../lib/serverGlobalSearch";
+import { globalSearchNormalizedPayload, globalSearchSuggest } from "../../../lib/serverGlobalSearch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,12 +16,7 @@ export async function GET(req: Request) {
     const res = NextResponse.json({
       ok: true,
       query: q,
-      normalized: {
-        primary: normalized.primary,
-        variants: normalized.variants,
-        keyboardFixed: normalized.keyboardFixed,
-        transliterated: normalized.transliterated,
-      },
+      normalized: globalSearchNormalizedPayload(normalized),
       suggestions,
     });
     res.headers.set("Cache-Control", "no-store, max-age=0");

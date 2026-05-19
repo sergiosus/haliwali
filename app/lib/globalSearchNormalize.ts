@@ -2,11 +2,16 @@ import { normalizeQuery } from "./categoryDirectory";
 import { buildSearchVariants, convertEnToRuKeyboard, shouldConvertEnToRuKeyboard } from "./utils/keyboardLayout";
 
 export type GlobalSearchNormalizedQuery = {
-  raw: string;
+  /** Trimmed user input (unchanged casing). */
+  original: string;
+  /** Trimmed, lowercased, collapsed spaces — primary match key. */
   primary: string;
-  variants: string[];
   keyboardFixed: string | null;
   transliterated: string | null;
+  /** Deduped non-empty variants for matching (includes primary, keyboard, translit). */
+  normalizedUniqueVariants: string[];
+  /** @deprecated Alias for {@link normalizedUniqueVariants}. */
+  variants: string[];
 };
 
 const LAT_MULTI: readonly [string, string][] = [
@@ -51,9 +56,14 @@ const LAT_SINGLE: Record<string, string> = {
   j: "дж",
 };
 
-/** Approximate Latin typing → Russian (e.g. noutbuk → ноутбук). */
+/** Trim, lowercase, collapse repeated spaces. */
+export function collapseSearchSpaces(text: string): string {
+  return (text ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Approximate Latin typing → Russian (e.g. noutbuk → ноутбук, remont → ремонт). */
 export function latinTypingToRussianApprox(text: string): string {
-  const src = text.trim().toLowerCase();
+  const src = collapseSearchSpaces(text);
   if (!src || /[\u0400-\u04FF]/.test(src)) return "";
   let i = 0;
   let out = "";
@@ -77,42 +87,62 @@ export function latinTypingToRussianApprox(text: string): string {
     out += LAT_SINGLE[ch] ?? ch;
     i += 1;
   }
-  return out.replace(/\s+/g, " ").trim();
+  return collapseSearchSpaces(out);
 }
 
-/** Normalize user query: lowercase, EN keyboard fix, simple Latin→RU, deduped variants. */
+/** Normalize user query: spaces, EN keyboard fix, simple Latin→RU, deduped variants. */
 export function normalizeGlobalSearchQuery(raw: string): GlobalSearchNormalizedQuery {
-  const trimmed = (raw ?? "").trim();
-  const primary = normalizeQuery(trimmed);
-  const variants = new Set<string>();
+  const original = (raw ?? "").trim();
+  const primary = collapseSearchSpaces(original);
+  const unique = new Set<string>();
 
-  if (primary) variants.add(primary);
+  if (primary) unique.add(primary);
 
   let keyboardFixed: string | null = null;
-  if (shouldConvertEnToRuKeyboard(trimmed)) {
-    const kb = normalizeQuery(convertEnToRuKeyboard(trimmed));
+  if (shouldConvertEnToRuKeyboard(original)) {
+    const kb = collapseSearchSpaces(convertEnToRuKeyboard(original));
     if (kb) {
       keyboardFixed = kb;
-      variants.add(kb);
+      unique.add(kb);
     }
   }
 
   let transliterated: string | null = null;
-  const latRu = latinTypingToRussianApprox(trimmed);
+  const latRu = latinTypingToRussianApprox(original);
   if (latRu && latRu !== primary && latRu !== keyboardFixed) {
     transliterated = latRu;
-    variants.add(latRu);
+    unique.add(latRu);
   }
 
-  for (const v of buildSearchVariants(trimmed)) {
-    if (v) variants.add(v);
+  for (const v of buildSearchVariants(original)) {
+    const n = collapseSearchSpaces(v);
+    if (n) unique.add(n);
   }
+
+  const normalizedUniqueVariants = [...unique].filter((v) => v.length >= 1);
 
   return {
-    raw: trimmed,
+    original,
     primary,
-    variants: [...variants].filter((v) => v.length >= 1),
     keyboardFixed,
     transliterated,
+    normalizedUniqueVariants,
+    variants: normalizedUniqueVariants,
+  };
+}
+
+/** Client/server helper: all match variants for a raw query string. */
+export function getSearchQueryVariants(raw: string): string[] {
+  return normalizeGlobalSearchQuery(raw).normalizedUniqueVariants;
+}
+
+export function globalSearchNormalizedPayload(n: GlobalSearchNormalizedQuery) {
+  return {
+    original: n.original,
+    primary: n.primary,
+    keyboardFixed: n.keyboardFixed,
+    transliterated: n.transliterated,
+    normalizedUniqueVariants: n.normalizedUniqueVariants,
+    variants: n.normalizedUniqueVariants,
   };
 }

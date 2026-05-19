@@ -4,12 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CompactListingCard } from "../components/CompactListingCard";
+import { ExternalSearchResults } from "../components/ExternalSearchResults";
 import { appendReturnUrlQuery } from "../lib/returnNavigation";
+import type { ExternalSearchResultItem } from "../lib/externalSearch";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchListingTypeFilter, GlobalSearchResultItem } from "../lib/globalSearchTypes";
 import type { Listing, ListingType } from "../lib/listingModel";
 import { homepageLocationLabelFromScope } from "../lib/searchScopeLocation";
 import { useCompactListingEnrichment } from "../lib/useCompactListingEnrichment";
+import { normalizeGlobalSearchQuery, searchDebugLog } from "../lib/searchMatch";
 import { useSearchScope } from "../lib/useStoredCity";
 
 const TYPE_TABS: { id: GlobalSearchListingTypeFilter; label: string }[] = [
@@ -62,6 +65,7 @@ export function SearchPageClient() {
 
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<GlobalSearchResultItem[]>([]);
+  const [externalResults, setExternalResults] = useState<ExternalSearchResultItem[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const listings = useMemo(() => results.map(searchResultToListing), [results]);
@@ -80,6 +84,7 @@ export function SearchPageClient() {
   const loadResults = useCallback(async () => {
     if (!query) {
       setResults([]);
+      setExternalResults([]);
       setFetchError(null);
       return;
     }
@@ -90,15 +95,30 @@ export function SearchPageClient() {
       const scopeP = globalSearchScopeToQueryParams(searchScope);
       for (const [k, v] of scopeP.entries()) p.set(k, v);
       const r = await fetch(`/api/search?${p.toString()}`, { cache: "no-store" });
-      const d = (await r.json()) as { ok?: boolean; results?: GlobalSearchResultItem[]; error?: string };
+      const d = (await r.json()) as {
+        ok?: boolean;
+        results?: GlobalSearchResultItem[];
+        externalResults?: ExternalSearchResultItem[];
+        error?: string;
+      };
       if (!r.ok || !d.ok) {
         setResults([]);
+        setExternalResults([]);
         setFetchError(d.error ?? "search_failed");
         return;
       }
-      setResults(Array.isArray(d.results) ? d.results : []);
+      const list = Array.isArray(d.results) ? d.results : [];
+      setResults(list);
+      setExternalResults(Array.isArray(d.externalResults) ? d.externalResults : []);
+      const n = normalizeGlobalSearchQuery(query);
+      searchDebugLog("search-page", {
+        raw: n.original,
+        variants: n.normalizedUniqueVariants,
+        resultCount: list.length,
+      });
     } catch {
       setResults([]);
+      setExternalResults([]);
       setFetchError("search_failed");
     } finally {
       setLoading(false);
@@ -123,13 +143,15 @@ export function SearchPageClient() {
     <main className="mx-auto w-full min-w-0 max-w-7xl px-3 py-6 sm:px-6">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-black">Поиск</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-black">Результаты поиска</h1>
           {query ?
-            <p className="mt-1 text-sm text-black/60">
-              {loading ? "Ищем…" : `${results.length} результатов`}
-              {query ? ` по запросу «${query}»` : ""}
-              {scopeLabel && scopeLabel !== "Вся Россия" ? ` · ${scopeLabel}` : ""}
-            </p>
+            <>
+              <p className="mt-1 text-sm text-black/70">По запросу: «{query}»</p>
+              <p className="mt-0.5 text-sm text-black/60">
+                {loading ? "Ищем…" : `Найдено: ${results.length}`}
+                {scopeLabel && scopeLabel !== "Вся Россия" ? ` · ${scopeLabel}` : ""}
+              </p>
+            </>
           : <p className="mt-1 text-sm text-black/60">Введите запрос в строке поиска в шапке сайта</p>}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -156,7 +178,12 @@ export function SearchPageClient() {
       : null}
 
       {!loading && query && results.length === 0 && !fetchError ?
-        <p className="py-12 text-center text-lg text-black/60">Ничего не найдено</p>
+        <div className="py-12 text-center">
+          <p className="text-lg text-black/70">Ничего не найдено</p>
+          <p className="mt-2 text-sm text-black/55">
+            Попробуйте изменить запрос или выбрать Вся Россия
+          </p>
+        </div>
       : null}
 
       <ul className="mt-4 flex flex-col gap-3">
@@ -176,6 +203,8 @@ export function SearchPageClient() {
           );
         })}
       </ul>
+
+      <ExternalSearchResults items={externalResults} />
     </main>
   );
 }

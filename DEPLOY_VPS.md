@@ -40,6 +40,20 @@ Copy `.env.production.example` to `.env.production` on the server and fill secre
 
 Optional SMS/email keys: see `.env.production.example`.
 
+**Search (optional, default off)**
+
+- `ENABLE_EXTERNAL_SEARCH=false` — show licensed/official external links on `/search` (scaffold only until a feed is integrated).
+- `ENABLE_SEARCH_ANALYTICS=false` — log query + normalized query + result count only (no IP, no user id). Uses PostgreSQL table `search_analytics_events` when migrated, else `.data/search-analytics.jsonl`.
+
+Apply search DB migrations on VPS (when using PostgreSQL):
+
+```bash
+psql "$DATABASE_URL" -f db/migrations/20260517_global_search_trgm.sql
+psql "$DATABASE_URL" -f db/migrations/20260518_search_trgm_safe.sql
+psql "$DATABASE_URL" -f db/migrations/20260518_search_analytics.sql
+```
+
+
 ---
 
 ## 3. PostgreSQL setup

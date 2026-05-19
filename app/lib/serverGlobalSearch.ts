@@ -1,17 +1,23 @@
 import { allDirectoryItems, normalizeQuery } from "./categoryDirectory";
+import {
+  globalSearchNormalizedPayload,
+  normalizeGlobalSearchQuery,
+  type GlobalSearchNormalizedQuery,
+} from "./globalSearchNormalize";
 import { listingPath } from "./seo";
 import type { Listing, ListingType } from "./listingModel";
 import { isListingPubliclyListed } from "./listingModel";
 import { getPool, usesPostgres } from "./pgPool";
 import { listBootstrap } from "./serverListingsStore";
 import { listingFromPersistentRow } from "./serverListingsMap";
-import { normalizeGlobalSearchQuery, type GlobalSearchNormalizedQuery } from "./globalSearchNormalize";
 import type { GlobalSearchListingTypeFilter, GlobalSearchResultItem, GlobalSearchSuggestItem } from "./globalSearchTypes";
 import { listingMatchesSearchScope, type SearchScopeLocation } from "./searchScopeLocation";
-import { buildSearchVariants } from "./utils/keyboardLayout";
+import { haystackMatchesRawQuery, listingMatchesSearchQuery, scoreListingSearch, searchDebugLog } from "./searchMatch";
 import { filterGlobalRussiaCitiesByQuery } from "./staticRussiaCities";
+import { logSearchAnalytics } from "./serverSearchAnalytics";
 
 const DESCRIPTION_SNIPPET_MAX = 160;
+const PUBLIC_STATUS_SQL = `('auto','approved','published')`;
 
 function listingResultType(type: ListingType): GlobalSearchResultItem["type"] {
   if (type === "task") return "task";
@@ -53,64 +59,64 @@ export function listingToGlobalSearchResult(listing: Listing, score: number): Gl
   };
 }
 
-function listingHaystackNormalized(listing: Listing): string {
-  const spec = listing.type === "service" && "specialization" in listing ?
-    String((listing as { specialization?: string }).specialization ?? "")
-  : "";
-  return normalizeQuery(
-    [
-      listing.title,
-      listing.description,
-      listing.categoryName,
-      listing.categorySlug,
-      listing.city,
-      spec,
-      listing.type,
-    ].join(" "),
-  );
-}
 
-function listingMatchesSearchVariants(listing: Listing, rawQuery: string, variants: string[]): boolean {
-  const hay = listingHaystackNormalized(listing);
-  const vs = variants.length > 0 ? variants : buildSearchVariants(rawQuery);
-  if (vs.length === 0) return true;
-  return vs.some((v) => hay.includes(v));
-}
+const PG_SCORE_EXPR = `
+  (
+    CASE WHEN lower(l.title) = ANY($1::text[]) THEN 100 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v WHERE lower(l.title) LIKE v || '%'
+      ) THEN 85 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v WHERE lower(l.title) LIKE '%' || v || '%'
+      ) THEN 70 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v
+        WHERE lower(COALESCE(l.category_name, '')) LIKE '%' || v || '%'
+           OR lower(COALESCE(l.category_slug, '')) LIKE '%' || v || '%'
+           OR lower(COALESCE(l.specialization, '')) LIKE '%' || v || '%'
+      ) THEN 50 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v
+        WHERE lower(COALESCE(l.description, '')) LIKE '%' || v || '%'
+      ) THEN 30 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v
+        WHERE lower(COALESCE(l.city, '')) LIKE '%' || v || '%'
+      ) THEN 20 ELSE 0 END
+    + GREATEST(
+        COALESCE((SELECT MAX(similarity(lower(l.title), v)) FROM unnest($1::text[]) v), 0),
+        COALESCE((SELECT MAX(similarity(lower(COALESCE(l.description, '')), v)) FROM unnest($1::text[]) v), 0)
+      ) * 5
+  )::double precision AS search_score`;
 
-function haystackMatchesQuery(haystackLower: string, rawQuery: string): boolean {
-  const variants = buildSearchVariants(rawQuery);
-  if (variants.length === 0) return true;
-  return variants.some((v) => haystackLower.includes(v));
-}
+const PG_MATCH_WHERE = `
+  EXISTS (
+    SELECT 1 FROM unnest($1::text[]) v
+    WHERE lower(l.title) LIKE '%' || v || '%'
+       OR lower(COALESCE(l.description, '')) LIKE '%' || v || '%'
+       OR lower(COALESCE(l.category_name, '')) LIKE '%' || v || '%'
+       OR lower(COALESCE(l.category_slug, '')) LIKE '%' || v || '%'
+       OR lower(COALESCE(l.specialization, '')) LIKE '%' || v || '%'
+       OR lower(COALESCE(l.city, '')) LIKE '%' || v || '%'
+       OR l.title % v
+       OR COALESCE(l.description, '') % v
+       OR COALESCE(l.category_name, '') % v
+  )`;
 
-function scoreListingFallback(listing: Listing, variants: string[]): number {
-  const title = normalizeQuery(listing.title ?? "");
-  const hay = normalizeQuery(
-    [
-      listing.title,
-      listing.description,
-      listing.categoryName,
-      listing.categorySlug,
-      listing.city,
-      "specialization" in listing ? (listing as { specialization?: string }).specialization : "",
-    ].join(" "),
-  );
-  let score = 0;
-  for (const v of variants) {
-    if (!v) continue;
-    if (title === v) score = Math.max(score, 100);
-    else if (title.includes(v)) score = Math.max(score, 50);
-    else if (hay.includes(v)) score = Math.max(score, 20);
-  }
-  return score;
-}
+const PG_PUBLIC_WHERE = `
+  l.status IN ${PUBLIC_STATUS_SQL}
+  AND COALESCE(NULLIF(TRIM(l.deal_status), ''), 'active') = 'active'
+  AND COALESCE(NULLIF(TRIM(l.listing_lifecycle), ''), 'live') = 'live'`;
 
 async function searchListingsPg(
   normalized: GlobalSearchNormalizedQuery,
   type: GlobalSearchListingTypeFilter,
   limit: number,
 ): Promise<{ rows: Listing[]; scores: Map<string, number> }> {
-  const variants = normalized.variants.length > 0 ? normalized.variants : [normalized.primary].filter(Boolean);
+  const variants =
+    normalized.normalizedUniqueVariants.length > 0 ?
+      normalized.normalizedUniqueVariants
+    : [normalized.primary].filter(Boolean);
   if (variants.length === 0) return { rows: [], scores: new Map() };
 
   const pool = getPool();
@@ -122,29 +128,19 @@ async function searchListingsPg(
   else if (type === "product") typeSql = `AND l.type IN ('product_sell','product_buy')`;
 
   const sql = `
-    SELECT l.*,
-      (
-        CASE WHEN lower(l.title) = ANY($1::text[]) THEN 100 ELSE 0 END
-        + CASE WHEN EXISTS (
-            SELECT 1 FROM unnest($1::text[]) v
-            WHERE lower(l.title) LIKE '%' || v || '%'
-          ) THEN 50 ELSE 0 END
-        + GREATEST(
-            COALESCE((SELECT MAX(similarity(lower(l.title), v)) FROM unnest($1::text[]) v), 0),
-            COALESCE((SELECT MAX(similarity(lower(COALESCE(l.description, '')), v)) FROM unnest($1::text[]) v), 0),
-            COALESCE((SELECT MAX(similarity(lower(COALESCE(l.category_name, '')), v)) FROM unnest($1::text[]) v), 0),
-            COALESCE((SELECT MAX(similarity(lower(COALESCE(l.specialization, '')), v)) FROM unnest($1::text[]) v), 0)
-          ) * 10
-        + CASE WHEN EXISTS (
-            SELECT 1 FROM unnest($1::text[]) v
-            WHERE lower(COALESCE(l.description, '')) LIKE '%' || v || '%'
-               OR lower(COALESCE(l.category_name, '')) LIKE '%' || v || '%'
-          ) THEN 15 ELSE 0 END
-      )::double precision AS search_score
+    SELECT l.*, ${PG_SCORE_EXPR}
     FROM listings l
-    WHERE l.status IN ('auto','approved')
-      AND COALESCE(NULLIF(TRIM(l.deal_status), ''), 'active') = 'active'
-      AND COALESCE(NULLIF(TRIM(l.listing_lifecycle), ''), 'live') = 'live'
+    WHERE ${PG_PUBLIC_WHERE}
+      ${typeSql}
+      AND ${PG_MATCH_WHERE}
+    ORDER BY search_score DESC, l.created_at DESC
+    LIMIT $2
+  `;
+
+  const likeSql = `
+    SELECT l.*, ${PG_SCORE_EXPR}
+    FROM listings l
+    WHERE ${PG_PUBLIC_WHERE}
       ${typeSql}
       AND EXISTS (
         SELECT 1 FROM unnest($1::text[]) v
@@ -153,58 +149,12 @@ async function searchListingsPg(
            OR lower(COALESCE(l.category_name, '')) LIKE '%' || v || '%'
            OR lower(COALESCE(l.specialization, '')) LIKE '%' || v || '%'
            OR lower(COALESCE(l.city, '')) LIKE '%' || v || '%'
-           OR l.title % v
-           OR COALESCE(l.description, '') % v
-           OR COALESCE(l.category_name, '') % v
       )
     ORDER BY search_score DESC, l.created_at DESC
     LIMIT $2
   `;
 
-  try {
-    const { rows } = await pool.query(sql, params.slice(0, type === "all" ? 2 : params.length));
-    const listings: Listing[] = [];
-    const scores = new Map<string, number>();
-    for (const row of rows) {
-      const scoreRaw = (row as { search_score?: unknown }).search_score;
-      const score = typeof scoreRaw === "number" && Number.isFinite(scoreRaw) ? scoreRaw : 0;
-      const listing = listingFromPersistentRow(row as Record<string, unknown>);
-      if (!listing) continue;
-      listings.push(listing);
-      scores.set(listing.id, score);
-    }
-    return { rows: listings, scores };
-  } catch {
-    const likeSql = `
-      SELECT l.*,
-        (
-          CASE WHEN lower(l.title) = ANY($1::text[]) THEN 100 ELSE 0 END
-          + CASE WHEN EXISTS (
-              SELECT 1 FROM unnest($1::text[]) v WHERE lower(l.title) LIKE '%' || v || '%'
-            ) THEN 50 ELSE 0 END
-          + CASE WHEN EXISTS (
-              SELECT 1 FROM unnest($1::text[]) v
-              WHERE lower(COALESCE(l.description, '')) LIKE '%' || v || '%'
-                 OR lower(COALESCE(l.category_name, '')) LIKE '%' || v || '%'
-            ) THEN 15 ELSE 0 END
-        )::double precision AS search_score
-      FROM listings l
-      WHERE l.status IN ('auto','approved')
-        AND COALESCE(NULLIF(TRIM(l.deal_status), ''), 'active') = 'active'
-        AND COALESCE(NULLIF(TRIM(l.listing_lifecycle), ''), 'live') = 'live'
-        ${typeSql}
-        AND EXISTS (
-          SELECT 1 FROM unnest($1::text[]) v
-          WHERE lower(l.title) LIKE '%' || v || '%'
-             OR lower(COALESCE(l.description, '')) LIKE '%' || v || '%'
-             OR lower(COALESCE(l.category_name, '')) LIKE '%' || v || '%'
-             OR lower(COALESCE(l.specialization, '')) LIKE '%' || v || '%'
-             OR lower(COALESCE(l.city, '')) LIKE '%' || v || '%'
-        )
-      ORDER BY search_score DESC, l.created_at DESC
-      LIMIT $2
-    `;
-    const { rows } = await pool.query(likeSql, params);
+  function mapRows(rows: Record<string, unknown>[]) {
     const listings: Listing[] = [];
     const scores = new Map<string, number>();
     for (const row of rows) {
@@ -217,6 +167,14 @@ async function searchListingsPg(
     }
     return { rows: listings, scores };
   }
+
+  try {
+    const { rows } = await pool.query(sql, params);
+    return mapRows(rows as Record<string, unknown>[]);
+  } catch {
+    const { rows } = await pool.query(likeSql, params);
+    return mapRows(rows as Record<string, unknown>[]);
+  }
 }
 
 async function searchListingsFile(
@@ -225,16 +183,16 @@ async function searchListingsFile(
   limit: number,
 ): Promise<{ rows: Listing[]; scores: Map<string, number> }> {
   const all = await listBootstrap(null, false);
-  const q = normalized.raw || normalized.primary;
-  const variants = normalized.variants;
+  const variants = normalized.normalizedUniqueVariants;
 
   let pool = all.filter(isListingPubliclyListed);
   if (type === "task") pool = pool.filter((l) => l.type === "task");
   else if (type === "service") pool = pool.filter((l) => l.type === "service");
   else if (type === "product") pool = pool.filter((l) => l.type === "product_sell" || l.type === "product_buy");
 
-  const matched = pool.filter((l) => listingMatchesSearchVariants(l, q, variants));
-  const scored = matched.map((l) => ({ l, score: scoreListingFallback(l, variants) }));
+  const queryForMatch = normalized.original || normalized.primary;
+  const matched = pool.filter((l) => listingMatchesSearchQuery(l, queryForMatch));
+  const scored = matched.map((l) => ({ l, score: scoreListingSearch(l, queryForMatch) }));
   scored.sort((a, b) => b.score - a.score || (b.l.createdAt ?? 0) - (a.l.createdAt ?? 0));
   const top = scored.slice(0, limit * 4);
   const scores = new Map<string, number>();
@@ -247,6 +205,7 @@ export async function globalSearchListings(opts: {
   type?: GlobalSearchListingTypeFilter;
   limit?: number;
   scope: SearchScopeLocation;
+  logAnalytics?: boolean;
 }): Promise<{
   normalized: GlobalSearchNormalizedQuery;
   results: GlobalSearchResultItem[];
@@ -255,7 +214,7 @@ export async function globalSearchListings(opts: {
   const type = opts.type ?? "all";
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100);
 
-  if (!normalized.primary && normalized.variants.length === 0) {
+  if (!normalized.primary && normalized.normalizedUniqueVariants.length === 0) {
     return { normalized, results: [] };
   }
 
@@ -270,20 +229,43 @@ export async function globalSearchListings(opts: {
   for (const l of scoped) {
     if (seen.has(l.id)) continue;
     seen.add(l.id);
-    results.push(listingToGlobalSearchResult(l, scores.get(l.id) ?? scoreListingFallback(l, normalized.variants)));
+    results.push(
+      listingToGlobalSearchResult(
+        l,
+        scores.get(l.id) ?? scoreListingSearch(l, normalized.original || normalized.primary),
+      ),
+    );
     if (results.length >= limit) break;
   }
 
-  results.sort((a, b) => b.score - a.score);
+  results.sort((a, b) => b.score - a.score || 0);
+
+  searchDebugLog("api-search", {
+    raw: normalized.original,
+    variants: normalized.normalizedUniqueVariants,
+    resultCount: results.length,
+  });
+
+  if (opts.logAnalytics !== false) {
+    void logSearchAnalytics({
+      query: normalized.original,
+      normalizedQuery: normalized.primary,
+      resultCount: results.length,
+      timestamp: Date.now(),
+    });
+  }
+
   return { normalized, results };
 }
+
+export { globalSearchNormalizedPayload };
 
 function suggestCategories(q: string, max: number): GlobalSearchSuggestItem[] {
   const out: GlobalSearchSuggestItem[] = [];
   const seen = new Set<string>();
   for (const item of allDirectoryItems) {
     const hay = normalizeQuery(item.title);
-    if (!haystackMatchesQuery(hay, q)) continue;
+    if (!haystackMatchesRawQuery(hay, q)) continue;
     const key = item.title.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -307,7 +289,7 @@ export async function globalSearchSuggest(opts: {
   scope: SearchScopeLocation;
 }): Promise<{ normalized: GlobalSearchNormalizedQuery; suggestions: GlobalSearchSuggestItem[] }> {
   const normalized = normalizeGlobalSearchQuery(opts.query);
-  const q = normalized.raw;
+  const q = normalized.original;
   if (q.length < 2) {
     return { normalized, suggestions: [] };
   }
@@ -330,6 +312,7 @@ export async function globalSearchSuggest(opts: {
     type: "all",
     limit: 6,
     scope: opts.scope,
+    logAnalytics: false,
   });
   for (const r of results) {
     if (suggestions.length >= 8) break;

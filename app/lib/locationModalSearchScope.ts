@@ -4,6 +4,7 @@ import {
   type LegacyLocationSnapshot,
   type SearchScopeLocation,
   DEFAULT_SEARCH_SCOPE,
+  legacyFieldsFromSearchScope,
   normalizeSearchScope,
   searchScopeFromLegacySnapshot,
 } from "./searchScopeLocation";
@@ -58,6 +59,32 @@ export function incomingModalFieldsToScope(v: IncomingLocationModalFields | null
 
 export function searchScopeWholeRussia(): SearchScopeLocation {
   return { ...DEFAULT_SEARCH_SCOPE };
+}
+
+/** Same field shape as listing create/edit — keeps LocationModal map/circle behavior consistent. */
+export function browseLocationModalValue(scope: SearchScopeLocation): IncomingLocationModalFields {
+  const norm = normalizeSearchScope(scope);
+  if (norm.type === "country") {
+    return {
+      scope: searchScopeWholeRussia(),
+      city: "",
+      region: "",
+      displayName: "Вся Россия",
+      pickKind: "whole",
+      radiusKm: 0,
+    };
+  }
+  const L = legacyFieldsFromSearchScope(norm);
+  return {
+    scope: norm,
+    city: L.city,
+    region: L.region,
+    district: L.district,
+    displayName: L.displayName,
+    pickKind: L.pickKind,
+    radiusKm: L.radiusKm,
+    ...(typeof L.lat === "number" && typeof L.lng === "number" ? { lat: L.lat, lng: L.lng } : {}),
+  };
 }
 
 export function searchScopeFromBrowseGeoRow(row: BrowseGeoPickRow): SearchScopeLocation {

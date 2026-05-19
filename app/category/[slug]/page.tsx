@@ -25,6 +25,7 @@ import {
   useSearchScope,
   useStoredCityRadiusKm,
 } from "../../lib/useStoredCity";
+import { persistBrowseLocationScope } from "../../lib/browseLocationScope";
 import { DEFAULT_SEARCH_SCOPE, homepageLocationLabelFromScope, listingMatchesSearchScope } from "../../lib/searchScopeLocation";
 import { useCompactListingEnrichment } from "../../lib/useCompactListingEnrichment";
 export default function CategoryPage() {
@@ -412,7 +413,7 @@ export default function CategoryPage() {
               value={{ scope: searchScope }}
               onClose={() => setLocationModalOpen(false)}
               onChange={(next) => {
-                setStoredSearchScope(next.scope);
+                persistBrowseLocationScope(next.scope);
                 const c = `${next.city}`.trim();
                 setCity(c);
                 setRadiusKm(next.radiusKm);

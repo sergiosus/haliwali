@@ -387,31 +387,45 @@ function looksLikeAdministrativeAreaLabel(name: string): boolean {
   );
 }
 
-/** Clean stale/invalid auto-detected city (never manual). */
+/** Remove auto-detected city from global storage (never used for filters without user confirm). */
 export function cleanupStoredAutoCityOnLoad() {
   if (typeof window === "undefined") return;
-  const src = getSourceSnapshot();
-  if (src !== "auto") return;
-
-  const ts = readAutoTs();
-  const tooOld = ts != null && Date.now() - ts > 10 * 60 * 1000;
-  const city = (localStorage.getItem(CITY_KEY) ?? "").trim();
-  const lat = readNumber(CITY_LAT_KEY);
-  const lng = readNumber(CITY_LNG_KEY);
-  const coordsOk =
-    typeof lat === "number" &&
-    typeof lng === "number" &&
-    Number.isFinite(lat + lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180;
-
-  const badCity = !city || looksLikeAdministrativeAreaLabel(city) || looksLikeRuralAutoSettlement(city);
-
-  if (tooOld || !coordsOk || badCity) {
+  if (getSourceSnapshot() === "auto") {
     clearStoredAutoCity();
   }
+}
+
+/** Drop catalog/V1 location keys when browse was never explicitly confirmed (orphan Izhevsk/Moscow blobs). */
+export function clearUnconfirmedLocationCatalogKeys() {
+  if (typeof window === "undefined") return;
+  cleanupStoredAutoCityOnLoad();
+  try {
+    localStorage.removeItem(CITY_SEARCH_SCOPE_KEY);
+    localStorage.removeItem(CITY_KEY);
+    localStorage.removeItem(CITY_DISPLAY_NAME_KEY);
+    localStorage.removeItem(CITY_REGION_KEY);
+    localStorage.removeItem(CITY_DISTRICT_KEY);
+    localStorage.removeItem(CITY_PICK_KIND_KEY);
+    localStorage.removeItem(CITY_RADIUS_KM_KEY);
+    localStorage.removeItem(CITY_LAT_KEY);
+    localStorage.removeItem(CITY_LNG_KEY);
+    localStorage.removeItem(CITY_SOURCE_KEY);
+    localStorage.removeItem(CITY_AUTO_TS_KEY);
+  } catch {
+    /* ignore */
+  }
+  emit();
+}
+
+const BROWSE_SCOPE_STORAGE_KEY = "haliwali_browse_scope";
+const BROWSE_SCOPE_USER_SET_KEY = "haliwali_browse_scope_user_set";
+
+/** Explicit user confirm only (`haliwali_browse_scope_user_set`); avoids importing browseLocationScope (cycle). */
+function readUserSelectedSearchScopeOnly(): SearchScopeLocation | null {
+  if (typeof window === "undefined") return null;
+  if (localStorage.getItem(BROWSE_SCOPE_USER_SET_KEY) !== "1") return null;
+  const fromBrowse = parseSearchScopeJson(localStorage.getItem(BROWSE_SCOPE_STORAGE_KEY));
+  return fromBrowse ? normalizeSearchScope(fromBrowse) : null;
 }
 
 function readLegacyLocationSnapshotFromStorage(): LegacyLocationSnapshot {
@@ -485,9 +499,9 @@ let searchScopeSnapshotCached: SearchScopeLocation = DEFAULT_SEARCH_SCOPE;
 
 export function readClientSearchScope(): SearchScopeLocation {
   if (typeof window === "undefined") return DEFAULT_SEARCH_SCOPE;
-  const fromJson = parseSearchScopeJson(localStorage.getItem(CITY_SEARCH_SCOPE_KEY));
-  if (fromJson) return normalizeSearchScope(fromJson);
-  return searchScopeFromLegacySnapshot(readLegacyLocationSnapshotFromStorage());
+  const userScope = readUserSelectedSearchScopeOnly();
+  if (userScope && userScope.type !== "country") return userScope;
+  return DEFAULT_SEARCH_SCOPE;
 }
 
 /** `haliwali_search_scope_v1` JSON only (no flat-key fallback) — for browse canonical read priority. */
@@ -558,9 +572,7 @@ function getSearchScopeSnapshot(): SearchScopeLocation {
   const fp = getSearchScopeStorageFingerprint();
   if (fp === searchScopeSnapshotFingerprint) return searchScopeSnapshotCached;
   searchScopeSnapshotFingerprint = fp;
-  const computed = readClientSearchScope();
-  /** `normalizeSearchScope` allocates new objects — reuse canonical ref for «вся страна». */
-  searchScopeSnapshotCached = computed.type === "country" ? DEFAULT_SEARCH_SCOPE : computed;
+  searchScopeSnapshotCached = readClientSearchScope();
   return searchScopeSnapshotCached;
 }
 

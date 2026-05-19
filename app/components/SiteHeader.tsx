@@ -279,8 +279,7 @@ export function SiteHeader() {
     setUserVerified(false);
     closeAccountMenu();
     if (options?.closeSwitcher) setAccountSwitcherOpen(false);
-    router.push("/");
-    router.refresh();
+    window.location.assign("/");
   }
 
   function openAddAccountModal() {
@@ -307,7 +306,6 @@ export function SiteHeader() {
       syncHeaderProfile();
       void refreshChatUnread();
     });
-    router.refresh();
   }
 
   const accountSwitcherCurrentUser = useMemo(() => {

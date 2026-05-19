@@ -422,7 +422,6 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                     setSaveError(false);
                     setSelectedLocation(loc);
                   }}
-                  wholeRussia={wholeRussia}
                   cities={russianCities}
                   onWholeRussiaPicked={() => {
                     setAddress("");

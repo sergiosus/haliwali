@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { isFederalRussiaSettlementName } from "../lib/locationDisplay";
+import { listingLocationModalValue } from "../lib/listingLocationModal";
 import type { SelectedLocation } from "../lib/selectedLocation";
+import { persistBrowseLocationScope } from "../lib/browseLocationScope";
 import { LocationModal, type LocationModalChangePayload } from "./modals/LocationModal";
 
 /** «Выбрано: Москва» / «Выбрано: Город, регион». */
@@ -17,42 +19,46 @@ export function listingLocationChosenCaption(sl: SelectedLocation | null): strin
 }
 
 type Props = {
-  draftText: string;
-  onDraftTextChange: (v: string) => void;
   selectedLocation: SelectedLocation | null;
   onSelectedLocationChange: (next: SelectedLocation | null) => void;
-  /** True when объявление по всей России (нет города из комбобокса и точки карты). */
-  wholeRussia: boolean;
+  /** @deprecated Draft text is not used for listing location display or modal seeding. */
+  draftText?: string;
+  onDraftTextChange?: (v: string) => void;
   /** Список городов каталога (как у главной). */
   cities: readonly string[];
   disabled?: boolean;
   onLocationMessage?: (msg: string | null) => void;
-  /** Очистить поле региона/города родителя (комбобокс) при явном выборе «Вся Россия» в модалке. */
+  /** @deprecated Use onSelectedLocationChange(null) via modal «Вся Россия». */
   onWholeRussiaPicked?: () => void;
+  /** When true, also updates global browse filters (homepage/map). Default false for listing forms. */
+  syncGlobalBrowseScope?: boolean;
 };
 
 export function ListingLocationSection({
-  draftText,
-  onDraftTextChange,
   selectedLocation,
   onSelectedLocationChange,
-  wholeRussia,
+  draftText: _draftText,
+  onDraftTextChange,
   cities,
   disabled,
   onLocationMessage,
   onWholeRussiaPicked,
+  syncGlobalBrowseScope = false,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const applyBrowseResult = useCallback(
+  const modalValue = useMemo(() => listingLocationModalValue(selectedLocation), [selectedLocation]);
+
+  /** User-confirmed selection only — runs when «Выбрать эту область» fires in LocationModal. */
+  const applyConfirmedModalResult = useCallback(
     (next: LocationModalChangePayload) => {
       const c = `${next.city}`.trim();
       const reg = `${next.region}`.trim();
 
       if (next.scope?.type === "country" || next.pickKind === "whole" || (!c && reg === "Вся Россия")) {
         onWholeRussiaPicked?.();
+        onDraftTextChange?.("");
         onLocationMessage?.(null);
-        onDraftTextChange("");
         onSelectedLocationChange(null);
         setPickerOpen(false);
         return;
@@ -65,7 +71,7 @@ export function ListingLocationSection({
         city: c,
         region: `${next.region ?? ""}`.trim(),
         displayName: (next.displayName ?? "").trim() || c,
-        address: `${next.displayName ?? ""}`.trim() || c,
+        address: (next.displayName ?? "").trim() || c,
         latitude: lat,
         longitude: lng,
         source: "suggestion",
@@ -73,16 +79,22 @@ export function ListingLocationSection({
 
       onLocationMessage?.(null);
       onSelectedLocationChange(sl);
-      if (sl.displayName) {
-        onDraftTextChange(sl.displayName);
-      } else if (sl.region && sl.city) {
-        onDraftTextChange(`${sl.city}, ${sl.region}`);
-      } else {
-        onDraftTextChange(sl.city);
+      onDraftTextChange?.(sl.displayName || (sl.region && sl.city ? `${sl.city}, ${sl.region}` : sl.city));
+
+      if (syncGlobalBrowseScope) {
+        persistBrowseLocationScope({
+          type: "city",
+          label: sl.city,
+          region: sl.region,
+          parentName: sl.region,
+          lat,
+          lng,
+        });
       }
+
       setPickerOpen(false);
     },
-    [onDraftTextChange, onLocationMessage, onSelectedLocationChange, onWholeRussiaPicked],
+    [onDraftTextChange, onLocationMessage, onSelectedLocationChange, onWholeRussiaPicked, syncGlobalBrowseScope],
   );
 
   function openPickerFull() {
@@ -91,11 +103,11 @@ export function ListingLocationSection({
     setPickerOpen(true);
   }
 
-  const fieldLabel =
-    listingLocationChosenCaption(selectedLocation)?.trim() ||
-    (wholeRussia ? "Вся Россия" : "") ||
-    draftText.trim() ||
-    "Выберите город";
+  function closePickerWithoutCommit() {
+    setPickerOpen(false);
+  }
+
+  const fieldLabel = listingLocationChosenCaption(selectedLocation)?.trim() || "Вся Россия";
 
   const triggerCls = [
     "min-h-[48px] min-w-0 max-w-full flex-1 overflow-hidden rounded-2xl border border-black/[0.08] bg-white px-4 py-3 text-left text-sm text-black/85 outline-none transition-colors hover:border-black/[0.14] hover:bg-black/[0.015] disabled:opacity-45",
@@ -114,41 +126,35 @@ export function ListingLocationSection({
         </div>
 
         <p className="text-xs leading-relaxed text-black/52">
-          Можно оставить «Вся Россия» или выбрать город / район.
+          По умолчанию «Вся Россия». Город подставляется только после подтверждения в окне выбора.
         </p>
 
-        {selectedLocation ? (
+        {selectedLocation ?
           <button
             type="button"
             disabled={disabled}
             onClick={() => {
               onSelectedLocationChange(null);
-              onDraftTextChange("");
+              onDraftTextChange?.("");
               onLocationMessage?.(null);
             }}
             className="w-fit text-left text-sm font-medium text-black/58 underline underline-offset-2 hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
           >
             Сбросить местоположение
           </button>
-        ) : null}
+        : null}
       </div>
 
       {pickerOpen ?
         <LocationModal
           variant="listing"
           listingSubMode="full"
+          listingFormMode
           open
           cities={cities}
-          value={{
-            city: `${selectedLocation?.city ?? ""}`.trim(),
-            region: selectedLocation?.region,
-            radiusKm: 0,
-            lat: selectedLocation?.latitude,
-            lng: selectedLocation?.longitude,
-            citySeed: draftText,
-          }}
-          onClose={() => setPickerOpen(false)}
-          onChange={applyBrowseResult}
+          value={modalValue}
+          onClose={closePickerWithoutCommit}
+          onChange={applyConfirmedModalResult}
         />
       : null}
     </>

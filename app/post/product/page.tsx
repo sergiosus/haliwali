@@ -434,7 +434,6 @@ function ProductPostForm({
           onSelectedLocationChange={(loc) => {
             setSelectedLocation(loc);
           }}
-          wholeRussia={wholeRussia}
           cities={russianCities}
           onWholeRussiaPicked={() => {
             setLocationDraft("");

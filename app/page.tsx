@@ -56,9 +56,12 @@ import { LocationModal, type LocationModalValue } from "./components/modals/Loca
 import { resolveRussiaCityRegionDisplay } from "./lib/locationDisplay";
 import {
   DEFAULT_BROWSE_LOCATION_SCOPE,
+  persistBrowseLocationScope,
+  persistHomepageColumnBrowseScopes,
+  readPersistedHomepageColumnBrowseScopes,
   type BrowseLocationScope,
 } from "./lib/browseLocationScope";
-import { incomingModalFieldsToScope } from "./lib/locationModalSearchScope";
+import { browseLocationModalValue, incomingModalFieldsToScope } from "./lib/locationModalSearchScope";
 import {
   homepageLocationLabelFromScope,
   listingMatchesSearchScope,
@@ -149,13 +152,21 @@ function HaliwaliLanding() {
   const [homeAuthOpen, setHomeAuthOpen] = useState(false);
   const pendingHomeSubmitRef = useRef<null | (() => void)>(null);
 
-  /** Session-only per-column browse filters — never hydrated from localStorage. */
+  /** Per-column browse filters — default «Вся Россия»; only explicit user picks are restored. */
   const [homeBrowseScopeTasks, setHomeBrowseScopeTasks] =
     useState<BrowseLocationScope>(DEFAULT_BROWSE_LOCATION_SCOPE);
   const [homeBrowseScopeServices, setHomeBrowseScopeServices] =
     useState<BrowseLocationScope>(DEFAULT_BROWSE_LOCATION_SCOPE);
   const [homeBrowseScopeProducts, setHomeBrowseScopeProducts] =
     useState<BrowseLocationScope>(DEFAULT_BROWSE_LOCATION_SCOPE);
+
+  useEffect(() => {
+    const scopes = readPersistedHomepageColumnBrowseScopes();
+    if (!scopes) return;
+    setHomeBrowseScopeTasks(normalizeSearchScope(scopes.tasks));
+    setHomeBrowseScopeServices(normalizeSearchScope(scopes.services));
+    setHomeBrowseScopeProducts(normalizeSearchScope(scopes.products));
+  }, []);
 
   const [locationSyncTasks, setLocationSyncTasks] = useState(false);
   const [locationSyncServices, setLocationSyncServices] = useState(false);
@@ -173,12 +184,12 @@ function HaliwaliLanding() {
     return homeBrowseScopeProducts;
   }, [homeBrowseScopeTasks, homeBrowseScopeServices, homeBrowseScopeProducts]);
 
-  /** Snapshot at open time: `scope` only. */
+  /** Snapshot at open time — full modal fields (same shape as listing LocationModal). */
   const modalValue = useMemo((): LocationModalValue => {
     const fallbackColumn = activeLocationColumn ?? "Задачи";
     const base = browseScopeForColumn(fallbackColumn);
     const scope = normalizeSearchScope(locationModalInitialScope ?? base);
-    return { scope };
+    return browseLocationModalValue(scope);
   }, [locationModalInitialScope, activeLocationColumn, browseScopeForColumn]);
 
   const openHomeLocationModal = useCallback(
@@ -621,6 +632,8 @@ function HaliwaliLanding() {
       {locationModalOpen ?
         <LocationModal
           key={`browse-scope-${activeLocationColumn ?? "none"}-${modalValue.scope!.type}-${modalValue.scope!.label}`}
+          variant="listing"
+          listingSubMode="full"
           open
           cities={russianCities}
           onClose={() => {
@@ -635,18 +648,22 @@ function HaliwaliLanding() {
               col === "Задачи" ? locationSyncTasks
               : col === "Услуги" ? locationSyncServices
               : locationSyncProducts;
-            if (applyToAll) {
-              setHomeBrowseScopeTasks(newScope);
-              setHomeBrowseScopeServices(newScope);
-              setHomeBrowseScopeProducts(newScope);
-            } else if (col === "Задачи") {
-              setHomeBrowseScopeTasks(newScope);
-            } else if (col === "Услуги") {
-              setHomeBrowseScopeServices(newScope);
-            } else {
-              setHomeBrowseScopeProducts(newScope);
-            }
+            const nextTasks =
+              applyToAll || col === "Задачи" ? newScope : homeBrowseScopeTasks;
+            const nextServices =
+              applyToAll || col === "Услуги" ? newScope : homeBrowseScopeServices;
+            const nextProducts =
+              applyToAll || col === "Товары" ? newScope : homeBrowseScopeProducts;
+            setHomeBrowseScopeTasks(nextTasks);
+            setHomeBrowseScopeServices(nextServices);
+            setHomeBrowseScopeProducts(nextProducts);
+            persistHomepageColumnBrowseScopes({
+              tasks: nextTasks,
+              services: nextServices,
+              products: nextProducts,
+            });
             setLocationModalInitialScope(newScope);
+            persistBrowseLocationScope(newScope);
             setLocationModalOpen(false);
             setActiveLocationColumn(null);
           }}
@@ -1553,7 +1570,7 @@ function TaskDialog({
               }}
               options={russianCities}
               allowCustomCity
-              placeholder="Например: Москва или Вся Россия"
+              placeholder="Например: Ижевск или Вся Россия"
               className={[
                 "h-[52px] w-full rounded-xl border px-4 text-sm leading-normal outline-none focus:border-black/30 focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]",
                 cityError ? "border-red-300 focus:ring-red-200" : "border-black/15",
@@ -1578,7 +1595,6 @@ function TaskDialog({
             }}
             selectedLocation={taskSelectedLocation}
             onSelectedLocationChange={handleTaskSelectedLocation}
-            wholeRussia={taskWholeRussia}
             cities={russianCities}
             onWholeRussiaPicked={() => {
               setTaskCity("");
@@ -1842,7 +1858,7 @@ function OfferDialog({
               }}
               options={russianCities}
               allowCustomCity
-              placeholder="Например: Москва или Вся Россия"
+              placeholder="Например: Ижевск или Вся Россия"
               className={[
                 "h-[52px] w-full rounded-xl border px-4 text-sm leading-normal outline-none focus:border-black/30 focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]",
                 cityError ? "border-red-300 focus:ring-red-200" : "border-black/15",
@@ -1867,7 +1883,6 @@ function OfferDialog({
             }}
             selectedLocation={serviceSelectedLocation}
             onSelectedLocationChange={handleServiceSelectedLocation}
-            wholeRussia={serviceWholeRussia}
             cities={russianCities}
             onWholeRussiaPicked={() => {
               setServiceCity("");
@@ -2184,7 +2199,7 @@ function ProductDialog({
                 }}
                 options={russianCities}
                 allowCustomCity
-                placeholder="Например: Москва или Вся Россия"
+                placeholder="Например: Ижевск или Вся Россия"
                 className={[
                   "h-[52px] w-full rounded-xl border px-4 text-sm leading-normal outline-none focus:border-black/30 focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]",
                   cityError ? "border-red-300 focus:ring-red-200" : "border-black/15",
@@ -2209,7 +2224,6 @@ function ProductDialog({
               }}
               selectedLocation={productSelectedLocation}
               onSelectedLocationChange={handleProductSelectedLocation}
-              wholeRussia={productWholeRussia}
               cities={russianCities}
               onWholeRussiaPicked={() => {
                 setProductCity("");

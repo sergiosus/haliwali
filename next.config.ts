@@ -24,6 +24,7 @@ const nextConfig: NextConfig = {
         "https://api-maps.yandex.ru",
         "https://*.maps.yandex.net",
         "https://*.yandex.ru",
+        "https://mc.yandex.ru",
       ].join(" "),
       `frame-src ${jitsiOrigin}`,
       "media-src 'self' blob:",

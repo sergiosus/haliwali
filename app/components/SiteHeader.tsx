@@ -10,7 +10,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { getAuthSnapshot, logout as logoutAuth, subscribeAuth, useAuth } from "../lib/auth";
 import { isDebugAuthClient } from "../lib/debugAuth";
 import { getProfile, subscribeProfiles } from "../lib/profile";
@@ -26,6 +26,7 @@ import {
 } from "../lib/rememberedAccounts";
 import { AccountCredentialsModal } from "./AccountCredentialsModal";
 import { AccountSwitcherModal } from "./AccountSwitcherModal";
+import { GlobalHeaderSearch } from "./GlobalHeaderSearch";
 
 /** Temporary account-menu tap debug: `localStorage.setItem("debugAccountMenu","1")` or development build. */
 function isAccountMenuDebugOn(): boolean {
@@ -51,24 +52,6 @@ function accountMenuLogHrefFromTarget(target: EventTarget | null): string | unde
   return typeof h === "string" ? h.slice(0, 200) : undefined;
 }
 
-function SearchIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="11" cy="11" r="7" />
-      <path d="M16.5 16.5 21 21" />
-    </svg>
-  );
-}
-
 /**
  * Identical to the former homepage hero `h1` wordmark: same `text-3xl font-extrabold tracking-tight md:text-4xl`
  * and the same `Hal` + `custom-i` spans. Wrapped in `span` + `scale-90` only so it fits the header width.
@@ -83,14 +66,10 @@ function HeaderHaliwaliLogo() {
 }
 
 export function SiteHeader() {
-  const router = useRouter();
   const pathname = usePathname();
-  const sp = useSearchParams();
-  const isHome = pathname === "/";
   /** Полноэкранный вход в админку — без меню обычного пользователя и без «Привет, …». */
   const suppressUserChromeForAdmin = pathname === "/admin";
 
-  const [q, setQ] = useState("");
   const auth = useAuth();
   const [userLabel, setUserLabel] = useState<string>("");
   const [userAvatar, setUserAvatar] = useState<string>("");
@@ -366,59 +345,6 @@ export function SiteHeader() {
     };
   }, [menuOpen, accountSwitcherOpen]);
 
-  useEffect(() => {
-    if (isHome) {
-      queueMicrotask(() => setQ(sp.get("q") ?? ""));
-    } else {
-      queueMicrotask(() => setQ(""));
-    }
-  }, [isHome, sp]);
-
-  const pushSearch = useCallback(
-    (raw: string) => {
-      const next = new URLSearchParams();
-      for (const [k, v] of sp.entries()) {
-        if (k === "q") continue;
-        next.set(k, v);
-      }
-      const t = raw.trim();
-      if (t) next.set("q", t);
-      const qs = next.toString();
-      router.push(qs ? `/?${qs}` : "/");
-    },
-    [router, sp],
-  );
-
-  const replaceHomeQ = useCallback(
-    (raw: string) => {
-      const next = new URLSearchParams();
-      for (const [k, v] of sp.entries()) {
-        if (k === "q") continue;
-        next.set(k, v);
-      }
-      const t = raw.trim();
-      if (t) next.set("q", t);
-      const qs = next.toString();
-      router.replace(qs ? `/?${qs}` : "/");
-    },
-    [router, sp],
-  );
-
-  function onInputChange(value: string) {
-    setQ(value);
-    if (isHome) {
-      replaceHomeQ(value);
-    }
-  }
-
-  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    if (!isHome) {
-      pushSearch(q);
-    }
-  }
-
   const postCta = (
     <Link
       href="/post"
@@ -650,33 +576,15 @@ export function SiteHeader() {
             <div className="min-w-0 shrink">{authBlock}</div>
           </div>
           {suppressUserChromeForAdmin ? null : <div className="w-full min-w-0 max-w-full">{postCta}</div>}
-          <div className="relative w-full">
-            <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              value={q}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Поиск по объявлениям"
-              className="h-11 w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 text-sm text-black outline-none placeholder:text-black/40 focus:border-gray-300 focus:ring-2 focus:ring-[rgba(255,122,0,0.2)]"
-            />
-          </div>
-        </div>
+                    <GlobalHeaderSearch iconLeftClassName="left-3.5" />
+</div>
 
         <div className="hidden min-w-0 items-center justify-between gap-6 md:flex">
           <Link href="/" className="inline-flex shrink-0 items-center leading-none">
             <HeaderHaliwaliLogo />
           </Link>
-          <div className="relative min-w-0 max-w-[500px] flex-1 px-2">
-            <SearchIcon className="pointer-events-none absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              value={q}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Поиск по объявлениям"
-              className="h-11 w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 text-sm text-black outline-none placeholder:text-black/40 focus:border-gray-300 focus:ring-2 focus:ring-[rgba(255,122,0,0.2)]"
-            />
-          </div>
-          <div className="flex shrink-0 items-center gap-8">
+                    <GlobalHeaderSearch className="min-w-0 max-w-[500px] flex-1 px-2" />
+<div className="flex shrink-0 items-center gap-8">
             {suppressUserChromeForAdmin ? null : postCta}
             {authBlock}
           </div>

@@ -1,4 +1,4 @@
-import { cities as APP_RF_CITIES } from "./cities";
+import { cities as APP_RF_CITIES } from "./citiesData";
 import { calculateDistanceKm } from "@/lib/shared/geo";
 import { buildSearchVariants } from "./utils/keyboardLayout";
 

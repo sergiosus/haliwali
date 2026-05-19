@@ -1,25 +1,73 @@
 import { NextResponse } from "next/server";
-import { siteUrl } from "../lib/siteUrl";
 
-export async function GET() {
-  const body = `User-agent: *
+/** Canonical robots rules for Yandex/Google (see Yandex Webmaster allow/disallow docs). */
+const ROBOTS_TXT = `User-agent: Yandex
+Allow: /$
 Allow: /
+Allow: /search
+Allow: /category/
+Allow: /listing/
+Allow: /tasks
+Allow: /services
+Allow: /products
+Allow: /about
+Allow: /contact
+Allow: /privacy
+Allow: /terms
 Disallow: /admin
-Disallow: /dashboard
-Disallow: /profile
-Disallow: /messages
-Disallow: /settings
 Disallow: /api
 Disallow: /login
-Disallow: /register
+Disallow: /reset-password
+Disallow: /profile
+Disallow: /chat
+User-agent: Googlebot
+Allow: /$
+Allow: /
+Allow: /search
+Allow: /category/
+Allow: /listing/
+Allow: /tasks
+Allow: /services
+Allow: /products
+Allow: /about
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+Disallow: /admin
+Disallow: /api
+Disallow: /login
+Disallow: /reset-password
+Disallow: /profile
+Disallow: /chat
+User-agent: *
+Allow: /$
+Allow: /
+Allow: /search
+Allow: /category/
+Allow: /listing/
+Allow: /tasks
+Allow: /services
+Allow: /products
+Allow: /about
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+Disallow: /admin
+Disallow: /api
+Disallow: /login
+Disallow: /reset-password
+Disallow: /profile
+Disallow: /chat
 
-Sitemap: ${siteUrl()}/sitemap.xml
+Host: haliwali.ru
+Sitemap: https://haliwali.ru/sitemap.xml
 `;
-  return new NextResponse(body, {
+
+export async function GET() {
+  return new NextResponse(ROBOTS_TXT, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "public, max-age=3600",
     },
   });
 }
-

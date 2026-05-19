@@ -60,6 +60,31 @@ export function listingToGlobalSearchResult(listing: Listing, score: number): Gl
 }
 
 
+const PG_SCORE_EXPR_BASIC = `
+  (
+    CASE WHEN lower(l.title) = ANY($1::text[]) THEN 100 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v WHERE lower(l.title) LIKE v || '%'
+      ) THEN 85 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v WHERE lower(l.title) LIKE '%' || v || '%'
+      ) THEN 70 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v
+        WHERE lower(COALESCE(l.category_name, '')) LIKE '%' || v || '%'
+           OR lower(COALESCE(l.category_slug, '')) LIKE '%' || v || '%'
+           OR lower(COALESCE(l.specialization, '')) LIKE '%' || v || '%'
+      ) THEN 50 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v
+        WHERE lower(COALESCE(l.description, '')) LIKE '%' || v || '%'
+      ) THEN 30 ELSE 0 END
+    + CASE WHEN EXISTS (
+        SELECT 1 FROM unnest($1::text[]) v
+        WHERE lower(COALESCE(l.city, '')) LIKE '%' || v || '%'
+      ) THEN 20 ELSE 0 END
+  )::double precision AS search_score`;
+
 const PG_SCORE_EXPR = `
   (
     CASE WHEN lower(l.title) = ANY($1::text[]) THEN 100 ELSE 0 END
@@ -88,6 +113,14 @@ const PG_SCORE_EXPR = `
         COALESCE((SELECT MAX(similarity(lower(COALESCE(l.description, '')), v)) FROM unnest($1::text[]) v), 0)
       ) * 5
   )::double precision AS search_score`;
+
+function isPgTrgmSearchError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const code = (e as { code?: string }).code;
+  if (code === "42883" || code === "42704") return true;
+  const msg = String((e as { message?: string }).message ?? "").toLowerCase();
+  return msg.includes("similarity") || msg.includes("pg_trgm") || (msg.includes("operator") && msg.includes("%"));
+}
 
 const PG_MATCH_WHERE = `
   EXISTS (
@@ -138,7 +171,7 @@ async function searchListingsPg(
   `;
 
   const likeSql = `
-    SELECT l.*, ${PG_SCORE_EXPR}
+    SELECT l.*, ${PG_SCORE_EXPR_BASIC}
     FROM listings l
     WHERE ${PG_PUBLIC_WHERE}
       ${typeSql}
@@ -171,10 +204,22 @@ async function searchListingsPg(
   try {
     const { rows } = await pool.query(sql, params);
     return mapRows(rows as Record<string, unknown>[]);
-  } catch {
-    const { rows } = await pool.query(likeSql, params);
-    return mapRows(rows as Record<string, unknown>[]);
+  } catch (e) {
+    if (!isPgTrgmSearchError(e)) throw e;
+    try {
+      const { rows } = await pool.query(likeSql, params);
+      return mapRows(rows as Record<string, unknown>[]);
+    } catch (e2) {
+      if (isPgTrgmSearchError(e2)) return { rows: [], scores: new Map() };
+      throw e2;
+    }
   }
+}
+
+function warnSearchSuggestError(context: string, e: unknown): void {
+  if (process.env.NODE_ENV !== "development") return;
+  const detail = e instanceof Error ? e.stack ?? e.message : String(e);
+  console.warn(`[search-suggest] ${context}:`, detail);
 }
 
 async function searchListingsFile(
@@ -304,19 +349,32 @@ export async function globalSearchSuggest(opts: {
     suggestions.push(item);
   }
 
-  for (const c of suggestCategories(q, 3)) push(c);
-  for (const c of suggestCities(q, 2)) push(c);
+  try {
+    for (const c of suggestCategories(q, 3)) push(c);
+  } catch (e) {
+    warnSearchSuggestError("suggestCategories", e);
+  }
 
-  const { results } = await globalSearchListings({
-    query: q,
-    type: "all",
-    limit: 6,
-    scope: opts.scope,
-    logAnalytics: false,
-  });
-  for (const r of results) {
-    if (suggestions.length >= 8) break;
-    push({ kind: "listing", label: r.title, query: r.title });
+  try {
+    for (const c of suggestCities(q, 2)) push(c);
+  } catch (e) {
+    warnSearchSuggestError("suggestCities", e);
+  }
+
+  try {
+    const { results } = await globalSearchListings({
+      query: q,
+      type: "all",
+      limit: 6,
+      scope: opts.scope,
+      logAnalytics: false,
+    });
+    for (const r of results) {
+      if (suggestions.length >= 8) break;
+      push({ kind: "listing", label: r.title, query: r.title });
+    }
+  } catch (e) {
+    warnSearchSuggestError("suggestListings", e);
   }
 
   return { normalized, suggestions: suggestions.slice(0, 8) };

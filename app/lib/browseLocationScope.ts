@@ -170,6 +170,17 @@ export function readPersistedUserBrowseScope(): BrowseLocationScope | null {
   return null;
 }
 
+/**
+ * Homepage browse scope after refresh: explicit user confirm only, else «Вся Россия».
+ * Geolocation / modal draft never restores from storage without `haliwali_browse_scope_user_set`.
+ */
+export function readUnifiedBrowseScopeForHomepage(): BrowseLocationScope {
+  purgeUnconfirmedLocationStorage();
+  const user = readPersistedUserBrowseScope();
+  if (user) return normalizeSearchScope(user);
+  return DEFAULT_BROWSE_LOCATION_SCOPE;
+}
+
 /** Remove orphan browse/catalog keys when the user never confirmed a location. */
 export function purgeUnconfirmedLocationStorage(): void {
   if (typeof window === "undefined") return;
@@ -292,6 +303,29 @@ export function persistBrowseLocationScope(scope: BrowseLocationScope): void {
   ensureLegacyLocationV2Migrated();
 
   const normIncoming = normalizeSearchScope(scope);
+
+  if (normIncoming.type === "country") {
+    const country = { ...DEFAULT_BROWSE_LOCATION_SCOPE };
+    try {
+      localStorage.setItem(BROWSE_SCOPE_STORAGE_KEY, JSON.stringify(country));
+      localStorage.setItem(BROWSE_SCOPE_USER_SET_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    try {
+      setStoredSearchScope(country);
+      setStoredCitySource("manual");
+    } catch {
+      /* ignore */
+    }
+    try {
+      localStorage.removeItem(LEGACY_LOCATION_V2_KEY);
+      localStorage.removeItem(LEGACY_LOCATION_V2_USER_SET_KEY);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
 
   const writeNorm = (norm: BrowseLocationScope): void => {
     try {

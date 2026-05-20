@@ -86,8 +86,8 @@ export function CompactListingCard({
       </div>;
 
   return (
-    <div className="rounded-2xl border border-black/10 bg-white p-3 shadow-sm sm:p-4">
-      <div className="flex gap-3">
+    <div className="max-w-full min-w-0 overflow-hidden rounded-2xl border border-black/10 bg-white p-3 shadow-sm sm:p-4">
+      <div className="flex min-w-0 max-w-full gap-3">
         {variant === "link" ?
           <Link href={href} className={thumbClass}>
             {thumbnail}

@@ -32,10 +32,13 @@ import {
   looksLikeRuralAutoSettlement,
 } from "../../lib/russiaPlaceLabelHeuristics";
 import { buildSearchVariants, matchesSearchVariantsInText } from "../../lib/utils/keyboardLayout";
+import { isInsideRussiaGeolocationBounds } from "../../lib/geoSettlementDetection";
 import {
-  isInsideRussiaGeolocationBounds,
-  pickBestSettlementAtCoords,
-} from "../../lib/geoSettlementDetection";
+  hasCommittedSettlementInModalValue,
+  modalMainSettlementToScope,
+  resolveModalMainSettlement,
+  type ModalMainSettlement,
+} from "../../lib/resolveModalMainSettlement";
 
 type LatLng = { readonly lat: number; readonly lng: number };
 
@@ -353,9 +356,17 @@ export type LocationModalChangePayload = {
 function suggestionMatchesWholeRussia(raw: string): boolean {
   const q = raw.trim().toLowerCase();
   if (q.length < 2) return false;
+  if (q === "вся россия" || q === "вся россии") return true;
   if (q.includes("росси") || q.includes("росий")) return true;
   if (/^вся\b/.test(q)) return true;
   return q === "вр";
+}
+
+function isWholeRussiaDraftQuery(raw: string): boolean {
+  const q = raw.trim().toLowerCase();
+  if (!q) return false;
+  if (q === "вся россия" || q === "вся россии") return true;
+  return suggestionMatchesWholeRussia(raw);
 }
 
 function buildChangePayload(scope: SearchScopeLocation): LocationModalChangePayload {
@@ -522,10 +533,13 @@ export function LocationModal({
   const [mapRecenterTick, setMapRecenterTick] = useState(0);
   const hasKey = Boolean(getYandexMapsApiKey());
 
-  /** Geolocation suggestion only — never written to `chosenScope` until user confirms. */
-  const [detectedSettlement, setDetectedSettlement] = useState<PickableSettlement | null>(null);
+  /** Selected main населённый пункт (modal draft — global filters update only on confirm). */
+  const [mainSettlement, setMainSettlement] = useState<ModalMainSettlement | null>(null);
+  /** Nearby НП within radius, excluding {@link mainSettlement}. */
+  const [nearbySettlements, setNearbySettlements] = useState<CircleSettlementRow[]>([]);
   /** Browser GPS fix for map (distinct from circle center after pan). */
   const [userLocation, setUserLocation] = useState<MapCenter | null>(null);
+  const defaultSettlementLoadRef = useRef(0);
 
   const valueSig = useMemo(() => JSON.stringify(value ?? null), [value]);
 
@@ -560,6 +574,12 @@ export function LocationModal({
       const c = { lat: norm.lat!, lng: norm.lng! };
 
       setChosenScope(norm);
+      setMainSettlement({
+        name: (norm.label ?? "").trim(),
+        region: (norm.region ?? norm.parentName ?? "").trim(),
+        lat: c.lat,
+        lng: c.lng,
+      });
       setDraftQuery(labelForScopeDraft(norm));
       setOriginalSelectedCenter(c);
       setCurrentCircleCenter(c);
@@ -574,7 +594,8 @@ export function LocationModal({
     if (!open) {
       geoCancelledRef.current = false;
       blockHomeAutoGeoRef.current = false;
-      setDetectedSettlement(null);
+      setMainSettlement(null);
+      setNearbySettlements([]);
       setUserLocation(null);
       setCurrentCircleCenter(null);
       setOriginalSelectedCenter(null);
@@ -593,13 +614,15 @@ export function LocationModal({
 
     setActiveTab(hideMapPreview ? "nearby" : "map");
 
-    if (incomingIsWholeRussia(value)) {
-      setChosenScope(searchScopeWholeRussia());
+    if (!hasCommittedSettlementInModalValue(value)) {
+      setChosenScope(null);
+      setMainSettlement(null);
+      setNearbySettlements([]);
       setDraftQuery("");
       setCurrentCircleCenter(null);
       setOriginalSelectedCenter(null);
-      setSuggestionsDismissed(false);
-      inputRef.current?.focus();
+      setSuggestionsDismissed(true);
+      setAllowSuggestDropdown(false);
       return;
     }
 
@@ -675,46 +698,11 @@ export function LocationModal({
     inputRef.current?.focus();
   }, [open, valueSig, hideMapPreview, applySelectedLocation]);
 
-  /** Single source: Haversine from `currentCircleCenter`, ≤ {@link CIRCLE_RADIUS_KM}, deduped for display. */
-  const [circleItems, setCircleItems] = useState<CircleSettlementRow[]>([]);
   const [circleNearest, setCircleNearest] = useState<NearestCleanSettlement | null>(null);
 
-  useEffect(() => {
-    if (!open || !currentCircleCenter || !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)) {
-      setCircleItems([]);
-      setCircleNearest(null);
-      return;
-    }
-    let cancelled = false;
-    void fetchNearbyApi(currentCircleCenter, CIRCLE_RADIUS_KM, 2000)
-      .then(({ items, nearest }) => {
-        if (cancelled) return;
-        const strict = items.filter((s) => s.distanceKm <= CIRCLE_RADIUS_KM + 1e-9);
-        setCircleItems(dedupeSettlementsForDisplay(strict));
-        setCircleNearest(
-          nearest && isInsideCircle(nearest.lat, nearest.lng, currentCircleCenter, CIRCLE_RADIUS_KM)
-            ? { name: nearest.name, lat: nearest.lat, lng: nearest.lng, region: nearest.region }
-            : null,
-        );
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCircleItems([]);
-        setCircleNearest(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, currentCircleCenter?.lat, currentCircleCenter?.lng]);
-
-  const settlementsInsideCircle = circleItems;
   const nearestFromClean = circleNearest;
 
-  /** Hide the active city row from the «рядом» list so it is not a duplicate of the current selection. */
-  const nearbyListRows = useMemo(
-    () => settlementsInsideCircle.filter((row) => !settlementRowMatchesChosenCity(row, chosenScope)),
-    [settlementsInsideCircle, chosenScope],
-  );
+  const nearbyListRows = nearbySettlements;
 
   const qTrim = draftQuery.trim();
 
@@ -780,74 +768,23 @@ export function LocationModal({
     [applySelectedLocation],
   );
 
-  /** Modal-only: nearest city suggestion for map/hint — does not change global filters until confirm. */
+  /** Default main НП when modal opens without an explicit city in `value` (snapped settlement, not raw GPS). */
   useEffect(() => {
-    if (!open) return;
+    if (!open || hasCommittedSettlementInModalValue(value)) return;
 
-    const incoming = incomingModalFieldsToScope(value);
-    const hasCommittedCity =
-      (incoming.type === "city" || incoming.type === "settlement") &&
-      Boolean((incoming.label ?? "").trim()) &&
-      typeof incoming.lat === "number" &&
-      typeof incoming.lng === "number" &&
-      Number.isFinite(incoming.lat + incoming.lng);
-
-    if (hasCommittedCity && !incomingIsWholeRussia(value)) {
-      setDetectedSettlement(null);
-      return;
-    }
-
+    const loadId = ++defaultSettlementLoadRef.current;
     let cancelled = false;
-    setDetectedSettlement(null);
 
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        if (cancelled || geoCancelledRef.current || blockHomeAutoGeoRef.current) return;
-
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-
-        if (!Number.isFinite(lat + lng) || !isInsideRussiaGeolocationBounds(lat, lng)) {
-          return;
-        }
-
-        const here: MapCenter = { lat, lng };
-        void pickBestSettlementAtCoords(here).then((pick) => {
-          if (cancelled || geoCancelledRef.current || blockHomeAutoGeoRef.current) return;
-          if (!pick) return;
-          const p = pickableFromSnapped(pick);
-          const anchor = { lat: p.lat, lng: p.lng };
-          setDetectedSettlement(p);
-          setUserLocation(here);
-          setCurrentCircleCenter(anchor);
-          viewportMapCenterForApplyRef.current = anchor;
-          setLiveViewportMapCenter(anchor);
-          setMapRecenterTick((n) => n + 1);
-          const reg = (p.region ?? "").trim();
-          const line = reg ? `${p.name}, ${reg}` : p.name;
-          setDraftQuery((prev) => (prev.trim() ? prev : line));
-        });
-      },
-      () => {
-        if (cancelled || geoCancelledRef.current) return;
-      },
-      {
-        enableHighAccuracy: false,
-        timeout: 12_000,
-        maximumAge: 120_000,
-      },
-    );
+    void resolveModalMainSettlement(value).then((main) => {
+      if (cancelled || loadId !== defaultSettlementLoadRef.current) return;
+      if (blockHomeAutoGeoRef.current || !main) return;
+      applySelectedLocation(modalMainSettlementToScope(main), { source: "init" });
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [open, valueSig, value]);
+  }, [open, valueSig, value, applySelectedLocation]);
 
   const suggestions = useMemo(() => {
     const rows: { key: string; line: string; scope: SearchScopeLocation }[] = [];
@@ -954,6 +891,10 @@ export function LocationModal({
    */
   const effectiveCircleCenter: MapCenter | null = useMemo(() => {
     if (!open) return null;
+    const isCountryDraft = chosenScope?.type === "country";
+    if (isCountryDraft) {
+      return RUSSIA_WIDE_CENTER;
+    }
     if (
       currentCircleCenter &&
       Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)
@@ -964,16 +905,6 @@ export function LocationModal({
     const rawParent = rawCoordsFromIncoming(value);
     if (rawParent) return rawParent;
     const incoming = incomingModalFieldsToScope(value);
-    const draftIsWide = chosenScope?.type === "country" || incomingIsWholeRussia(value);
-    if (
-      detectedSettlement &&
-      Number.isFinite(detectedSettlement.lat + detectedSettlement.lng) &&
-      draftIsWide &&
-      !currentCircleCenter
-    ) {
-      return { lat: detectedSettlement.lat, lng: detectedSettlement.lng };
-    }
-    if (draftIsWide) return RUSSIA_WIDE_CENTER;
     const staticA = staticMapAnchorForRegionLikeScope(incoming);
     if (staticA) return staticA;
     return null;
@@ -985,10 +916,64 @@ export function LocationModal({
     currentCircleCenter?.lng,
     selectedCenter?.lat,
     selectedCenter?.lng,
-    detectedSettlement?.lat,
-    detectedSettlement?.lng,
     chosenScope?.type,
+    mainSettlement?.lat,
+    mainSettlement?.lng,
   ]);
+
+  const nearbyListAnchor: MapCenter | null = useMemo(() => {
+    if (
+      currentCircleCenter &&
+      Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng)
+    ) {
+      return currentCircleCenter;
+    }
+    if (mainSettlement && Number.isFinite(mainSettlement.lat + mainSettlement.lng)) {
+      return { lat: mainSettlement.lat, lng: mainSettlement.lng };
+    }
+    return null;
+  }, [
+    currentCircleCenter?.lat,
+    currentCircleCenter?.lng,
+    mainSettlement?.lat,
+    mainSettlement?.lng,
+  ]);
+
+  useEffect(() => {
+    if (!open || !nearbyListAnchor || !Number.isFinite(nearbyListAnchor.lat + nearbyListAnchor.lng)) {
+      setNearbySettlements([]);
+      setCircleNearest(null);
+      return;
+    }
+    let cancelled = false;
+    const mainKey = mainSettlement
+      ? `${mainSettlement.name.toLowerCase()}\0${mainSettlement.region.toLowerCase()}`
+      : "";
+    void fetchNearbyApi(nearbyListAnchor, CIRCLE_RADIUS_KM, 2000)
+      .then(({ items, nearest }) => {
+        if (cancelled) return;
+        const strict = items.filter((s) => s.distanceKm <= CIRCLE_RADIUS_KM + 1e-9);
+        const deduped = dedupeSettlementsForDisplay(strict);
+        const withoutMain = deduped.filter((row) => {
+          const rk = `${row.name.toLowerCase()}\0${(row.region ?? "").toLowerCase()}`;
+          return !mainKey || rk !== mainKey;
+        });
+        setNearbySettlements(withoutMain);
+        setCircleNearest(
+          nearest && isInsideCircle(nearest.lat, nearest.lng, nearbyListAnchor, CIRCLE_RADIUS_KM)
+            ? { name: nearest.name, lat: nearest.lat, lng: nearest.lng, region: nearest.region }
+            : null,
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setNearbySettlements([]);
+        setCircleNearest(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, nearbyListAnchor?.lat, nearbyListAnchor?.lng, mainSettlement?.name, mainSettlement?.region]);
 
   const distanceAnchor: MapCenter | null = useMemo(() => {
     if (!open) return null;
@@ -1007,11 +992,12 @@ export function LocationModal({
   /** Remount map when parent `value` or geo suggestion anchor changes (Russia-wide → detected city). */
   const mapRemountKey = useMemo(
     () =>
-      `${valueSig}:${detectedSettlement?.lat ?? ""}:${detectedSettlement?.lng ?? ""}:${currentCircleCenter?.lat ?? ""}:${currentCircleCenter?.lng ?? ""}`,
+      `${valueSig}:${chosenScope?.type ?? ""}:${mainSettlement?.lat ?? ""}:${mainSettlement?.lng ?? ""}:${currentCircleCenter?.lat ?? ""}:${currentCircleCenter?.lng ?? ""}`,
     [
       valueSig,
-      detectedSettlement?.lat,
-      detectedSettlement?.lng,
+      chosenScope?.type,
+      mainSettlement?.lat,
+      mainSettlement?.lng,
       currentCircleCenter?.lat,
       currentCircleCenter?.lng,
     ],
@@ -1021,8 +1007,7 @@ export function LocationModal({
 
   /** Whole-Russia framing only while the map is actually anchored on {@link RUSSIA_WIDE_CENTER} (viewport matches «Вся Россия» placeholder). Once the user picks a city/NP inside the modal while `value` may still say country until apply, zoom must jump to normal city scale or the circle is invisible at zoom 4. */
   const isRussiaWideMapCenter = useMemo(() => {
-    const draftIsWide = chosenScope?.type === "country" || incomingIsWholeRussia(value);
-    if (detectedSettlement && draftIsWide) return false;
+    if (chosenScope?.type !== "country") return false;
     if (!effectiveCircleCenter || !Number.isFinite(effectiveCircleCenter.lat + effectiveCircleCenter.lng)) {
       return false;
     }
@@ -1030,15 +1015,7 @@ export function LocationModal({
       Math.abs(effectiveCircleCenter.lat - RUSSIA_WIDE_CENTER.lat) < 1 &&
       Math.abs(effectiveCircleCenter.lng - RUSSIA_WIDE_CENTER.lng) < 2
     );
-  }, [
-    effectiveCircleCenter?.lat,
-    effectiveCircleCenter?.lng,
-    detectedSettlement?.lat,
-    detectedSettlement?.lng,
-    chosenScope?.type,
-    valueSig,
-    value,
-  ]);
+  }, [effectiveCircleCenter?.lat, effectiveCircleCenter?.lng, chosenScope?.type]);
 
   const mapZoom = isRussiaWideMapCenter ? RUSSIA_WIDE_ZOOM : 11;
 
@@ -1064,6 +1041,7 @@ export function LocationModal({
    */
   const mapBottomLabel = useMemo(() => {
     if (!open) return "";
+    if (chosenScope?.type === "country" || incomingIsWholeRussia(value)) return "";
     const anchor =
       originalSelectedCenter && Number.isFinite(originalSelectedCenter.lat + originalSelectedCenter.lng) ?
         originalSelectedCenter
@@ -1117,7 +1095,10 @@ export function LocationModal({
     liveViewportMapCenter?.lng,
     nearestFromClean,
     chosenScope,
+    chosenScope?.type,
     selectedLocation?.label,
+    valueSig,
+    value,
   ]);
 
   /** Short NP name for «Вернуться к …» (same sources as {@link mapBottomLabel} headline). */
@@ -1251,7 +1232,7 @@ export function LocationModal({
       }
     }
 
-    for (const row of settlementsInsideCircle) {
+    for (const row of nearbySettlements) {
       if (out.length >= 50) break;
       if (hasChosenCoords && samePoint(row.lat, row.lng, chosenScope.lat!, chosenScope.lng!)) continue;
       out.push({
@@ -1268,7 +1249,7 @@ export function LocationModal({
   }, [
     open,
     chosenScope,
-    settlementsInsideCircle,
+    nearbySettlements,
     currentCircleCenter?.lat,
     currentCircleCenter?.lng,
     hideMapPreview,
@@ -1289,14 +1270,19 @@ export function LocationModal({
   function pickWholeRussia() {
     blockHomeAutoGeoRef.current = true;
     geoCancelledRef.current = true;
-    setDetectedSettlement(null);
+    setMainSettlement(null);
+    setNearbySettlements([]);
     setUserLocation(null);
     const scope = searchScopeWholeRussia();
     setChosenScope(scope);
-    setDraftQuery(labelForScopeDraft(scope));
-    // Whole Russia: no radius circle (only for actual city/area picks)
+    setDraftQuery("");
     setCurrentCircleCenter(null);
     setOriginalSelectedCenter(null);
+    viewportMapCenterForApplyRef.current = RUSSIA_WIDE_CENTER;
+    setLiveViewportMapCenter(RUSSIA_WIDE_CENTER);
+    setMapRecenterTick((n) => n + 1);
+    setSuggestionsDismissed(true);
+    setAllowSuggestDropdown(false);
   }
 
   function applyPick(scope: SearchScopeLocation) {
@@ -1313,6 +1299,8 @@ export function LocationModal({
     }
 
     setChosenScope(scope);
+    setMainSettlement(null);
+    setNearbySettlements([]);
     setDraftQuery(labelForScopeDraft(scope));
     setCurrentCircleCenter(null);
     setOriginalSelectedCenter(null);
@@ -1338,18 +1326,6 @@ export function LocationModal({
     if (!listingFormMode) {
       const inferred = inferScopeFromQuery(draftQuery, apiCityRows);
       if (inferred && inferred.type !== "country") return inferred;
-
-      if (detectedSettlement && Number.isFinite(detectedSettlement.lat + detectedSettlement.lng)) {
-        const reg = (detectedSettlement.region ?? "").trim();
-        return normalizeSearchScope({
-          type: "city",
-          label: detectedSettlement.name.trim(),
-          region: reg || undefined,
-          parentName: reg || undefined,
-          lat: detectedSettlement.lat,
-          lng: detectedSettlement.lng,
-        });
-      }
 
       if (inferred) return inferred;
     }
@@ -1461,7 +1437,7 @@ export function LocationModal({
   if (!open) return null;
 
   const noCircleAnchorYet =
-    !currentCircleCenter || !Number.isFinite(currentCircleCenter.lat + currentCircleCenter.lng);
+    !nearbyListAnchor || !Number.isFinite(nearbyListAnchor.lat + nearbyListAnchor.lng);
 
   const nearbyScrollListPanel = (
     <div className="min-h-[260px] rounded-xl border border-black/[0.08] bg-black/[0.02] p-1.5 sm:min-h-[300px]">
@@ -1543,7 +1519,7 @@ export function LocationModal({
               </button>
             </div>
 
-            {allowSuggestDropdown && qTrim.length >= 2 && !suggestionsDismissed ?
+            {allowSuggestDropdown && qTrim.length >= 2 && !suggestionsDismissed && !isWholeRussiaDraftQuery(qTrim) ?
               suggestions.length > 0 ?
                 <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-xl border border-black/[0.10] bg-white p-1 shadow-lg">
                   {suggestions.slice(0, 8).map((s) => (

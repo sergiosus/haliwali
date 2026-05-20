@@ -403,10 +403,21 @@ export function listingMatchesSearchScope(listing: Listing, scope: SearchScopeLo
       if (lc) return calculateDistanceKm(s.lat!, s.lng!, lc.lat, lc.lng) <= rk;
     }
     const target = normalizeRussiaLocationLookupKey(s.label.trim());
+    if (!target) return false;
     const cityKey = normalizeRussiaLocationLookupKey(listing.city?.trim() ?? "");
-    if (target && cityKey === target) return true;
+    const scopeReg = normalizeComparableRegionKey(
+      canonicalRussiaRegionLabel((s.region || s.parentName || "").trim()),
+    );
+    const listingRegKey = normalizeComparableRegionKey(canonicalRussiaRegionLabel(listingReg));
+    if (cityKey === target) {
+      if (!scopeReg || !listingRegKey) return true;
+      return listingRegKey.includes(scopeReg) || scopeReg.includes(listingRegKey);
+    }
     const dn = listing.location?.displayName?.trim();
-    if (target && dn && normalizeRussiaLocationLookupKey(dn).includes(target)) return true;
+    if (dn && normalizeRussiaLocationLookupKey(dn) === target) {
+      if (!scopeReg || !listingRegKey) return true;
+      return listingRegKey.includes(scopeReg) || scopeReg.includes(listingRegKey);
+    }
     return false;
   }
 

@@ -80,6 +80,8 @@ export function GlobalHeaderSearch({
   const [activeIdx, setActiveIdx] = useState(-1);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const debounceRef = useRef<number | null>(null);
+  const suggestAbortRef = useRef<AbortController | null>(null);
+  const suggestSeqRef = useRef(0);
 
   useEffect(() => {
     if (isHome || isSearchPage) {
@@ -105,6 +107,22 @@ export function GlobalHeaderSearch({
     [isHome, router, sp],
   );
 
+  const replaceSearchPageQ = useCallback(
+    (raw: string) => {
+      if (!isSearchPage) return;
+      const next = new URLSearchParams();
+      for (const [k, v] of sp.entries()) {
+        if (k === "q") continue;
+        next.set(k, v);
+      }
+      const t = raw.trim();
+      if (t) next.set("q", t);
+      const qs = next.toString();
+      router.replace(qs ? `/search?${qs}` : "/search");
+    },
+    [isSearchPage, router, sp],
+  );
+
   const goSearch = useCallback(
     (raw: string) => {
       const t = raw.trim();
@@ -122,29 +140,43 @@ export function GlobalHeaderSearch({
     async (raw: string) => {
       const t = raw.trim();
       if (t.length < 2) {
+        suggestAbortRef.current?.abort();
+        suggestAbortRef.current = null;
         setSuggestions([]);
         setSuggestLoading(false);
         return;
       }
 
+      const seq = ++suggestSeqRef.current;
+      suggestAbortRef.current?.abort();
+      const ac = new AbortController();
+      suggestAbortRef.current = ac;
+
       const local = buildLocalSearchSuggestions(t, 8);
-      setSuggestions(local);
+      if (seq === suggestSeqRef.current) setSuggestions(local);
       setSuggestLoading(true);
 
       try {
         const p = new URLSearchParams({ q: t });
         const scopeP = globalSearchScopeToQueryParams(searchScope);
         for (const [k, v] of scopeP.entries()) p.set(k, v);
-        const r = await fetch(`/api/search/suggest?${p.toString()}`, { cache: "no-store" });
+        const r = await fetch(`/api/search/suggest?${p.toString()}`, {
+          cache: "no-store",
+          signal: ac.signal,
+        });
+        if (seq !== suggestSeqRef.current || ac.signal.aborted) return;
         const d = (await r.json()) as { ok?: boolean; suggestions?: GlobalSearchSuggestItem[] };
+        if (seq !== suggestSeqRef.current || ac.signal.aborted) return;
         const remote = r.ok && d.ok && Array.isArray(d.suggestions) ? d.suggestions : [];
         const merged = mergeSuggestions(local, remote, 8);
         setSuggestions(merged);
         searchDebugLog("suggest-header", { raw: t, local: local.length, remote: remote.length, merged: merged.length });
-      } catch {
+      } catch (e) {
+        if (seq !== suggestSeqRef.current || ac.signal.aborted) return;
+        if (e instanceof DOMException && e.name === "AbortError") return;
         setSuggestions(local);
       } finally {
-        setSuggestLoading(false);
+        if (seq === suggestSeqRef.current) setSuggestLoading(false);
       }
     },
     [searchScope],
@@ -153,7 +185,12 @@ export function GlobalHeaderSearch({
   function onInputChange(value: string) {
     setQ(value);
     setActiveIdx(-1);
+    setSuggestions([]);
+    suggestAbortRef.current?.abort();
+    suggestAbortRef.current = null;
+    suggestSeqRef.current += 1;
     if (isHome) replaceHomeQ(value);
+    if (isSearchPage) replaceSearchPageQ(value);
     if (value.trim().length >= 2) {
       setSuggestOpen(true);
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
@@ -204,6 +241,7 @@ export function GlobalHeaderSearch({
   useEffect(() => {
     return () => {
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
+      suggestAbortRef.current?.abort();
     };
   }, []);
 

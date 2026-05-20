@@ -36,6 +36,7 @@ import {
   normalizeGlobalSearchQuery,
   scoreListingSearch,
   searchDebugLog,
+  scopeLocationDebugLog,
 } from "./lib/search";
 import {
   categoryToSlug,
@@ -63,9 +64,8 @@ import { LocationModal, type LocationModalValue } from "./components/modals/Loca
 import { resolveRussiaCityRegionDisplay } from "./lib/locationDisplay";
 import {
   DEFAULT_BROWSE_LOCATION_SCOPE,
-  persistBrowseLocationScope,
   persistHomepageColumnBrowseScopes,
-  readPersistedHomepageColumnBrowseScopes,
+  purgeUnconfirmedLocationStorage,
   type BrowseLocationScope,
 } from "./lib/browseLocationScope";
 import { browseLocationModalValue, incomingModalFieldsToScope } from "./lib/locationModalSearchScope";
@@ -75,7 +75,6 @@ import {
   modalCurrentSelectionPartsFromScope,
   normalizeSearchScope,
 } from "./lib/searchScopeLocation";
-import { useSearchScope } from "./lib/useStoredCity";
 import {
   LOCATION_MESSAGES,
   type SelectedLocation,
@@ -134,6 +133,15 @@ function homeListingColumnHeading(l: Listing): HomeGridColumnHeading {
   return "Товары";
 }
 
+type HomeColumnNonCountryPick = {
+  scope: BrowseLocationScope;
+  column: HomeGridColumnHeading;
+};
+
+function isNonCountryBrowseScope(scope: BrowseLocationScope): boolean {
+  return normalizeSearchScope(scope).type !== "country";
+}
+
 /** Toolbar line from current session browse `SearchScopeLocation` (country, multi-part labels, optional ± km for point radius). */
 function homepageToolbarBrowseStatusLine(scope: BrowseLocationScope): string {
   const s = normalizeSearchScope(scope);
@@ -168,21 +176,32 @@ function HaliwaliLanding() {
   const [homeBrowseScopeProducts, setHomeBrowseScopeProducts] =
     useState<BrowseLocationScope>(DEFAULT_BROWSE_LOCATION_SCOPE);
 
-  useEffect(() => {
-    const scopes = readPersistedHomepageColumnBrowseScopes();
-    if (!scopes) return;
-    setHomeBrowseScopeTasks(normalizeSearchScope(scopes.tasks));
-    setHomeBrowseScopeServices(normalizeSearchScope(scopes.services));
-    setHomeBrowseScopeProducts(normalizeSearchScope(scopes.products));
-  }, []);
-
   const [locationSyncTasks, setLocationSyncTasks] = useState(false);
   const [locationSyncServices, setLocationSyncServices] = useState(false);
   const [locationSyncProducts, setLocationSyncProducts] = useState(false);
 
+  /** Last explicit non-country pick in the location modal (per-column; not a sync link). */
+  const lastNonCountryColumnPickRef = useRef<HomeColumnNonCountryPick | null>(null);
+
+  /** Fresh homepage visit / refresh: country scope, «Для всех» off — never restore from storage. */
+  useEffect(() => {
+    purgeUnconfirmedLocationStorage();
+    lastNonCountryColumnPickRef.current = null;
+    setHomeBrowseScopeTasks(DEFAULT_BROWSE_LOCATION_SCOPE);
+    setHomeBrowseScopeServices(DEFAULT_BROWSE_LOCATION_SCOPE);
+    setHomeBrowseScopeProducts(DEFAULT_BROWSE_LOCATION_SCOPE);
+    setLocationSyncTasks(false);
+    setLocationSyncServices(false);
+    setLocationSyncProducts(false);
+    scopeLocationDebugLog("homepage-init", {
+      scopeType: "country",
+      scopeLabel: DEFAULT_BROWSE_LOCATION_SCOPE.label,
+      scopeRegion: null,
+    });
+  }, []);
+
   const searchParams = useSearchParams();
   const directorySearch = searchParams.get("q") ?? "";
-  const headerSearchScope = useSearchScope();
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [locationModalInitialScope, setLocationModalInitialScope] = useState<BrowseLocationScope | null>(null);
   const [activeLocationColumn, setActiveLocationColumn] = useState<HomeGridColumnHeading | null>(null);
@@ -191,6 +210,26 @@ function HaliwaliLanding() {
     if (column === "Задачи") return homeBrowseScopeTasks;
     if (column === "Услуги") return homeBrowseScopeServices;
     return homeBrowseScopeProducts;
+  }, [homeBrowseScopeTasks, homeBrowseScopeServices, homeBrowseScopeProducts]);
+
+  /** Homepage realtime search: explicit per-column scopes only; mixed/implicit → country. */
+  const homepageSearchScope = useMemo((): BrowseLocationScope => {
+    const scopes = [
+      normalizeSearchScope(homeBrowseScopeTasks),
+      normalizeSearchScope(homeBrowseScopeServices),
+      normalizeSearchScope(homeBrowseScopeProducts),
+    ];
+    const [first, ...rest] = scopes;
+    const same =
+      first != null &&
+      rest.every(
+        (s) =>
+          s.type === first.type &&
+          s.label === first.label &&
+          (s.region ?? "") === (first.region ?? "") &&
+          (s.radiusKm ?? 0) === (first.radiusKm ?? 0),
+      );
+    return same ? first : DEFAULT_BROWSE_LOCATION_SCOPE;
   }, [homeBrowseScopeTasks, homeBrowseScopeServices, homeBrowseScopeProducts]);
 
   /** Snapshot at open time — full modal fields (same shape as listing LocationModal). */
@@ -208,6 +247,89 @@ function HaliwaliLanding() {
       setLocationModalOpen(true);
     },
     [browseScopeForColumn],
+  );
+
+  const persistCurrentHomeColumnScopes = useCallback(
+    (tasks: BrowseLocationScope, services: BrowseLocationScope, products: BrowseLocationScope) => {
+      persistHomepageColumnBrowseScopes({
+        tasks: normalizeSearchScope(tasks),
+        services: normalizeSearchScope(services),
+        products: normalizeSearchScope(products),
+      });
+    },
+    [],
+  );
+
+  const pickNonCountryScopeFromOtherColumns = useCallback(
+    (targetColumn: HomeGridColumnHeading): BrowseLocationScope | null => {
+      const pick = lastNonCountryColumnPickRef.current;
+      if (pick && pick.column !== targetColumn && isNonCountryBrowseScope(pick.scope)) {
+        return normalizeSearchScope(pick.scope);
+      }
+      const others: { column: HomeGridColumnHeading; scope: BrowseLocationScope }[] = [
+        { column: "Задачи", scope: homeBrowseScopeTasks },
+        { column: "Услуги", scope: homeBrowseScopeServices },
+        { column: "Товары", scope: homeBrowseScopeProducts },
+      ];
+      for (const { column, scope } of others) {
+        if (column === targetColumn) continue;
+        const norm = normalizeSearchScope(scope);
+        if (isNonCountryBrowseScope(norm)) return norm;
+      }
+      return null;
+    },
+    [homeBrowseScopeTasks, homeBrowseScopeServices, homeBrowseScopeProducts],
+  );
+
+  const handleLocationSyncToAllChange = useCallback(
+    (column: HomeGridColumnHeading, checked: boolean) => {
+      const setSync =
+        column === "Задачи" ? setLocationSyncTasks
+        : column === "Услуги" ? setLocationSyncServices
+        : setLocationSyncProducts;
+
+      if (!checked) {
+        setSync(false);
+        const nextTasks = column === "Задачи" ? DEFAULT_BROWSE_LOCATION_SCOPE : homeBrowseScopeTasks;
+        const nextServices = column === "Услуги" ? DEFAULT_BROWSE_LOCATION_SCOPE : homeBrowseScopeServices;
+        const nextProducts = column === "Товары" ? DEFAULT_BROWSE_LOCATION_SCOPE : homeBrowseScopeProducts;
+        if (column === "Задачи") setHomeBrowseScopeTasks(DEFAULT_BROWSE_LOCATION_SCOPE);
+        else if (column === "Услуги") setHomeBrowseScopeServices(DEFAULT_BROWSE_LOCATION_SCOPE);
+        else setHomeBrowseScopeProducts(DEFAULT_BROWSE_LOCATION_SCOPE);
+        persistCurrentHomeColumnScopes(nextTasks, nextServices, nextProducts);
+        scopeLocationDebugLog("homepage-sync-uncheck", { column });
+        return;
+      }
+
+      const source = pickNonCountryScopeFromOtherColumns(column);
+      if (!source) {
+        setSync(false);
+        scopeLocationDebugLog("homepage-sync-check-no-source", { column });
+        return;
+      }
+
+      const copied = normalizeSearchScope(source);
+      setSync(true);
+      const nextTasks = column === "Задачи" ? copied : homeBrowseScopeTasks;
+      const nextServices = column === "Услуги" ? copied : homeBrowseScopeServices;
+      const nextProducts = column === "Товары" ? copied : homeBrowseScopeProducts;
+      if (column === "Задачи") setHomeBrowseScopeTasks(copied);
+      else if (column === "Услуги") setHomeBrowseScopeServices(copied);
+      else setHomeBrowseScopeProducts(copied);
+      persistCurrentHomeColumnScopes(nextTasks, nextServices, nextProducts);
+      scopeLocationDebugLog("homepage-sync-check-copy", {
+        column,
+        fromLabel: copied.label,
+        fromType: copied.type,
+      });
+    },
+    [
+      homeBrowseScopeTasks,
+      homeBrowseScopeServices,
+      homeBrowseScopeProducts,
+      pickNonCountryScopeFromOtherColumns,
+      persistCurrentHomeColumnScopes,
+    ],
   );
 
   const { addListing, loaded, listings } = useListingsStore();
@@ -239,6 +361,13 @@ function HaliwaliLanding() {
     for (const section of homeCategoryGridFiltered) {
       if (!isHomeGridColumnHeading(section.heading)) continue;
       const scope = normalizeSearchScope(browseScopeForColumn(section.heading));
+      scopeLocationDebugLog("category-counter-scope", {
+        column: section.heading,
+        scopeType: scope.type,
+        scopeLabel: scope.label,
+        scopeRegion: scope.region ?? null,
+        scopeCity: scope.type === "city" || scope.type === "settlement" ? scope.label : null,
+      });
       const { counts: c } = computeHomeCategoryCounts(uniqueListings, {
         listingLocationFilter: (l) => listingMatchesSearchScope(l, scope),
       });
@@ -251,7 +380,12 @@ function HaliwaliLanding() {
   const publishedSearchResults = useMemo(() => {
     if (!hasActiveSearchQuery(directorySearch)) return EMPTY_SEARCH_RESULTS;
     if (!loaded) return [];
-    const scope = normalizeSearchScope(headerSearchScope);
+    const scope = homepageSearchScope;
+    scopeLocationDebugLog("listing-filter-scope", {
+      scopeType: scope.type,
+      scopeLabel: scope.label,
+      scopeRegion: scope.region ?? null,
+    });
     return uniqueListings
       .filter((l) => isListingPubliclyListed(l))
       .filter((l) => listingMatchesSearchScope(l, scope))
@@ -265,7 +399,7 @@ function HaliwaliLanding() {
         return b.createdAt - a.createdAt;
       })
       .slice(0, 30);
-  }, [directorySearch, uniqueListings, loaded, headerSearchScope]);
+  }, [directorySearch, uniqueListings, loaded, homepageSearchScope]);
 
   const homeSearchHasCategoryHits = useMemo(() => {
     if (!hasActiveSearchQuery(directorySearch)) return false;
@@ -548,30 +682,41 @@ function HaliwaliLanding() {
 
       <main className="mx-auto w-full min-w-0 max-w-full max-w-[1200px] px-4 pb-16 pt-2 sm:px-6 sm:pt-3">
           {hasActiveSearchQuery(directorySearch) ? (
-            <section className="mb-4">
-              <div className="rounded-3xl border border-black/10 bg-white p-5">
+            <section className="mb-4 w-full min-w-0 max-w-full overflow-x-hidden box-border">
+              <div
+                className={`box-border w-full min-w-0 rounded-3xl border border-black/10 bg-white p-4 sm:p-5 ${
+                  publishedSearchResults.length <= 1 ? "max-w-xl"
+                  : publishedSearchResults.length === 2 ? "max-w-3xl"
+                  : "max-w-full"
+                }`}
+              >
                 <div className="text-sm text-black/60">Результаты поиска</div>
-                <div className="mt-3 grid gap-4 md:grid-cols-2">
+                <div
+                  className={`mt-3 grid w-full min-w-0 max-w-full gap-4 box-border ${
+                    publishedSearchResults.length > 1 ? "md:grid-cols-2" : "grid-cols-1"
+                  }`}
+                >
                   {loaded ? (
                     publishedSearchResults.length > 0 ? (
                       publishedSearchResults.map((l) => {
                         const oid = (l.ownerId ?? "").trim();
                         return (
-                          <CompactListingCard
-                            key={l.id}
-                            listing={l}
-                            href={appendReturnUrlQuery(listingPath(l.id, l.title), "/")}
-                            viewCount={viewCounts[l.id] ?? 0}
-                            publicAuthor={oid ? publicByUserId[oid] : null}
-                          />
+                          <div key={l.id} className="min-w-0 w-full max-w-full">
+                            <CompactListingCard
+                              listing={l}
+                              href={appendReturnUrlQuery(listingPath(l.id, l.title), "/")}
+                              viewCount={viewCounts[l.id] ?? 0}
+                              publicAuthor={oid ? publicByUserId[oid] : null}
+                            />
+                          </div>
                         );
                       })
                     ) : homeSearchHasCategoryHits ?
-                      <p className="text-sm text-black/55 md:col-span-2">
+                      <p className="min-w-0 text-sm text-black/55">
                         Совпадения в категориях ниже — откройте раздел или уточните запрос.
                       </p>
                     : (
-                      <div className="rounded-3xl border border-dashed border-black/15 bg-white p-6 md:col-span-2">
+                      <div className="min-w-0 rounded-3xl border border-dashed border-black/15 bg-white p-6">
                         <p className="text-sm text-black/70">Ничего не найдено</p>
                         <p className="mt-2 text-sm text-black/55">
                           Попробуйте изменить запрос или выбрать Вся Россия
@@ -603,10 +748,6 @@ function HaliwaliLanding() {
                 col === "Задачи" ? locationSyncTasks
                 : col === "Услуги" ? locationSyncServices
                 : locationSyncProducts;
-              const setLocationSyncToAll =
-                col === "Задачи" ? setLocationSyncTasks
-                : col === "Услуги" ? setLocationSyncServices
-                : setLocationSyncProducts;
               return (
                 <HomeCategorySectionCard
                   key={section.heading}
@@ -617,7 +758,7 @@ function HaliwaliLanding() {
                   browseLocationLabel={homepageToolbarBrowseStatusLine(browseScopeForColumn(col))}
                   onBrowseLocationClick={() => openHomeLocationModal(col)}
                   locationSyncToAll={locationSyncToAll}
-                  onLocationSyncToAllChange={setLocationSyncToAll}
+                  onLocationSyncToAllChange={(checked) => handleLocationSyncToAllChange(col, checked)}
                 />
               );
             })}
@@ -677,26 +818,23 @@ function HaliwaliLanding() {
           onChange={(next) => {
             const newScope = normalizeSearchScope(incomingModalFieldsToScope(next));
             const col = activeLocationColumn ?? "Задачи";
-            const applyToAll =
-              col === "Задачи" ? locationSyncTasks
-              : col === "Услуги" ? locationSyncServices
-              : locationSyncProducts;
-            const nextTasks =
-              applyToAll || col === "Задачи" ? newScope : homeBrowseScopeTasks;
-            const nextServices =
-              applyToAll || col === "Услуги" ? newScope : homeBrowseScopeServices;
-            const nextProducts =
-              applyToAll || col === "Товары" ? newScope : homeBrowseScopeProducts;
-            setHomeBrowseScopeTasks(nextTasks);
-            setHomeBrowseScopeServices(nextServices);
-            setHomeBrowseScopeProducts(nextProducts);
-            persistHomepageColumnBrowseScopes({
-              tasks: nextTasks,
-              services: nextServices,
-              products: nextProducts,
+            if (isNonCountryBrowseScope(newScope)) {
+              lastNonCountryColumnPickRef.current = { scope: newScope, column: col };
+            }
+            scopeLocationDebugLog("homepage-confirm", {
+              scopeType: newScope.type,
+              scopeLabel: newScope.label,
+              scopeRegion: newScope.region ?? null,
+              column: col,
             });
+            const nextTasks = col === "Задачи" ? newScope : homeBrowseScopeTasks;
+            const nextServices = col === "Услуги" ? newScope : homeBrowseScopeServices;
+            const nextProducts = col === "Товары" ? newScope : homeBrowseScopeProducts;
+            if (col === "Задачи") setHomeBrowseScopeTasks(newScope);
+            else if (col === "Услуги") setHomeBrowseScopeServices(newScope);
+            else setHomeBrowseScopeProducts(newScope);
+            persistCurrentHomeColumnScopes(nextTasks, nextServices, nextProducts);
             setLocationModalInitialScope(newScope);
-            persistBrowseLocationScope(newScope);
             setLocationModalOpen(false);
             setActiveLocationColumn(null);
           }}
@@ -773,7 +911,7 @@ function HomeCategorySectionCard({
               checked={locationSyncToAll}
               onChange={(e) => onLocationSyncToAllChange(e.target.checked)}
               className="h-3.5 w-3.5 shrink-0 rounded border-black/17 text-zinc-700 accent-zinc-600 focus:ring-1 focus:ring-black/12"
-              aria-label="Применять выбранное место ко всем колонкам при сохранении"
+              aria-label="Скопировать место из другой колонки в эту"
             />
             <span>Для всех</span>
           </label>

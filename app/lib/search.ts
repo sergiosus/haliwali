@@ -18,6 +18,7 @@ export {
   normalizeGlobalSearchQuery,
   scoreListingSearch,
   searchDebugLog,
+  scopeLocationDebugLog,
 } from "./searchMatch";
 
 /** @deprecated Use {@link buildListingSearchHaystack}. */

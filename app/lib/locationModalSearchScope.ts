@@ -25,6 +25,9 @@ export type IncomingLocationModalFields = {
 export function incomingModalFieldsToScope(v: IncomingLocationModalFields | null | undefined): SearchScopeLocation {
   if (v?.scope) {
     const base = normalizeSearchScope(v.scope);
+    if (base.type === "country") {
+      return searchScopeWholeRussia();
+    }
     const la = typeof v.lat === "number" && Number.isFinite(v.lat) ? v.lat : undefined;
     const lo = typeof v.lng === "number" && Number.isFinite(v.lng) ? v.lng : undefined;
     if (

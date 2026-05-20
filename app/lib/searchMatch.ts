@@ -18,6 +18,13 @@ export function searchDebugLog(label: string, data: Record<string, unknown>): vo
   console.debug(`[haliwali-search] ${label}`, data);
 }
 
+/** Dev-only location scope diagnostics (never logs in production). */
+export function scopeLocationDebugLog(label: string, data: Record<string, unknown>): void {
+  if (process.env.NODE_ENV !== "development") return;
+  if (typeof console === "undefined" || typeof console.debug !== "function") return;
+  console.debug(`[haliwali-location-scope] ${label}`, data);
+}
+
 export function haystackMatchesVariants(haystackLower: string, variants: readonly string[]): boolean {
   if (variants.length === 0) return true;
   const hay = collapseSearchSpaces(haystackLower);

@@ -17,10 +17,22 @@ export async function GET(req: Request) {
   const q = (url.searchParams.get("q") ?? "").trim();
   const scope = parseGlobalSearchScopeFromUrl(url);
 
+  if (q.length < 3) {
+    const normalized = normalizeGlobalSearchQuery(q);
+    const res = NextResponse.json({
+      ok: true,
+      query: q,
+      normalized: globalSearchNormalizedPayload(normalized),
+      suggestions: [],
+    });
+    res.headers.set("Cache-Control", "no-store, max-age=0");
+    return res;
+  }
+
   try {
     const { normalized, suggestions } = await globalSearchSuggest({ query: q, scope });
 
-    const listingOnly = suggestions.filter((s) => s.kind === "listing").slice(0, 5);
+    const listingOnly = suggestions.filter((s) => s.kind === "listing").slice(0, 6);
 
     const res = NextResponse.json({
       ok: true,

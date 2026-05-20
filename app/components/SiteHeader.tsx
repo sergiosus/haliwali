@@ -69,6 +69,8 @@ export function SiteHeader() {
   const pathname = usePathname();
   /** Полноэкранный вход в админку — без меню обычного пользователя и без «Привет, …». */
   const suppressUserChromeForAdmin = pathname === "/admin";
+  /** Homepage primary search lives in the hero — keep header compact. */
+  const hideHeaderSearch = pathname === "/";
 
   const auth = useAuth();
   const [userLabel, setUserLabel] = useState<string>("");
@@ -576,15 +578,17 @@ export function SiteHeader() {
             <div className="min-w-0 shrink">{authBlock}</div>
           </div>
           {suppressUserChromeForAdmin ? null : <div className="w-full min-w-0 max-w-full">{postCta}</div>}
-                    <GlobalHeaderSearch iconLeftClassName="left-3.5" />
-</div>
+          {hideHeaderSearch ? null : <GlobalHeaderSearch iconLeftClassName="left-3.5" />}
+        </div>
 
         <div className="hidden min-w-0 items-center justify-between gap-6 md:flex">
           <Link href="/" className="inline-flex shrink-0 items-center leading-none">
             <HeaderHaliwaliLogo />
           </Link>
-                    <GlobalHeaderSearch className="min-w-0 max-w-[500px] flex-1 px-2" />
-<div className="flex shrink-0 items-center gap-8">
+          {hideHeaderSearch ? null : (
+            <GlobalHeaderSearch className="min-w-0 max-w-[500px] flex-1 px-2" />
+          )}
+          <div className="flex shrink-0 items-center gap-8">
             {suppressUserChromeForAdmin ? null : postCta}
             {authBlock}
           </div>

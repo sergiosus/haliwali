@@ -19,6 +19,8 @@ import { ConsentCheckbox } from "../../components/ConsentCheckbox";
 import { OkModal } from "../../components/OkModal";
 import { getCurrentUserId, refreshAuthFromServer } from "../../lib/auth";
 import { AuthContinueModal } from "../../components/AuthContinueModal";
+import { TransferListingBlock } from "../../components/TransferListingBlock";
+import type { ListingTransferDraftPrefill } from "../../lib/listingTransferDraft";
 import { isValidPhone, PHONE_VALIDATION_MESSAGE } from "../../lib/identity";
 import { resolveRussiaCityRegionDisplay } from "../../lib/locationDisplay";
 import {
@@ -42,6 +44,7 @@ export default function PostProductPage() {
   const titleRef = useRef<HTMLInputElement | null>(null);
   const { addListing, findByEditToken } = useListingsStore();
   const [formKey, setFormKey] = useState(0);
+  const [transferPrefill, setTransferPrefill] = useState<ListingTransferDraftPrefill | null>(null);
   const [okOpen, setOkOpen] = useState(false);
   const [createdListingId, setCreatedListingId] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -155,9 +158,29 @@ export default function PostProductPage() {
               <div className="text-lg font-medium md:text-xl">Разместить товар</div>
               <div className="mt-1 text-sm text-black/60">Заполните объявление — оно попадёт на проверку.</div>
 
-              <div className="mt-4">
+              <div className="mt-5">
+                <TransferListingBlock
+                  onDraftReady={(draft) => {
+                    setTransferPrefill(draft);
+                    setFormKey((k) => k + 1);
+                  }}
+                  onNeedAuth={(resume) => {
+                    pendingSubmitRef.current = resume;
+                    setAuthOpen(true);
+                  }}
+                />
+              </div>
+
+              <div className="my-6 flex items-center gap-3">
+                <div className="h-px flex-1 bg-black/10" />
+                <span className="shrink-0 text-xs font-medium text-black/45">Или заполните вручную</span>
+                <div className="h-px flex-1 bg-black/10" />
+              </div>
+
+              <div>
                 <ProductPostForm
                   key={formKey}
+                  prefill={transferPrefill}
                   titleRef={titleRef}
                   onSubmit={addProduct}
                   disabled={false}
@@ -201,11 +224,13 @@ export default function PostProductPage() {
 
 function ProductPostForm({
   titleRef,
+  prefill,
   onSubmit,
   onNeedAuth,
   disabled,
 }: {
   titleRef: React.RefObject<HTMLInputElement | null>;
+  prefill?: ListingTransferDraftPrefill | null;
   onSubmit: (form: {
     kind: ProductKind;
     title: string;
@@ -223,10 +248,15 @@ function ProductPostForm({
   disabled?: boolean;
 }) {
   const [kind, setKind] = useState<ProductKind>("Продам");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [title, setTitle] = useState(prefill?.title ?? "");
+  const [description, setDescription] = useState(prefill?.description ?? "");
   const [categoryName, setCategoryName] = useState<(typeof productCategories)[number]>(productCategories[0]);
-  const [price, setPrice] = useState<string>("");
+  const [price, setPrice] = useState(
+    prefill?.price != null && Number.isFinite(prefill.price) && prefill.price > 0 ?
+      String(Math.round(prefill.price))
+    : "",
+  );
+  const showPhotoHint = Boolean(prefill?.showPhotoHint);
   const [locationDraft, setLocationDraft] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
   const [locationMsg, setLocationMsg] = useState<string | null>(null);
@@ -468,6 +498,11 @@ function ProductPostForm({
         </div>
       </div>
 
+      {showPhotoHint ?
+        <p className="rounded-xl border border-dashed border-orange-200/80 bg-orange-50/40 px-3 py-2 text-sm text-black/65">
+          Добавьте фото вручную
+        </p>
+      : null}
       <Field label="Фото (до 10)" labelAsGroup>
         <FilePhotoPicker
           files={files}

@@ -14,6 +14,8 @@ export type GlobalSearchResultItem = {
   imageUrl: string | null;
   href: string;
   score: number;
+  /** Server-only tie-break for autocomplete / equal score ordering. */
+  listingCreatedAtMs?: number;
 };
 
 export type GlobalSearchSuggestItem = {
@@ -22,6 +24,12 @@ export type GlobalSearchSuggestItem = {
   query: string;
   /** Set for listing rows returned by `/api/search/suggest` (header). */
   listingType?: "task" | "service" | "product";
+  /** Present for listing suggestions — navigate to listing detail on pick. */
+  listingId?: string;
+  href?: string;
+  city?: string;
+  /** Short category/spec line for dropdown (no long description). */
+  categoryLabel?: string;
 };
 
 export type GlobalSearchScopeParams = {

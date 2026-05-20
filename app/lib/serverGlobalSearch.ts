@@ -54,6 +54,7 @@ export function listingToGlobalSearchResult(listing: Listing, score: number): Gl
     imageUrl,
     href: listingPath(listing.id, listing.title ?? ""),
     score,
+    listingCreatedAtMs: listing.createdAt,
   };
 }
 
@@ -303,13 +304,16 @@ export async function globalSearchListings(opts: {
 
 export { globalSearchNormalizedPayload };
 
+const HEADER_SUGGEST_MIN_CHARS = 3;
+const HEADER_SUGGEST_LISTING_CAP = 6;
+
 export async function globalSearchSuggest(opts: {
   query: string;
   scope: SearchScopeLocation;
 }): Promise<{ normalized: GlobalSearchNormalizedQuery; suggestions: GlobalSearchSuggestItem[] }> {
   const normalized = normalizeGlobalSearchQuery(opts.query);
-  const q = normalized.original;
-  if (q.length < 2) {
+  const q = normalized.original.trim();
+  if (q.length < HEADER_SUGGEST_MIN_CHARS) {
     return { normalized, suggestions: [] };
   }
 
@@ -317,7 +321,9 @@ export async function globalSearchSuggest(opts: {
   const seen = new Set<string>();
 
   function push(item: GlobalSearchSuggestItem) {
-    const key = `${item.kind}:${item.label.toLowerCase()}`;
+    const key =
+      item.listingId ? `id:${item.listingId}`
+      : `${item.kind}:${item.label.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
     suggestions.push(item);
@@ -327,22 +333,37 @@ export async function globalSearchSuggest(opts: {
     const { results } = await globalSearchListings({
       query: q,
       type: "all",
-      limit: 5,
+      /** Pull a wider pool; ranking + cap happen below. */
+      limit: 48,
       scope: opts.scope,
       logAnalytics: false,
     });
-    for (const r of results) {
-      if (suggestions.length >= 5) break;
+
+    const ranked = results.slice().sort((a, b) => {
+      const d = b.score - a.score;
+      if (d !== 0) return d;
+      return (b.listingCreatedAtMs ?? 0) - (a.listingCreatedAtMs ?? 0);
+    });
+
+    for (const r of ranked) {
+      if (suggestions.length >= HEADER_SUGGEST_LISTING_CAP) break;
+      const cat = (r.category ?? "").trim();
+      const sub = (r.subcategory ?? "").trim();
+      const categoryLabel = cat && sub && sub !== cat ? `${cat} · ${sub}` : cat || sub || "";
       push({
         kind: "listing",
         label: r.title,
         query: r.title,
         listingType: r.type,
+        listingId: r.id,
+        href: r.href,
+        city: r.city.trim() || "",
+        categoryLabel,
       });
     }
   } catch (e) {
     warnSearchSuggestError("suggestListings", e);
   }
 
-  return { normalized, suggestions: suggestions.slice(0, 5) };
+  return { normalized, suggestions: suggestions.slice(0, HEADER_SUGGEST_LISTING_CAP) };
 }

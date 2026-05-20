@@ -111,7 +111,7 @@ export function hasActiveSearchQuery(rawQuery: string): boolean {
 /** Instant client suggestions (same normalization as API). */
 export function buildLocalSearchSuggestions(rawQuery: string, max = 8): GlobalSearchSuggestItem[] {
   const q = normalizeGlobalSearchQuery(rawQuery).original;
-  if (q.length < 2) return [];
+  if (q.length < 3) return [];
 
   const out: GlobalSearchSuggestItem[] = [];
   const seen = new Set<string>();

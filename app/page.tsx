@@ -90,6 +90,7 @@ type HomeListingPublishExtras = {
 import { resolveRussiaCityFromName } from "./lib/resolveRussiaCityFromStatic";
 import { getCurrentUserId, refreshAuthFromServer } from "./lib/auth";
 import { AuthContinueModal } from "./components/AuthContinueModal";
+import { GlobalHeaderSearch } from "./components/GlobalHeaderSearch";
 export default function Home() {
   return (
     <Suspense
@@ -670,20 +671,22 @@ function HaliwaliLanding() {
 
   return (
     <div className="min-h-full min-w-0 max-w-full bg-black/[0.03] text-black">
-      <header className="min-w-0 max-w-full w-full px-3 pb-4 pt-3 sm:px-6 sm:pb-5 sm:pt-4">
-        <div className="flex min-w-0 max-w-full w-full flex-col">
-          <div className="mt-2 flex w-full justify-center pt-2 sm:mt-4 sm:pt-2">
-            <div className="w-full min-w-0 max-w-full px-1 text-center sm:max-w-[1200px] sm:px-4">
-              <p className="text-lg font-semibold leading-tight break-words text-gray-800 md:text-xl">
-                Размещайте задачи, продавайте товары и находите клиентов по всей России без посредников
-              </p>
-              <p className="mx-auto mt-4 max-w-[46rem] text-sm leading-snug text-gray-500">
-                Выберите категорию, чтобы посмотреть объявления или создать своё
-              </p>
-            </div>
+      <section
+        className="w-full px-3 pb-5 pt-1 sm:px-6 sm:pb-6"
+        aria-label="Поиск по объявлениям"
+      >
+        <div className="mx-auto w-full max-w-3xl text-center">
+          <p className="text-sm font-medium leading-snug text-black/55 sm:text-base">
+            Найдите услуги, товары и помощь рядом
+          </p>
+          <div className="mt-3 sm:mt-4">
+            <GlobalHeaderSearch variant="hero" />
           </div>
+          <p className="mx-auto mt-3 max-w-md text-xs leading-snug text-black/45 sm:text-sm">
+            Поиск по задачам, услугам и товарам по всей России
+          </p>
         </div>
-      </header>
+      </section>
 
       <main className="mx-auto w-full min-w-0 max-w-full max-w-[1200px] px-4 pb-16 pt-2 sm:px-6 sm:pt-3">
           {hasActiveSearchQuery(directorySearch) ? (

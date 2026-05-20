@@ -19,6 +19,8 @@ import { ConsentCheckbox } from "../../components/ConsentCheckbox";
 import { OkModal } from "../../components/OkModal";
 import { getCurrentUserId, refreshAuthFromServer } from "../../lib/auth";
 import { AuthContinueModal } from "../../components/AuthContinueModal";
+import { TransferListingBlock } from "../../components/TransferListingBlock";
+import type { ListingTransferDraftPrefill } from "../../lib/listingTransferDraft";
 import { isValidPhone, PHONE_VALIDATION_MESSAGE } from "../../lib/identity";
 import { resolveRussiaCityRegionDisplay } from "../../lib/locationDisplay";
 import {
@@ -40,6 +42,7 @@ export default function PostServicePage() {
   const titleRef = useRef<HTMLInputElement | null>(null);
   const { addListing, findByEditToken } = useListingsStore();
   const [formKey, setFormKey] = useState(0);
+  const [transferPrefill, setTransferPrefill] = useState<ListingTransferDraftPrefill | null>(null);
   const [okOpen, setOkOpen] = useState(false);
   const [createdListingId, setCreatedListingId] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -149,9 +152,29 @@ export default function PostServicePage() {
               <div className="text-lg font-medium md:text-xl">Предложить услугу</div>
               <div className="mt-1 text-sm text-black/60">Заполните объявление — оно попадёт на проверку.</div>
 
-              <div className="mt-4">
+              <div className="mt-5">
+                <TransferListingBlock
+                  onDraftReady={(draft) => {
+                    setTransferPrefill(draft);
+                    setFormKey((k) => k + 1);
+                  }}
+                  onNeedAuth={(resume) => {
+                    pendingSubmitRef.current = resume;
+                    setAuthOpen(true);
+                  }}
+                />
+              </div>
+
+              <div className="my-6 flex items-center gap-3">
+                <div className="h-px flex-1 bg-black/10" />
+                <span className="shrink-0 text-xs font-medium text-black/45">Или заполните вручную</span>
+                <div className="h-px flex-1 bg-black/10" />
+              </div>
+
+              <div>
                 <ServicePostForm
                   key={formKey}
+                  prefill={transferPrefill}
                   titleRef={titleRef}
                   onSubmit={addService}
                   disabled={false}
@@ -195,11 +218,13 @@ export default function PostServicePage() {
 
 function ServicePostForm({
   titleRef,
+  prefill,
   onSubmit,
   onNeedAuth,
   disabled,
 }: {
   titleRef: React.RefObject<HTMLInputElement | null>;
+  prefill?: ListingTransferDraftPrefill | null;
   onSubmit: (form: {
     title: string;
     description: string;
@@ -214,9 +239,10 @@ function ServicePostForm({
   onNeedAuth: (resume: () => void) => void;
   disabled?: boolean;
 }) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [title, setTitle] = useState(prefill?.title ?? "");
+  const [description, setDescription] = useState(prefill?.description ?? "");
   const [categoryName, setCategoryName] = useState<(typeof serviceCategories)[number]>(serviceCategories[0]);
+  const showPhotoHint = Boolean(prefill?.showPhotoHint);
   const [locationDraft, setLocationDraft] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
   const [locationMsg, setLocationMsg] = useState<string | null>(null);
@@ -433,6 +459,11 @@ function ServicePostForm({
         </div>
       </div>
 
+      {showPhotoHint ?
+        <p className="rounded-xl border border-dashed border-orange-200/80 bg-orange-50/40 px-3 py-2 text-sm text-black/65">
+          Добавьте фото вручную
+        </p>
+      : null}
       <Field label="Фото (до 10)" labelAsGroup>
         <FilePhotoPicker
           files={files}

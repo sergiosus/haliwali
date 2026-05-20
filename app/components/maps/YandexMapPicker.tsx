@@ -129,6 +129,15 @@ type Props = {
   recenterTick?: number;
   /** Geographic target for the latest recenter request; falls back to {@link center} if missing. */
   recenterTarget?: MapCenter | null;
+  /**
+   * Parent bumps when settlement / anchor changes — forces {@link center} onto the map even if
+   * coordinates are near the previous pick (avoids stale viewport under the search overlay).
+   */
+  mapSyncRevision?: number;
+  /** Search radius (km) — included in sync deps; optional geographic {@link ymaps.Circle} when set. */
+  radiusKm?: number;
+  /** Stable id for the selected settlement (name + coords) — triggers marker/center refresh. */
+  selectedSettlementKey?: string;
 };
 
 const CENTER_EMIT_DEBOUNCE_MS = 140;
@@ -241,6 +250,17 @@ function centerMovedEnough(a: MapCenter, b: MapCenter): boolean {
   return dKm * 1000 >= CENTER_EMIT_MIN_MOVE_M;
 }
 
+/** Yandex Maps JS API 2.1 geo coordinates: `[latitude, longitude]` (not GeoJSON lng-first). */
+function toYandexGeoCoordinates(c: MapCenter): [number, number] {
+  return [c.lat, c.lng];
+}
+
+/** Parse `map.getCenter()` / click `coords` from Yandex 2.1 into app `{ lat, lng }`. */
+function mapCenterFromYandexCoordinates(coords: number[]): MapCenter | null {
+  if (!coords || coords.length < 2 || !Number.isFinite(coords[0]! + coords[1]!)) return null;
+  return { lat: coords[0]!, lng: coords[1]! };
+}
+
 /** Thumbnail for map listing popup: image or neutral placeholder if missing / broken. */
 function ListingPopupThumb({ url, compact }: { url?: string; compact?: boolean }) {
   const trimmed = typeof url === "string" ? url.trim() : "";
@@ -289,6 +309,9 @@ export function YandexMapPicker({
   listingMarkerClickNavigatesOnly = false,
   recenterTick = 0,
   recenterTarget = null,
+  mapSyncRevision = 0,
+  radiusKm,
+  selectedSettlementKey = "",
 }: Props) {
   const holderRef = useRef<HTMLDivElement | null>(null);
   const effLat = center.lat;
@@ -333,6 +356,9 @@ export function YandexMapPicker({
   const settlementPlacemarksRef = useRef<unknown[]>([]);
   const listingPlacemarksRef = useRef<unknown[]>([]);
   const userLocationPlacemarkRef = useRef<unknown>(null);
+  const radiusCircleRef = useRef<unknown>(null);
+  const lastMapSyncRevisionRef = useRef(mapSyncRevision);
+  const lastSyncedCenterRef = useRef<MapCenter | null>(null);
 
   // React-controlled hover / click-pinned preview for listing marker **groups** (one popup per co-located cluster).
   const [hoveredListingGroupKey, setHoveredListingGroupKey] = useState<string | null>(null);
@@ -568,8 +594,9 @@ export function YandexMapPicker({
                 debounceTimerRef.current = null;
                 try {
                   const c = map!.getCenter() as number[] | undefined;
-                  if (!c || c.length < 2) return;
-                  emitIfMoved({ lat: c[0]!, lng: c[1]! });
+                  const parsed = c ? mapCenterFromYandexCoordinates(c) : null;
+                  if (!parsed) return;
+                  emitIfMoved(parsed);
                 } catch {
                   /* noop */
                 }
@@ -588,7 +615,8 @@ export function YandexMapPicker({
                   const c = map!.getCenter() as number[] | undefined;
                   const b = map!.getBounds?.() as number[][] | undefined;
                   if (!c || c.length < 2 || !b || !Array.isArray(b) || b.length < 2) return;
-                  const centerMap: MapCenter = { lat: c[0]!, lng: c[1]! };
+                  const centerMap = mapCenterFromYandexCoordinates(c);
+                  if (!centerMap) return;
                   const box = normalizeYandexBoundsGeo(b);
                   if (!box) return;
                   onViewportStableRef.current?.({ center: centerMap, bounds: box });
@@ -641,8 +669,8 @@ export function YandexMapPicker({
                 closePreviewImmediatelyRef.current();
               }
               const coords = e.get("coords") as [number, number] | undefined;
-              if (!coords || coords.length < 2) return;
-              const mapCenter: MapCenter = { lat: coords[0]!, lng: coords[1]! };
+              const mapCenter = coords ? mapCenterFromYandexCoordinates(coords) : null;
+              if (!mapCenter) return;
               onMapClickRef.current?.(mapCenter);
               lastEmittedRef.current = mapCenter;
               onCenterChangeRef.current?.(mapCenter);
@@ -699,6 +727,9 @@ export function YandexMapPicker({
         const m = mapInstRef.current?.map as { geoObjects?: { remove?: (x: unknown) => void } } | undefined;
         const mk = userLocationPlacemarkRef.current;
         if (m?.geoObjects?.remove && mk) m.geoObjects.remove(mk);
+        const circle = radiusCircleRef.current;
+        if (m?.geoObjects?.remove && circle) m.geoObjects.remove(circle);
+        radiusCircleRef.current = null;
         for (const pm of listingPlacemarksRef.current) {
           try {
             m?.geoObjects?.remove?.(pm);
@@ -722,32 +753,102 @@ export function YandexMapPicker({
     };
   }, [updateActivePreviewPosition, mapLoadAttempt]);
 
-  /** Sync prop center → map without changing zoom (avoids snap-back after user zooms out). */
+  const settlementMarkersJson = useMemo(
+    () => JSON.stringify(settlementMarkers),
+    [settlementMarkers],
+  );
+
+  /**
+   * Keep map viewport, optional radius circle, and settlement markers in sync with props.
+   * Does not rely on constructor `center` alone — runs on every anchor / revision change.
+   */
   useLayoutEffect(() => {
     const inst = mapInstRef.current;
     if (!inst?.map || !mapReady || !Number.isFinite(effLat + effLng)) return;
 
-    const centerArr = [effLat, effLng] as [number, number];
+    const target: MapCenter = { lat: effLat, lng: effLng };
+    const revisionChanged = mapSyncRevision !== lastMapSyncRevisionRef.current;
+    lastMapSyncRevisionRef.current = mapSyncRevision;
+
+    const lastSynced = lastSyncedCenterRef.current;
+    const skipCenterPan =
+      !revisionChanged &&
+      lastSynced != null &&
+      !centerMovedEnough(lastSynced, target);
 
     /* eslint-disable @typescript-eslint/no-explicit-any */
     const m = inst.map as any;
-    try {
-      const cur = m.getCenter?.() as number[] | undefined;
-      if (cur && cur.length >= 2 && Number.isFinite(cur[0] + cur[1])) {
-        const dKm = calculateDistanceKm(cur[0]!, cur[1]!, effLat, effLng);
-        if (dKm * 1000 < 1) return;
+    const ymaps = ymapsApiRef.current as {
+      Circle?: new (
+        geometry: [number[], number],
+        properties?: Record<string, unknown>,
+        options?: Record<string, unknown>,
+      ) => unknown;
+    };
+
+    if (!skipCenterPan) {
+      try {
+        const z =
+          typeof m.getZoom === "function" && Number.isFinite(Number(m.getZoom())) ?
+            Number(m.getZoom())
+          : Number(zoom ?? 11);
+        m.setCenter?.(toYandexGeoCoordinates(target), z, { duration: revisionChanged ? 280 : 0 });
+      } catch {
+        try {
+          m.setCenter?.(toYandexGeoCoordinates(target));
+        } catch {
+          /* noop */
+        }
       }
+      try {
+        m.container?.fitToViewport?.();
+      } catch {
+        /* noop */
+      }
+      lastSyncedCenterRef.current = target;
+      lastEmittedRef.current = target;
+    }
+
+    try {
+      const circle = radiusCircleRef.current;
+      if (circle) m.geoObjects?.remove?.(circle);
     } catch {
       /* noop */
     }
-    try {
-      m.setCenter?.(centerArr);
-    } catch {
-      /* noop */
+    radiusCircleRef.current = null;
+
+    const rk =
+      typeof radiusKm === "number" && Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 0;
+    if (rk > 0 && ymaps?.Circle && m.geoObjects?.add) {
+      try {
+        const circle = new ymaps.Circle(
+          [toYandexGeoCoordinates(target), rk * 1000],
+          {},
+          {
+            fillColor: "rgba(37, 99, 235, 0.08)",
+            strokeColor: "rgba(37, 99, 235, 0.45)",
+            strokeWidth: 2,
+            interactivityModel: "default#transparent",
+            zIndex: 200,
+          },
+        );
+        m.geoObjects.add(circle);
+        radiusCircleRef.current = circle;
+      } catch {
+        /* noop */
+      }
     }
     /* eslint-enable @typescript-eslint/no-explicit-any */
-    lastEmittedRef.current = { lat: effLat, lng: effLng };
-  }, [effLat, effLng, mapReady]);
+  }, [
+    effLat,
+    effLng,
+    mapReady,
+    zoom,
+    mapSyncRevision,
+    radiusKm,
+    selectedSettlementKey,
+    settlementMarkersJson,
+  ]);
 
   /** When the controlled `center` prop moves to a new place (new city etc.), align recenter bookkeeping so stale ticks don't fire. */
   useLayoutEffect(() => {
@@ -788,7 +889,7 @@ export function YandexMapPicker({
       };
       const zoomNow = typeof m.getZoom === "function" ? Number(m.getZoom()) : Number(zoom ?? 11);
       const zUse = Number.isFinite(zoomNow) ? zoomNow : Number(zoom ?? 11);
-      m.setCenter?.([t.lat, t.lng], zUse, { duration: 300 });
+      m.setCenter?.(toYandexGeoCoordinates(t), zUse, { duration: 300 });
     } catch {
       /* noop */
     }
@@ -817,11 +918,6 @@ export function YandexMapPicker({
       /* noop */
     }
   }, [zoom, mapReady]);
-
-  const settlementMarkersJson = useMemo(
-    () => JSON.stringify(settlementMarkers),
-    [settlementMarkers],
-  );
 
   useEffect(() => {
     if (!mapReady || !mapInstRef.current) return;
@@ -1085,7 +1181,7 @@ export function YandexMapPicker({
         if (!Number.isFinite(lat + lng)) return;
 
         try {
-          map.setCenter([lat, lng], 12, { duration: 300 });
+          map.setCenter(toYandexGeoCoordinates({ lat, lng }), 12, { duration: 300 });
           const nextCenter: MapCenter = { lat, lng };
           lastEmittedRef.current = nextCenter;
           onCenterChangeRef.current?.(nextCenter);

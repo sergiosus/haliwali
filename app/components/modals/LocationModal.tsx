@@ -200,6 +200,16 @@ function isInsideCircle(lat: number, lng: number, center: MapCenter | null, radi
   return haversineDistanceKm(center, { lat, lng }) <= radiusKm + 1e-9;
 }
 
+/**
+ * Numeric part for «± N км» map footer — same rounding thresholds as `formatDistanceKm` in `@/lib/shared/geo` (not search `radiusKm`).
+ */
+function formatOffsetKmNumber(km: number): string {
+  if (!Number.isFinite(km) || km < 0) return "0";
+  if (km < 0.05) return "0";
+  if (km < 10) return km.toFixed(1);
+  return String(Math.round(km));
+}
+
 /** Whole Russia view (must NOT default to Moscow or any city). */
 const RUSSIA_WIDE_CENTER: MapCenter = { lat: 61.5, lng: 99 };
 const RUSSIA_WIDE_ZOOM = 4;
@@ -531,6 +541,8 @@ export function LocationModal({
   const [liveViewportMapCenter, setLiveViewportMapCenter] = useState<MapCenter | null>(null);
   /** Bump so {@link YandexMapPicker} animates back to {@link originalSelectedCenter}. */
   const [mapRecenterTick, setMapRecenterTick] = useState(0);
+  /** Forces map viewport sync when settlement anchor changes (even if coords are near previous pick). */
+  const [mapSyncRevision, setMapSyncRevision] = useState(0);
   const hasKey = Boolean(getYandexMapsApiKey());
 
   /** Selected main населённый пункт (modal draft — global filters update only on confirm). */
@@ -583,6 +595,7 @@ export function LocationModal({
       setDraftQuery(labelForScopeDraft(norm));
       setOriginalSelectedCenter(c);
       setCurrentCircleCenter(c);
+      setMapSyncRevision((n) => n + 1);
       setActiveTab(hideMapPreview ? "nearby" : "map");
       setSuggestionsDismissed(true);
       inputRef.current?.blur();
@@ -601,6 +614,7 @@ export function LocationModal({
       setOriginalSelectedCenter(null);
       setChosenScope(null);
       setDraftQuery("");
+      setMapSyncRevision(0);
       setSuggestionsDismissed(false);
       setAllowSuggestDropdown(false);
     } else {
@@ -886,6 +900,35 @@ export function LocationModal({
     return rows.filter((x) => x.scope.type !== "country").slice(0, 8);
   }, [allowSuggestDropdown, qTrim, suggestionsDismissed, apiCityRows]);
 
+  /** Draft settlement coords — map must follow these before stale pan anchor. */
+  const draftSettlementCenter: MapCenter | null = useMemo(() => {
+    if (
+      mainSettlement &&
+      Number.isFinite(mainSettlement.lat + mainSettlement.lng)
+    ) {
+      return { lat: mainSettlement.lat, lng: mainSettlement.lng };
+    }
+    if (
+      chosenScope &&
+      (chosenScope.type === "city" ||
+        chosenScope.type === "settlement" ||
+        chosenScope.type === "point") &&
+      typeof chosenScope.lat === "number" &&
+      Number.isFinite(chosenScope.lat) &&
+      typeof chosenScope.lng === "number" &&
+      Number.isFinite(chosenScope.lng)
+    ) {
+      return { lat: chosenScope.lat, lng: chosenScope.lng };
+    }
+    return null;
+  }, [
+    mainSettlement?.lat,
+    mainSettlement?.lng,
+    chosenScope?.type,
+    chosenScope?.lat,
+    chosenScope?.lng,
+  ]);
+
   /**
    * Map initial / prop-sync center: radius anchor coords or persisted selection; «Вся Россия» → whole Russia view.
    */
@@ -894,6 +937,9 @@ export function LocationModal({
     const isCountryDraft = chosenScope?.type === "country";
     if (isCountryDraft) {
       return RUSSIA_WIDE_CENTER;
+    }
+    if (draftSettlementCenter) {
+      return draftSettlementCenter;
     }
     if (
       currentCircleCenter &&
@@ -912,6 +958,8 @@ export function LocationModal({
     open,
     valueSig,
     value,
+    draftSettlementCenter?.lat,
+    draftSettlementCenter?.lng,
     currentCircleCenter?.lat,
     currentCircleCenter?.lng,
     selectedCenter?.lat,
@@ -975,33 +1023,34 @@ export function LocationModal({
     };
   }, [open, nearbyListAnchor?.lat, nearbyListAnchor?.lng, mainSettlement?.name, mainSettlement?.region]);
 
-  const distanceAnchor: MapCenter | null = useMemo(() => {
-    if (!open) return null;
-    if (
-      originalSelectedCenter &&
-      Number.isFinite(originalSelectedCenter.lat + originalSelectedCenter.lng)
-    ) {
-      return originalSelectedCenter;
-    }
-    if (selectedCenter) return selectedCenter;
-    const incoming = incomingModalFieldsToScope(value);
-    if (incoming.type === "country") return null;
-    return null;
-  }, [open, valueSig, value, originalSelectedCenter?.lat, originalSelectedCenter?.lng, selectedCenter?.lat, selectedCenter?.lng]);
-
   /** Remount map when parent `value` or geo suggestion anchor changes (Russia-wide → detected city). */
   const mapRemountKey = useMemo(
     () =>
-      `${valueSig}:${chosenScope?.type ?? ""}:${mainSettlement?.lat ?? ""}:${mainSettlement?.lng ?? ""}:${currentCircleCenter?.lat ?? ""}:${currentCircleCenter?.lng ?? ""}`,
+      `${valueSig}:${chosenScope?.type ?? ""}:${chosenScope?.label ?? ""}:${mainSettlement?.name ?? ""}:${mainSettlement?.lat ?? ""}:${mainSettlement?.lng ?? ""}:${mapSyncRevision}`,
     [
       valueSig,
       chosenScope?.type,
+      chosenScope?.label,
+      mainSettlement?.name,
       mainSettlement?.lat,
       mainSettlement?.lng,
-      currentCircleCenter?.lat,
-      currentCircleCenter?.lng,
+      mapSyncRevision,
     ],
   );
+
+  const selectedSettlementKey = useMemo(() => {
+    const name = (mainSettlement?.name ?? chosenScope?.label ?? "").trim();
+    const lat = draftSettlementCenter?.lat ?? effectiveCircleCenter?.lat ?? "";
+    const lng = draftSettlementCenter?.lng ?? effectiveCircleCenter?.lng ?? "";
+    return name ? `${name}:${lat}:${lng}` : `${lat}:${lng}`;
+  }, [
+    mainSettlement?.name,
+    chosenScope?.label,
+    draftSettlementCenter?.lat,
+    draftSettlementCenter?.lng,
+    effectiveCircleCenter?.lat,
+    effectiveCircleCenter?.lng,
+  ]);
 
   const incomingType = useMemo(() => incomingModalFieldsToScope(value).type, [valueSig, value]);
 
@@ -1035,85 +1084,92 @@ export function LocationModal({
     setMapRecenterTick(0);
   }, [effectiveCircleCenter?.lat, effectiveCircleCenter?.lng]);
 
-  /**
-   * One line under map: «City ± …» — distance from original selected NP to live `map.getCenter()`
-   * (meters if &lt; 1 km, else km with one decimal under 10 km).
-   */
-  const mapBottomLabel = useMemo(() => {
-    if (!open) return "";
-    if (chosenScope?.type === "country" || incomingIsWholeRussia(value)) return "";
-    const anchor =
-      originalSelectedCenter && Number.isFinite(originalSelectedCenter.lat + originalSelectedCenter.lng) ?
-        originalSelectedCenter
-      : distanceAnchor && Number.isFinite(distanceAnchor.lat + distanceAnchor.lng) ?
-        distanceAnchor
-      : null;
-    const live =
-      liveViewportMapCenter && Number.isFinite(liveViewportMapCenter.lat + liveViewportMapCenter.lng) ?
-        liveViewportMapCenter
-      : null;
-    if (!anchor || !live) return "";
-
+  /** Short NP name for «Вернуться к …» and map footer (draft may still say «Вся Россия» in props). */
+  const settlementNameForMapFooter = useMemo(() => {
     const nearestLabel = (nearestFromClean?.name ?? "").trim();
     const persistedPickLabel = (selectedLocation?.label ?? "").trim();
     const chosenLabel =
       chosenScope &&
+      chosenScope.type !== "country" &&
       (chosenScope.type === "city" ||
         chosenScope.type === "settlement" ||
         chosenScope.type === "point") ?
         (chosenScope.label ?? "").trim()
       : "";
-
-    const dKm = calculateDistanceKm(anchor.lat, anchor.lng, live.lat, live.lng);
-    if (!Number.isFinite(dKm)) return "";
-    const meters = dKm * 1000;
-
-    const labelBase =
-      meters < 5 && (chosenLabel || persistedPickLabel) ?
-        (chosenLabel || persistedPickLabel)
-      : nearestLabel || chosenLabel || persistedPickLabel || "Локация";
-
-    let distPart: string;
-    if (meters < 5) {
-      distPart = "0 км";
-    } else if (meters < 1000) {
-      distPart = `${Math.round(meters)} м`;
-    } else {
-      distPart =
-        dKm < 10 ?
-          dKm.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " км"
-        : `${Math.round(dKm).toLocaleString("ru-RU")} км`;
-    }
-    return `${labelBase} ± ${distPart}`;
+    const mainName = (mainSettlement?.name ?? "").trim();
+    const draftCity = (draftQuery.split(",")[0] ?? "").trim();
+    return mainName || chosenLabel || persistedPickLabel || draftCity || nearestLabel || "";
   }, [
-    open,
-    originalSelectedCenter?.lat,
-    originalSelectedCenter?.lng,
-    distanceAnchor?.lat,
-    distanceAnchor?.lng,
-    liveViewportMapCenter?.lat,
-    liveViewportMapCenter?.lng,
-    nearestFromClean,
+    nearestFromClean?.name,
     chosenScope,
     chosenScope?.type,
+    chosenScope?.label,
+    mainSettlement?.name,
     selectedLocation?.label,
-    valueSig,
-    value,
+    draftQuery,
   ]);
 
-  /** Short NP name for «Вернуться к …» (same sources as {@link mapBottomLabel} headline). */
-  const npNameForReturnButton = useMemo(() => {
-    const nearestLabel = (nearestFromClean?.name ?? "").trim();
-    const persistedPickLabel = (selectedLocation?.label ?? "").trim();
-    const chosenLabel =
-      chosenScope &&
-      (chosenScope.type === "city" ||
-        chosenScope.type === "settlement" ||
-        chosenScope.type === "point") ?
-        (chosenScope.label ?? "").trim()
-      : "";
-    return chosenLabel || persistedPickLabel || nearestLabel || "";
-  }, [nearestFromClean?.name, chosenScope, selectedLocation?.label]);
+  /**
+   * Map footer: distance from selected НП anchor to current map / search viewport center (Haversine).
+   * Does not use scope `radiusKm` (that is only for search-circle drawing).
+   */
+  const settlementRadiusFooterText = useMemo((): string | null => {
+    if (!open) return null;
+    if (chosenScope?.type === "country") return null;
+    if (!chosenScope && incomingIsWholeRussia(value)) return null;
+
+    const name = settlementNameForMapFooter.trim();
+    if (!name || name === "Вся Россия") return null;
+
+    const selectedSettlement: MapCenter | null =
+      originalSelectedCenter && Number.isFinite(originalSelectedCenter.lat + originalSelectedCenter.lng) ?
+        originalSelectedCenter
+      : mainSettlement && Number.isFinite(mainSettlement.lat + mainSettlement.lng) ?
+        { lat: mainSettlement.lat, lng: mainSettlement.lng }
+      : null;
+    if (!selectedSettlement) return null;
+
+    const currentMapCenter: MapCenter | null =
+      liveViewportMapCenter &&
+      Number.isFinite(liveViewportMapCenter.lat + liveViewportMapCenter.lng) ?
+        liveViewportMapCenter
+      : effectiveCircleCenter &&
+          Number.isFinite(effectiveCircleCenter.lat + effectiveCircleCenter.lng) ?
+        effectiveCircleCenter
+      : null;
+    if (!currentMapCenter) return null;
+
+    const dKm = calculateDistanceKm(
+      selectedSettlement.lat,
+      selectedSettlement.lng,
+      currentMapCenter.lat,
+      currentMapCenter.lng,
+    );
+    if (!Number.isFinite(dKm)) return null;
+
+    return `${name} ± ${formatOffsetKmNumber(dKm)} км`;
+  }, [
+    open,
+    chosenScope?.type,
+    chosenScope,
+    settlementNameForMapFooter,
+    valueSig,
+    value,
+    originalSelectedCenter?.lat,
+    originalSelectedCenter?.lng,
+    mainSettlement?.lat,
+    mainSettlement?.lng,
+    liveViewportMapCenter?.lat,
+    liveViewportMapCenter?.lng,
+    effectiveCircleCenter?.lat,
+    effectiveCircleCenter?.lng,
+  ]);
+
+  /** Short NP name for «Вернуться к …». */
+  const npNameForReturnButton = useMemo(
+    () => settlementNameForMapFooter,
+    [settlementNameForMapFooter],
+  );
 
   const showReturnToNpButton = useMemo(() => {
     if (
@@ -1281,6 +1337,7 @@ export function LocationModal({
     viewportMapCenterForApplyRef.current = RUSSIA_WIDE_CENTER;
     setLiveViewportMapCenter(RUSSIA_WIDE_CENTER);
     setMapRecenterTick((n) => n + 1);
+    setMapSyncRevision((n) => n + 1);
     setSuggestionsDismissed(true);
     setAllowSuggestDropdown(false);
   }
@@ -1605,6 +1662,8 @@ export function LocationModal({
                         key={mapRemountKey}
                         center={effectiveCircleCenter}
                         zoom={mapZoom}
+                        mapSyncRevision={mapSyncRevision}
+                        selectedSettlementKey={selectedSettlementKey}
                         className="aspect-square w-full min-h-[288px] max-h-[min(46dvh,92vw)] sm:min-h-[320px] sm:max-h-[min(42vh,560px)]"
                         settlementMarkers={settlementMarkersForMap}
                         onSettlementMarkerClick={handleSettlementMarkerClick}
@@ -1619,10 +1678,10 @@ export function LocationModal({
                         recenterTick={mapRecenterTick}
                         recenterTarget={originalSelectedCenter}
                       />
-                      {mapBottomLabel || showReturnToNpButton ?
+                      {settlementRadiusFooterText || showReturnToNpButton ?
                         <div className="mt-1.5 space-y-1 text-center">
-                          {mapBottomLabel ?
-                            <p className="text-sm font-medium text-black/70">{mapBottomLabel}</p>
+                          {settlementRadiusFooterText ?
+                            <p className="text-sm font-medium text-black/70">{settlementRadiusFooterText}</p>
                           : null}
                           {showReturnToNpButton && originalSelectedCenter ?
                             <button

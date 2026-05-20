@@ -133,11 +133,6 @@ function homeListingColumnHeading(l: Listing): HomeGridColumnHeading {
   return "Товары";
 }
 
-type HomeColumnNonCountryPick = {
-  scope: BrowseLocationScope;
-  column: HomeGridColumnHeading;
-};
-
 function isNonCountryBrowseScope(scope: BrowseLocationScope): boolean {
   return normalizeSearchScope(scope).type !== "country";
 }
@@ -180,13 +175,13 @@ function HaliwaliLanding() {
   const [locationSyncServices, setLocationSyncServices] = useState(false);
   const [locationSyncProducts, setLocationSyncProducts] = useState(false);
 
-  /** Last explicit non-country pick in the location modal (per-column; not a sync link). */
-  const lastNonCountryColumnPickRef = useRef<HomeColumnNonCountryPick | null>(null);
+  /** Latest explicit non-country pick — checked columns follow this until unchecked or country pick. */
+  const [sharedFollowLocation, setSharedFollowLocation] = useState<BrowseLocationScope | null>(null);
 
   /** Fresh homepage visit / refresh: country scope, «Для всех» off — never restore from storage. */
   useEffect(() => {
     purgeUnconfirmedLocationStorage();
-    lastNonCountryColumnPickRef.current = null;
+    setSharedFollowLocation(null);
     setHomeBrowseScopeTasks(DEFAULT_BROWSE_LOCATION_SCOPE);
     setHomeBrowseScopeServices(DEFAULT_BROWSE_LOCATION_SCOPE);
     setHomeBrowseScopeProducts(DEFAULT_BROWSE_LOCATION_SCOPE);
@@ -260,25 +255,44 @@ function HaliwaliLanding() {
     [],
   );
 
-  const pickNonCountryScopeFromOtherColumns = useCallback(
-    (targetColumn: HomeGridColumnHeading): BrowseLocationScope | null => {
-      const pick = lastNonCountryColumnPickRef.current;
-      if (pick && pick.column !== targetColumn && isNonCountryBrowseScope(pick.scope)) {
-        return normalizeSearchScope(pick.scope);
+  /** Explicit modal confirm in `sourceColumn`; updates shared source and all «Для всех» followers. */
+  const applyExplicitColumnLocationPick = useCallback(
+    (sourceColumn: HomeGridColumnHeading, newScope: BrowseLocationScope) => {
+      const norm = normalizeSearchScope(newScope);
+      const shared = isNonCountryBrowseScope(norm) ? norm : null;
+
+      let nextTasks = sourceColumn === "Задачи" ? norm : homeBrowseScopeTasks;
+      let nextServices = sourceColumn === "Услуги" ? norm : homeBrowseScopeServices;
+      let nextProducts = sourceColumn === "Товары" ? norm : homeBrowseScopeProducts;
+
+      if (shared) {
+        setSharedFollowLocation(shared);
+        if (sourceColumn !== "Задачи" && locationSyncTasks) nextTasks = shared;
+        if (sourceColumn !== "Услуги" && locationSyncServices) nextServices = shared;
+        if (sourceColumn !== "Товары" && locationSyncProducts) nextProducts = shared;
       }
-      const others: { column: HomeGridColumnHeading; scope: BrowseLocationScope }[] = [
-        { column: "Задачи", scope: homeBrowseScopeTasks },
-        { column: "Услуги", scope: homeBrowseScopeServices },
-        { column: "Товары", scope: homeBrowseScopeProducts },
-      ];
-      for (const { column, scope } of others) {
-        if (column === targetColumn) continue;
-        const norm = normalizeSearchScope(scope);
-        if (isNonCountryBrowseScope(norm)) return norm;
-      }
-      return null;
+
+      setHomeBrowseScopeTasks(nextTasks);
+      setHomeBrowseScopeServices(nextServices);
+      setHomeBrowseScopeProducts(nextProducts);
+      persistCurrentHomeColumnScopes(nextTasks, nextServices, nextProducts);
+      scopeLocationDebugLog("homepage-location-pick", {
+        sourceColumn,
+        shared: shared?.label ?? null,
+        followTasks: locationSyncTasks,
+        followServices: locationSyncServices,
+        followProducts: locationSyncProducts,
+      });
     },
-    [homeBrowseScopeTasks, homeBrowseScopeServices, homeBrowseScopeProducts],
+    [
+      homeBrowseScopeTasks,
+      homeBrowseScopeServices,
+      homeBrowseScopeProducts,
+      locationSyncTasks,
+      locationSyncServices,
+      locationSyncProducts,
+      persistCurrentHomeColumnScopes,
+    ],
   );
 
   const handleLocationSyncToAllChange = useCallback(
@@ -301,35 +315,26 @@ function HaliwaliLanding() {
         return;
       }
 
-      const source = pickNonCountryScopeFromOtherColumns(column);
-      if (!source) {
-        setSync(false);
-        scopeLocationDebugLog("homepage-sync-check-no-source", { column });
+      setSync(true);
+      if (!sharedFollowLocation || !isNonCountryBrowseScope(sharedFollowLocation)) {
+        scopeLocationDebugLog("homepage-sync-check-follow", { column, hasShared: false });
         return;
       }
 
-      const copied = normalizeSearchScope(source);
-      setSync(true);
-      const nextTasks = column === "Задачи" ? copied : homeBrowseScopeTasks;
-      const nextServices = column === "Услуги" ? copied : homeBrowseScopeServices;
-      const nextProducts = column === "Товары" ? copied : homeBrowseScopeProducts;
-      if (column === "Задачи") setHomeBrowseScopeTasks(copied);
-      else if (column === "Услуги") setHomeBrowseScopeServices(copied);
-      else setHomeBrowseScopeProducts(copied);
+      const follow = normalizeSearchScope(sharedFollowLocation);
+      const nextTasks = column === "Задачи" ? follow : homeBrowseScopeTasks;
+      const nextServices = column === "Услуги" ? follow : homeBrowseScopeServices;
+      const nextProducts = column === "Товары" ? follow : homeBrowseScopeProducts;
+      if (column === "Задачи") setHomeBrowseScopeTasks(follow);
+      else if (column === "Услуги") setHomeBrowseScopeServices(follow);
+      else setHomeBrowseScopeProducts(follow);
       persistCurrentHomeColumnScopes(nextTasks, nextServices, nextProducts);
-      scopeLocationDebugLog("homepage-sync-check-copy", {
+      scopeLocationDebugLog("homepage-sync-check-follow", {
         column,
-        fromLabel: copied.label,
-        fromType: copied.type,
+        fromLabel: follow.label,
       });
     },
-    [
-      homeBrowseScopeTasks,
-      homeBrowseScopeServices,
-      homeBrowseScopeProducts,
-      pickNonCountryScopeFromOtherColumns,
-      persistCurrentHomeColumnScopes,
-    ],
+    [homeBrowseScopeTasks, homeBrowseScopeServices, homeBrowseScopeProducts, sharedFollowLocation, persistCurrentHomeColumnScopes],
   );
 
   const { addListing, loaded, listings } = useListingsStore();
@@ -818,22 +823,7 @@ function HaliwaliLanding() {
           onChange={(next) => {
             const newScope = normalizeSearchScope(incomingModalFieldsToScope(next));
             const col = activeLocationColumn ?? "Задачи";
-            if (isNonCountryBrowseScope(newScope)) {
-              lastNonCountryColumnPickRef.current = { scope: newScope, column: col };
-            }
-            scopeLocationDebugLog("homepage-confirm", {
-              scopeType: newScope.type,
-              scopeLabel: newScope.label,
-              scopeRegion: newScope.region ?? null,
-              column: col,
-            });
-            const nextTasks = col === "Задачи" ? newScope : homeBrowseScopeTasks;
-            const nextServices = col === "Услуги" ? newScope : homeBrowseScopeServices;
-            const nextProducts = col === "Товары" ? newScope : homeBrowseScopeProducts;
-            if (col === "Задачи") setHomeBrowseScopeTasks(newScope);
-            else if (col === "Услуги") setHomeBrowseScopeServices(newScope);
-            else setHomeBrowseScopeProducts(newScope);
-            persistCurrentHomeColumnScopes(nextTasks, nextServices, nextProducts);
+            applyExplicitColumnLocationPick(col, newScope);
             setLocationModalInitialScope(newScope);
             setLocationModalOpen(false);
             setActiveLocationColumn(null);

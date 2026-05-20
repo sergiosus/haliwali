@@ -334,11 +334,16 @@ export function GlobalHeaderSearch({
                       href={link.href}
                       target="_blank"
                       rel="noopener noreferrer nofollow"
-                      className="block rounded-md px-1 py-1.5 text-sm text-black/85 hover:bg-orange-50 hover:text-black"
-                      onPointerDown={(e) => {
-                        if (e.button !== 0) return;
+                      className="relative z-[1] block cursor-pointer rounded-md px-1 py-1.5 text-sm text-black/85 underline-offset-2 hover:bg-orange-50 hover:text-black hover:underline"
+                      onMouseDown={(e) => {
                         e.stopPropagation();
-                        setSuggestOpen(false);
+                      }}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.setTimeout(() => setSuggestOpen(false), 0);
                       }}
                     >
                       {link.label}

@@ -223,21 +223,23 @@ export function SearchPageClient() {
         </div>
       : null}
 
-      <div className="mx-auto mt-4 w-full min-w-0 max-w-2xl">
-        <ul className="flex w-full min-w-0 max-w-full flex-col gap-3">
+      <div className="mx-auto mt-4 w-full min-w-0 max-w-5xl">
+        <ul className="grid w-full min-w-0 max-w-full grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
           {!loading &&
             displayedResults.map((r) => {
               const listing = searchResultToListing(r);
               const ownerId = (listing.ownerId ?? "").trim();
               const href = appendReturnUrlQuery(r.href, returnHref);
               return (
-                <li key={r.id} className="min-w-0 w-full max-w-full">
-                  <CompactListingCard
-                    listing={listing}
-                    href={href}
-                    viewCount={viewCounts[r.id] ?? 0}
-                    publicAuthor={ownerId ? (publicByUserId[ownerId] ?? null) : null}
-                  />
+                <li key={r.id} className="flex min-h-0 min-w-0 w-full max-w-full">
+                  <div className="min-w-0 w-full flex-1">
+                    <CompactListingCard
+                      listing={listing}
+                      href={href}
+                      viewCount={viewCounts[r.id] ?? 0}
+                      publicAuthor={ownerId ? (publicByUserId[ownerId] ?? null) : null}
+                    />
+                  </div>
                 </li>
               );
             })}

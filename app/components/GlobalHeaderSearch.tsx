@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -12,6 +13,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchSuggestItem } from "../lib/globalSearchTypes";
 import { searchDebugLog } from "../lib/searchMatch";
+import { getHeaderSuggestExternalSearchLinks } from "../lib/externalSearchLinks";
 import { useSearchScope } from "../lib/useStoredCity";
 
 function SearchIcon({ className }: { className?: string }) {
@@ -108,10 +110,18 @@ export function GlobalHeaderSearch({
     [isSearchPage, router, sp],
   );
 
-  const goSearch = useCallback(
+  /** Navigate to /search, sync input, close dropdown — use for suggestions + Enter. */
+  const applySearchQueryAndNavigate = useCallback(
     (raw: string) => {
       const t = raw.trim();
       if (!t) return;
+      setQ(t);
+      setSuggestions([]);
+      setSuggestLoading(false);
+      setActiveIdx(-1);
+      suggestAbortRef.current?.abort();
+      suggestAbortRef.current = null;
+      suggestSeqRef.current += 1;
       setSuggestOpen(false);
       const p = new URLSearchParams({ q: t });
       const scopeP = globalSearchScopeToQueryParams(searchScope);
@@ -163,7 +173,6 @@ export function GlobalHeaderSearch({
         if (seq !== suggestSeqRef.current || ac.signal.aborted) return;
         if (e instanceof DOMException && e.name === "AbortError") return;
         setSuggestions([]);
-        setSuggestOpen(false);
       } finally {
         if (seq === suggestSeqRef.current) setSuggestLoading(false);
       }
@@ -212,19 +221,27 @@ export function GlobalHeaderSearch({
     }
     if (e.key !== "Enter") return;
     e.preventDefault();
-    if (activeIdx >= 0 && suggestions[activeIdx]) {
-      goSearch(suggestions[activeIdx]!.query);
+    const pick =
+      activeIdx >= 0 && suggestions[activeIdx] ?
+        (suggestions[activeIdx]!.query || suggestions[activeIdx]!.label).trim()
+      : "";
+    if (pick) {
+      applySearchQueryAndNavigate(pick);
       return;
     }
-    goSearch(q);
+    applySearchQueryAndNavigate(q);
   }
 
   useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!wrapRef.current?.contains(e.target as Node)) setSuggestOpen(false);
+    /** Close on outside clicks only — use bubble so dropdown pointer handlers run first. */
+    function onDocPointerDown(e: PointerEvent) {
+      const node = e.target;
+      if (!(node instanceof Node)) return;
+      if (wrapRef.current?.contains(node)) return;
+      setSuggestOpen(false);
     }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("pointerdown", onDocPointerDown, false);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown, false);
   }, []);
 
   useEffect(() => {
@@ -238,8 +255,10 @@ export function GlobalHeaderSearch({
     inputClassName ??
     "h-11 w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 text-sm text-black outline-none placeholder:text-black/40 focus:border-gray-300 focus:ring-2 focus:ring-[rgba(255,122,0,0.2)]";
 
-  const showSuggestPanel =
-    suggestOpen && q.trim().length >= 2 && (suggestLoading || suggestions.length > 0);
+  /** Outbound-only URLs — no scraping, no embedding results. */
+  const headerExternalLinks = useMemo(() => getHeaderSuggestExternalSearchLinks(q), [q]);
+
+  const showSuggestPanel = suggestOpen && q.trim().length >= 2;
 
   return (
     <div ref={wrapRef} className={`relative w-full ${className}`}>
@@ -267,13 +286,13 @@ export function GlobalHeaderSearch({
       {showSuggestPanel ?
         <div
           id={listId}
-          role="listbox"
           className="absolute left-0 right-0 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5"
         >
           {suggestLoading && suggestions.length === 0 ?
             <div className="px-3 py-2 text-sm text-black/50">Ищем…</div>
-          : suggestions.length > 0 ?
-            <ul className="max-h-64 overflow-y-auto py-1">
+          : null}
+          {suggestions.length > 0 ?
+            <ul className="max-h-64 overflow-y-auto py-1" role="listbox" aria-label="Подсказки объявлений">
               {suggestions.map((s, idx) => {
                 const typeLine = listingTypeShort(s.listingType);
                 return (
@@ -283,8 +302,13 @@ export function GlobalHeaderSearch({
                       className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-orange-50 ${
                         idx === activeIdx ? "bg-orange-50" : ""
                       }`}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => goSearch(s.query)}
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const picked = ((s.query || s.label).trim());
+                        applySearchQueryAndNavigate(picked);
+                      }}
                     >
                       <span className="line-clamp-2 text-black/90">{s.label}</span>
                       {typeLine ?
@@ -295,6 +319,34 @@ export function GlobalHeaderSearch({
                 );
               })}
             </ul>
+          : null}
+          {headerExternalLinks.length > 0 ?
+            <div
+              className={`border-t border-gray-100 px-3 py-2 ${suggestions.length === 0 && !suggestLoading ? "pt-3" : ""}`}
+            >
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-black/45">
+                Искать в интернете
+              </p>
+              <ul className="flex flex-col gap-0.5">
+                {headerExternalLinks.map((link) => (
+                  <li key={link.href}>
+                    <a
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                      className="block rounded-md px-1 py-1.5 text-sm text-black/85 hover:bg-orange-50 hover:text-black"
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.stopPropagation();
+                        setSuggestOpen(false);
+                      }}
+                    >
+                      {link.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
           : null}
         </div>
       : null}

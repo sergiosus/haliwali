@@ -174,10 +174,7 @@ export function SearchPageClient() {
     return qs ? `/search?${qs}` : "/search";
   }
 
-  const marketplaceLinks = useMemo(
-    () => getExternalMarketplaceSearchLinks(query, type),
-    [query, type],
-  );
+  const marketplaceLinks = useMemo(() => getExternalMarketplaceSearchLinks(query), [query]);
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-7xl overflow-x-hidden px-3 py-6 sm:px-6">

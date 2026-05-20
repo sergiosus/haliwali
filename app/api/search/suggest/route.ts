@@ -20,11 +20,13 @@ export async function GET(req: Request) {
   try {
     const { normalized, suggestions } = await globalSearchSuggest({ query: q, scope });
 
+    const listingOnly = suggestions.filter((s) => s.kind === "listing").slice(0, 5);
+
     const res = NextResponse.json({
       ok: true,
       query: q,
       normalized: globalSearchNormalizedPayload(normalized),
-      suggestions,
+      suggestions: listingOnly,
     });
     res.headers.set("Cache-Control", "no-store, max-age=0");
     return res;

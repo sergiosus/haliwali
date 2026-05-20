@@ -11,7 +11,7 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchSuggestItem } from "../lib/globalSearchTypes";
-import { buildLocalSearchSuggestions, searchDebugLog } from "../lib/searchMatch";
+import { searchDebugLog } from "../lib/searchMatch";
 import { useSearchScope } from "../lib/useStoredCity";
 
 function SearchIcon({ className }: { className?: string }) {
@@ -32,27 +32,11 @@ function SearchIcon({ className }: { className?: string }) {
   );
 }
 
-function suggestKindLabel(kind: GlobalSearchSuggestItem["kind"]): string {
-  if (kind === "category") return "Категория";
-  if (kind === "city") return "Город";
-  return "Объявление";
-}
-
-function mergeSuggestions(
-  local: GlobalSearchSuggestItem[],
-  remote: GlobalSearchSuggestItem[],
-  max: number,
-): GlobalSearchSuggestItem[] {
-  const out: GlobalSearchSuggestItem[] = [];
-  const seen = new Set<string>();
-  for (const item of [...local, ...remote]) {
-    const key = `${item.kind}:${item.label.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-    if (out.length >= max) break;
-  }
-  return out;
+function listingTypeShort(listingType: GlobalSearchSuggestItem["listingType"]): string | null {
+  if (listingType === "task") return "Задача";
+  if (listingType === "service") return "Услуга";
+  if (listingType === "product") return "Товар";
+  return null;
 }
 
 export function GlobalHeaderSearch({
@@ -83,13 +67,14 @@ export function GlobalHeaderSearch({
   const suggestAbortRef = useRef<AbortController | null>(null);
   const suggestSeqRef = useRef(0);
 
+  const qFromUrl = sp.get("q") ?? "";
   useEffect(() => {
     if (isHome || isSearchPage) {
-      queueMicrotask(() => setQ(sp.get("q") ?? ""));
+      queueMicrotask(() => setQ(qFromUrl));
     } else {
       queueMicrotask(() => setQ(""));
     }
-  }, [isHome, isSearchPage, sp]);
+  }, [isHome, isSearchPage, qFromUrl]);
 
   const replaceHomeQ = useCallback(
     (raw: string) => {
@@ -152,8 +137,7 @@ export function GlobalHeaderSearch({
       const ac = new AbortController();
       suggestAbortRef.current = ac;
 
-      const local = buildLocalSearchSuggestions(t, 8);
-      if (seq === suggestSeqRef.current) setSuggestions(local);
+      if (seq === suggestSeqRef.current) setSuggestions([]);
       setSuggestLoading(true);
 
       try {
@@ -167,14 +151,19 @@ export function GlobalHeaderSearch({
         if (seq !== suggestSeqRef.current || ac.signal.aborted) return;
         const d = (await r.json()) as { ok?: boolean; suggestions?: GlobalSearchSuggestItem[] };
         if (seq !== suggestSeqRef.current || ac.signal.aborted) return;
-        const remote = r.ok && d.ok && Array.isArray(d.suggestions) ? d.suggestions : [];
-        const merged = mergeSuggestions(local, remote, 8);
-        setSuggestions(merged);
-        searchDebugLog("suggest-header", { raw: t, local: local.length, remote: remote.length, merged: merged.length });
+        const raw = r.ok && d.ok && Array.isArray(d.suggestions) ? d.suggestions : [];
+        const listingOnly = raw.filter((s) => s.kind === "listing").slice(0, 5);
+        setSuggestions(listingOnly);
+        if (listingOnly.length === 0) setSuggestOpen(false);
+        searchDebugLog("suggest-header", {
+          raw: t,
+          listingCount: listingOnly.length,
+        });
       } catch (e) {
         if (seq !== suggestSeqRef.current || ac.signal.aborted) return;
         if (e instanceof DOMException && e.name === "AbortError") return;
-        setSuggestions(local);
+        setSuggestions([]);
+        setSuggestOpen(false);
       } finally {
         if (seq === suggestSeqRef.current) setSuggestLoading(false);
       }
@@ -249,7 +238,8 @@ export function GlobalHeaderSearch({
     inputClassName ??
     "h-11 w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 text-sm text-black outline-none placeholder:text-black/40 focus:border-gray-300 focus:ring-2 focus:ring-[rgba(255,122,0,0.2)]";
 
-  const showDropdown = suggestOpen && q.trim().length >= 2;
+  const showSuggestPanel =
+    suggestOpen && q.trim().length >= 2 && (suggestLoading || suggestions.length > 0);
 
   return (
     <div ref={wrapRef} className={`relative w-full ${className}`}>
@@ -270,41 +260,41 @@ export function GlobalHeaderSearch({
         placeholder="Поиск по объявлениям"
         className={inputCls}
         role="combobox"
-        aria-expanded={showDropdown && (suggestions.length > 0 || suggestLoading)}
+        aria-expanded={showSuggestPanel}
         aria-controls={listId}
         aria-autocomplete="list"
       />
-      {showDropdown ?
+      {showSuggestPanel ?
         <div
           id={listId}
           role="listbox"
           className="absolute left-0 right-0 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5"
         >
-          <div className="border-b border-gray-100 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-black/45">
-            {suggestLoading ? "Подсказки…" : "Подсказки"}
-          </div>
-          {suggestions.length > 0 ?
+          {suggestLoading && suggestions.length === 0 ?
+            <div className="px-3 py-2 text-sm text-black/50">Ищем…</div>
+          : suggestions.length > 0 ?
             <ul className="max-h-64 overflow-y-auto py-1">
-              {suggestions.map((s, idx) => (
-                <li key={`${s.kind}-${s.label}-${idx}`} role="option" aria-selected={idx === activeIdx}>
-                  <button
-                    type="button"
-                    className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-orange-50 ${
-                      idx === activeIdx ? "bg-orange-50" : ""
-                    }`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => goSearch(s.query)}
-                  >
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-orange-600/80">
-                      {suggestKindLabel(s.kind)}
-                    </span>
-                    <span className="text-black/90">{s.label}</span>
-                  </button>
-                </li>
-              ))}
+              {suggestions.map((s, idx) => {
+                const typeLine = listingTypeShort(s.listingType);
+                return (
+                  <li key={`${s.query}-${idx}`} role="option" aria-selected={idx === activeIdx}>
+                    <button
+                      type="button"
+                      className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-orange-50 ${
+                        idx === activeIdx ? "bg-orange-50" : ""
+                      }`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => goSearch(s.query)}
+                    >
+                      <span className="line-clamp-2 text-black/90">{s.label}</span>
+                      {typeLine ?
+                        <span className="text-[11px] font-medium text-black/45">{typeLine}</span>
+                      : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
-          : !suggestLoading ?
-            <p className="px-3 py-2 text-sm text-black/50">Нет подсказок</p>
           : null}
         </div>
       : null}

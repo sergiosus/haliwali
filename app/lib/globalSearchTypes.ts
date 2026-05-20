@@ -20,6 +20,8 @@ export type GlobalSearchSuggestItem = {
   kind: "listing" | "category" | "city";
   label: string;
   query: string;
+  /** Set for listing rows returned by `/api/search/suggest` (header). */
+  listingType?: "task" | "service" | "product";
 };
 
 export type GlobalSearchScopeParams = {

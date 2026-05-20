@@ -1,16 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CompactListingCard } from "../components/CompactListingCard";
 import { ExternalSearchResults } from "../components/ExternalSearchResults";
 import { appendReturnUrlQuery } from "../lib/returnNavigation";
 import type { ExternalSearchResultItem } from "../lib/externalSearch";
+import { getExternalMarketplaceSearchLinks } from "../lib/externalSearchLinks";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchListingTypeFilter, GlobalSearchResultItem } from "../lib/globalSearchTypes";
 import type { Listing, ListingType } from "../lib/listingModel";
-import { homepageLocationLabelFromScope } from "../lib/searchScopeLocation";
+import { homepageLocationLabelFromScope, normalizeSearchScope } from "../lib/searchScopeLocation";
 import { useCompactListingEnrichment } from "../lib/useCompactListingEnrichment";
 import { normalizeGlobalSearchQuery, searchDebugLog } from "../lib/searchMatch";
 import { useSearchScope } from "../lib/useStoredCity";
@@ -53,6 +54,14 @@ function searchResultToListing(r: GlobalSearchResultItem): Listing {
   return { ...base, type: "task" } as Listing;
 }
 
+function matchesListingTypeFilter(
+  r: GlobalSearchResultItem,
+  filter: GlobalSearchListingTypeFilter,
+): boolean {
+  if (filter === "all") return true;
+  return r.type === filter;
+}
+
 export function SearchPageClient() {
   const sp = useSearchParams();
   const query = (sp.get("q") ?? "").trim();
@@ -62,13 +71,26 @@ export function SearchPageClient() {
 
   const searchScope = useSearchScope();
   const scopeLabel = homepageLocationLabelFromScope(searchScope);
-
+  /** Stable key when `useSearchScope` reuses the same object reference across renders. */
+  const searchScopeKey = useMemo(
+    () => JSON.stringify(normalizeSearchScope(searchScope)),
+    [searchScope],
+  );
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<GlobalSearchResultItem[]>([]);
   const [externalResults, setExternalResults] = useState<ExternalSearchResultItem[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const fetchGenerationRef = useRef(0);
 
-  const listings = useMemo(() => results.map(searchResultToListing), [results]);
+  const displayedResults = useMemo(
+    () => results.filter((r) => matchesListingTypeFilter(r, type)),
+    [results, type],
+  );
+
+  const listings = useMemo(
+    () => displayedResults.map(searchResultToListing),
+    [displayedResults],
+  );
   const { viewCounts, publicByUserId } = useCompactListingEnrichment(listings);
 
   const returnHref = useMemo(() => {
@@ -82,6 +104,7 @@ export function SearchPageClient() {
   }, [query, type, searchScope]);
 
   useEffect(() => {
+    const gen = ++fetchGenerationRef.current;
     setResults([]);
     setExternalResults([]);
     setFetchError(null);
@@ -93,26 +116,25 @@ export function SearchPageClient() {
 
     const ac = new AbortController();
     const fetchQuery = query;
-    const fetchType = type;
     setLoading(true);
 
     void (async () => {
       try {
-        const p = new URLSearchParams({ q: fetchQuery, type: fetchType, limit: "60" });
+        const p = new URLSearchParams({ q: fetchQuery, type: "all", limit: "60" });
         const scopeP = globalSearchScopeToQueryParams(searchScope);
         for (const [k, v] of scopeP.entries()) p.set(k, v);
         const r = await fetch(`/api/search?${p.toString()}`, {
           cache: "no-store",
           signal: ac.signal,
         });
-        if (ac.signal.aborted) return;
+        if (ac.signal.aborted || gen !== fetchGenerationRef.current) return;
         const d = (await r.json()) as {
           ok?: boolean;
           results?: GlobalSearchResultItem[];
           externalResults?: ExternalSearchResultItem[];
           error?: string;
         };
-        if (ac.signal.aborted) return;
+        if (ac.signal.aborted || gen !== fetchGenerationRef.current) return;
         if (!r.ok || !d.ok) {
           setResults([]);
           setExternalResults([]);
@@ -120,7 +142,7 @@ export function SearchPageClient() {
           return;
         }
         const list = Array.isArray(d.results) ? d.results : [];
-        if (ac.signal.aborted) return;
+        if (ac.signal.aborted || gen !== fetchGenerationRef.current) return;
         setResults(list);
         setExternalResults(Array.isArray(d.externalResults) ? d.externalResults : []);
         const n = normalizeGlobalSearchQuery(fetchQuery);
@@ -129,18 +151,18 @@ export function SearchPageClient() {
           variants: n.normalizedUniqueVariants,
           resultCount: list.length,
         });
-      } catch (e) {
-        if (ac.signal.aborted) return;
+      } catch {
+        if (ac.signal.aborted || gen !== fetchGenerationRef.current) return;
         setResults([]);
         setExternalResults([]);
         setFetchError("search_failed");
       } finally {
-        if (!ac.signal.aborted) setLoading(false);
+        if (!ac.signal.aborted && gen === fetchGenerationRef.current) setLoading(false);
       }
     })();
 
     return () => ac.abort();
-  }, [query, type, searchScope]);
+  }, [query, searchScopeKey, searchScope]);
 
   function typeTabHref(nextType: GlobalSearchListingTypeFilter) {
     const p = new URLSearchParams();
@@ -152,6 +174,11 @@ export function SearchPageClient() {
     return qs ? `/search?${qs}` : "/search";
   }
 
+  const marketplaceLinks = useMemo(
+    () => getExternalMarketplaceSearchLinks(query, type),
+    [query, type],
+  );
+
   return (
     <main className="mx-auto w-full min-w-0 max-w-7xl overflow-x-hidden px-3 py-6 sm:px-6">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -161,7 +188,7 @@ export function SearchPageClient() {
             <>
               <p className="mt-1 text-sm text-black/70">По запросу: «{query}»</p>
               <p className="mt-0.5 text-sm text-black/60">
-                {loading ? "Ищем…" : `Найдено: ${results.length}`}
+                {loading ? "Ищем…" : `Найдено: ${displayedResults.length}`}
                 {scopeLabel && scopeLabel !== "Вся Россия" ? ` · ${scopeLabel}` : ""}
               </p>
             </>
@@ -190,7 +217,7 @@ export function SearchPageClient() {
         </p>
       : null}
 
-      {!loading && query && results.length === 0 && !fetchError ?
+      {!loading && query && displayedResults.length === 0 && !fetchError ?
         <div className="py-12 text-center">
           <p className="text-lg text-black/70">Ничего не найдено</p>
           <p className="mt-2 text-sm text-black/55">
@@ -199,26 +226,50 @@ export function SearchPageClient() {
         </div>
       : null}
 
-      <ul className="mt-4 flex w-full min-w-0 max-w-full flex-col gap-3">
-        {!loading &&
-          results.map((r) => {
-          const listing = searchResultToListing(r);
-          const ownerId = (listing.ownerId ?? "").trim();
-          const href = appendReturnUrlQuery(r.href, returnHref);
-          return (
-            <li key={r.id} className="min-w-0 w-full max-w-full">
-              <CompactListingCard
-                listing={listing}
-                href={href}
-                viewCount={viewCounts[r.id] ?? 0}
-                publicAuthor={ownerId ? (publicByUserId[ownerId] ?? null) : null}
-              />
-            </li>
-          );
-        })}
-      </ul>
+      <div className="mx-auto mt-4 w-full min-w-0 max-w-2xl">
+        <ul className="flex w-full min-w-0 max-w-full flex-col gap-3">
+          {!loading &&
+            displayedResults.map((r) => {
+              const listing = searchResultToListing(r);
+              const ownerId = (listing.ownerId ?? "").trim();
+              const href = appendReturnUrlQuery(r.href, returnHref);
+              return (
+                <li key={r.id} className="min-w-0 w-full max-w-full">
+                  <CompactListingCard
+                    listing={listing}
+                    href={href}
+                    viewCount={viewCounts[r.id] ?? 0}
+                    publicAuthor={ownerId ? (publicByUserId[ownerId] ?? null) : null}
+                  />
+                </li>
+              );
+            })}
+        </ul>
 
-      {!loading ? <ExternalSearchResults items={externalResults} /> : null}
+        {marketplaceLinks.length > 0 ?
+          <section className="mt-8 border-t border-gray-200 pt-6" aria-label="Поиск на других площадках">
+            <h2 className="text-sm font-semibold text-black">Искать также на других площадках</h2>
+            <p className="mt-1 text-xs leading-snug text-black/50">
+              Ссылки ведут на внешние сайты. Haliwali не отвечает за их объявления.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {marketplaceLinks.map((link) => (
+                <a
+                  key={`${link.label}-${link.href}`}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer nofollow"
+                  className="inline-flex max-w-full items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-black/85 hover:border-black/20 hover:bg-black/[0.02]"
+                >
+                  <span className="truncate">{link.label}</span>
+                </a>
+              ))}
+            </div>
+          </section>
+        : null}
+
+        {!loading ? <ExternalSearchResults items={externalResults} /> : null}
+      </div>
     </main>
   );
 }

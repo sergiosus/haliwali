@@ -1,4 +1,3 @@
-import { allDirectoryItems, normalizeQuery } from "./categoryDirectory";
 import {
   globalSearchNormalizedPayload,
   normalizeGlobalSearchQuery,
@@ -12,8 +11,7 @@ import { listBootstrap } from "./serverListingsStore";
 import { listingFromPersistentRow } from "./serverListingsMap";
 import type { GlobalSearchListingTypeFilter, GlobalSearchResultItem, GlobalSearchSuggestItem } from "./globalSearchTypes";
 import { listingMatchesSearchScope, type SearchScopeLocation } from "./searchScopeLocation";
-import { haystackMatchesRawQuery, listingMatchesSearchQuery, scoreListingSearch, searchDebugLog } from "./searchMatch";
-import { filterGlobalRussiaCitiesByQuery } from "./staticRussiaCities";
+import { listingMatchesSearchQuery, scoreListingSearch, searchDebugLog } from "./searchMatch";
 import { logSearchAnalytics } from "./serverSearchAnalytics";
 
 const DESCRIPTION_SNIPPET_MAX = 160;
@@ -305,30 +303,6 @@ export async function globalSearchListings(opts: {
 
 export { globalSearchNormalizedPayload };
 
-function suggestCategories(q: string, max: number): GlobalSearchSuggestItem[] {
-  const out: GlobalSearchSuggestItem[] = [];
-  const seen = new Set<string>();
-  for (const item of allDirectoryItems) {
-    const hay = normalizeQuery(item.title);
-    if (!haystackMatchesRawQuery(hay, q)) continue;
-    const key = item.title.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ kind: "category", label: item.title, query: item.title });
-    if (out.length >= max) return out;
-  }
-  return out;
-}
-
-function suggestCities(q: string, max: number): GlobalSearchSuggestItem[] {
-  const out: GlobalSearchSuggestItem[] = [];
-  for (const c of filterGlobalRussiaCitiesByQuery(q).slice(0, max)) {
-    const label = c.region ? `${c.city}, ${c.region}` : c.city;
-    out.push({ kind: "city", label, query: c.city });
-  }
-  return out;
-}
-
 export async function globalSearchSuggest(opts: {
   query: string;
   scope: SearchScopeLocation;
@@ -350,32 +324,25 @@ export async function globalSearchSuggest(opts: {
   }
 
   try {
-    for (const c of suggestCategories(q, 3)) push(c);
-  } catch (e) {
-    warnSearchSuggestError("suggestCategories", e);
-  }
-
-  try {
-    for (const c of suggestCities(q, 2)) push(c);
-  } catch (e) {
-    warnSearchSuggestError("suggestCities", e);
-  }
-
-  try {
     const { results } = await globalSearchListings({
       query: q,
       type: "all",
-      limit: 6,
+      limit: 5,
       scope: opts.scope,
       logAnalytics: false,
     });
     for (const r of results) {
-      if (suggestions.length >= 8) break;
-      push({ kind: "listing", label: r.title, query: r.title });
+      if (suggestions.length >= 5) break;
+      push({
+        kind: "listing",
+        label: r.title,
+        query: r.title,
+        listingType: r.type,
+      });
     }
   } catch (e) {
     warnSearchSuggestError("suggestListings", e);
   }
 
-  return { normalized, suggestions: suggestions.slice(0, 8) };
+  return { normalized, suggestions: suggestions.slice(0, 5) };
 }

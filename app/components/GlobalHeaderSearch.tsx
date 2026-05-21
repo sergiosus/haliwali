@@ -12,9 +12,16 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchSuggestItem } from "../lib/globalSearchTypes";
+import { bestGlobalSearchQueryText, keyboardLayoutSearchHint } from "../lib/globalSearchNormalize";
 import { searchDebugLog } from "../lib/searchMatch";
 import { getHeaderSuggestExternalSearchLinks } from "../lib/externalSearchLinks";
-import { pushRecentSearch } from "../lib/recentSearches";
+import {
+  clearRecentSearches,
+  pushRecentSearch,
+  readRecentSearches,
+  RECENT_SEARCHES_CHANGED_EVENT,
+  RECENT_SEARCH_MIN_LENGTH,
+} from "../lib/recentSearches";
 import { useSearchScope } from "../lib/useStoredCity";
 
 const MIN_LISTING_SUGGEST_CHARS = 3;
@@ -29,6 +36,24 @@ const SECTION_LABELS: Record<ListingTypeOrder, string> = {
   service: "Услуги",
   task: "Задачи",
 };
+
+function RecentSearchIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 8v4l2.5 1.5" />
+    </svg>
+  );
+}
 
 function SearchIcon({ className }: { className?: string }) {
   return (
@@ -111,6 +136,7 @@ export function GlobalHeaderSearch({
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
   const [submitHint, setSubmitHint] = useState(false);
+  const [recentQueries, setRecentQueries] = useState<string[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const debounceRef = useRef<number | null>(null);
   const suggestAbortRef = useRef<AbortController | null>(null);
@@ -124,6 +150,17 @@ export function GlobalHeaderSearch({
       queueMicrotask(() => setQ(""));
     }
   }, [isHome, isSearchPage, qFromUrl]);
+
+  const refreshRecentQueries = useCallback(() => {
+    setRecentQueries(readRecentSearches());
+  }, []);
+
+  useEffect(() => {
+    refreshRecentQueries();
+    const onChange = () => refreshRecentQueries();
+    window.addEventListener(RECENT_SEARCHES_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(RECENT_SEARCHES_CHANGED_EVENT, onChange);
+  }, [refreshRecentQueries]);
 
   /** Live URL params (avoids stale useSearchParams when clearing q). */
   const liveSearchParams = useCallback((): URLSearchParams => {
@@ -177,27 +214,56 @@ export function GlobalHeaderSearch({
     [isSearchPage, router, liveSearchParams, pathWithQuery],
   );
 
-  const clearHomeOrSearchUrlQuery = useCallback(() => {
-    resetSuggestState();
+  /** Clear URL query but keep dropdown open when recent searches exist (input may stay focused). */
+  const clearUrlQueryKeepRecentPanel = useCallback(() => {
+    if (debounceRef.current != null) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    suggestAbortRef.current?.abort();
+    suggestAbortRef.current = null;
+    suggestSeqRef.current += 1;
     setQ("");
+    setSuggestions([]);
+    setSuggestLoading(false);
+    setActiveIdx(-1);
+    setSubmitHint(false);
     if (isHome) {
       const next = liveSearchParams();
       next.delete("q");
       router.replace(pathWithQuery(pathname, next), { scroll: false });
-      return;
-    }
-    if (isSearchPage) {
+    } else if (isSearchPage) {
       const next = liveSearchParams();
       next.delete("q");
       router.replace(pathWithQuery("/search", next), { scroll: false });
     }
-  }, [isHome, isSearchPage, router, liveSearchParams, pathWithQuery, pathname, resetSuggestState]);
+    refreshRecentQueries();
+    if (suggestPages && readRecentSearches().length > 0) {
+      setSuggestOpen(true);
+    } else {
+      setSuggestOpen(false);
+    }
+  }, [
+    isHome,
+    isSearchPage,
+    router,
+    liveSearchParams,
+    pathWithQuery,
+    pathname,
+    suggestPages,
+    refreshRecentQueries,
+  ]);
+
+  const clearHomeOrSearchUrlQuery = useCallback(() => {
+    clearUrlQueryKeepRecentPanel();
+  }, [clearUrlQueryKeepRecentPanel]);
 
   /** Navigate to /search (global search). */
   const applySearchQueryAndNavigate = useCallback(
     (raw: string) => {
       const t = raw.trim();
-      if (t.length < MIN_LISTING_SUGGEST_CHARS) return;
+      const searchQ = bestGlobalSearchQueryText(raw);
+      if (searchQ.length < MIN_LISTING_SUGGEST_CHARS) return;
       setQ(t);
       setSuggestions([]);
       setSuggestLoading(false);
@@ -206,8 +272,8 @@ export function GlobalHeaderSearch({
       suggestAbortRef.current = null;
       suggestSeqRef.current += 1;
       setSuggestOpen(false);
-      pushRecentSearch(t);
-      const p = new URLSearchParams({ q: t });
+      pushRecentSearch(searchQ);
+      const p = new URLSearchParams({ q: searchQ });
       const scopeP = globalSearchScopeToQueryParams(searchScope);
       for (const [k, v] of scopeP.entries()) p.set(k, v);
       router.push(`/search?${p.toString()}`);
@@ -232,6 +298,30 @@ export function GlobalHeaderSearch({
       applySearchQueryAndNavigate((s.query || s.label).trim());
     },
     [applySearchQueryAndNavigate, router],
+  );
+
+  const applyRecentSearch = useCallback(
+    (query: string) => {
+      const t = query.trim();
+      if (t.length < RECENT_SEARCH_MIN_LENGTH) return;
+      resetSuggestState();
+      setQ(t);
+      if (isHome) {
+        replaceHomeQ(t);
+      } else if (isSearchPage) {
+        replaceSearchPageQ(t);
+      } else {
+        applySearchQueryAndNavigate(t);
+      }
+    },
+    [
+      resetSuggestState,
+      isHome,
+      isSearchPage,
+      replaceHomeQ,
+      replaceSearchPageQ,
+      applySearchQueryAndNavigate,
+    ],
   );
 
   const fetchSuggestions = useCallback(
@@ -302,7 +392,7 @@ export function GlobalHeaderSearch({
     if (t.length >= MIN_LISTING_SUGGEST_CHARS) setSubmitHint(false);
 
     if (t.length === 0) {
-      clearHomeOrSearchUrlQuery();
+      clearUrlQueryKeepRecentPanel();
       return;
     }
 
@@ -401,14 +491,35 @@ export function GlobalHeaderSearch({
     "min-h-[3.25rem] w-full flex-1 border-0 bg-transparent py-3 pl-12 pr-3 text-base text-black outline-none placeholder:text-black/45 sm:min-h-[3.5rem] sm:text-lg";
 
   const headerExternalLinks = useMemo(() => getHeaderSuggestExternalSearchLinks(q), [q]);
+  const keyboardLayoutHint = useMemo(() => keyboardLayoutSearchHint(q), [q]);
 
-  const showSuggestPanel = suggestOpen && suggestPages && qTrim.length >= 1;
+  const showListingBlock =
+    qTrim.length >= MIN_LISTING_SUGGEST_CHARS && (suggestLoading || flat.length > 0);
+  const showRecentBlock =
+    suggestPages && recentQueries.length > 0 && qTrim.length < MIN_LISTING_SUGGEST_CHARS;
+  const showSuggestPanel =
+    suggestOpen && suggestPages && (qTrim.length >= 1 || showRecentBlock);
   const showShortQueryHint = qTrim.length > 0 && qTrim.length < MIN_LISTING_SUGGEST_CHARS;
-  const showListingBlock = qTrim.length >= MIN_LISTING_SUGGEST_CHARS && (suggestLoading || flat.length > 0);
   /** Web search rows when query is at least 2 chars — below listing area or under short-query hint. */
   const showExternalBlock = headerExternalLinks.length > 0;
   const showSubmitValidation =
     submitHint && qTrim.length > 0 && qTrim.length < MIN_LISTING_SUGGEST_CHARS;
+
+  const openSuggestOnFocus = useCallback(() => {
+    if (!suggestPages) return;
+    refreshRecentQueries();
+    const t = q.trim();
+    const hasRecent = readRecentSearches().length > 0;
+    if (t.length === 0 && !hasRecent) return;
+    setSuggestOpen(true);
+    if (t.length >= MIN_LISTING_SUGGEST_CHARS && suggestions.length === 0 && !suggestLoading) {
+      if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
+      debounceRef.current = window.setTimeout(() => {
+        void fetchSuggestions(q);
+        debounceRef.current = null;
+      }, SUGGEST_DEBOUNCE_MS);
+    }
+  }, [suggestPages, q, refreshRecentQueries, suggestions.length, suggestLoading, fetchSuggestions]);
 
   const suggestPanel = showSuggestPanel ? (
     <div
@@ -418,8 +529,53 @@ export function GlobalHeaderSearch({
       }`}
     >
           <div className="min-h-0 flex-1 overflow-y-auto">
+            {showRecentBlock ?
+              <div role="group" aria-label="Недавние поиски">
+                <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-black/40">
+                    Недавние поиски
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearRecentSearches();
+                      refreshRecentQueries();
+                    }}
+                    className="shrink-0 text-[11px] font-medium text-black/45 underline-offset-2 transition-colors hover:text-black/70 hover:underline"
+                  >
+                    Очистить
+                  </button>
+                </div>
+                {recentQueries.map((query) => (
+                  <button
+                    key={query}
+                    type="button"
+                    className="flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left text-sm text-black/85 transition-colors hover:bg-orange-50"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      applyRecentSearch(query);
+                    }}
+                  >
+                    <RecentSearchIcon className="h-4 w-4 shrink-0 text-black/35" />
+                    <span className="min-w-0 truncate font-medium">{query}</span>
+                  </button>
+                ))}
+              </div>
+            : null}
+
             {showShortQueryHint ?
               <div className="px-3 py-2 text-sm text-black/55">Введите минимум 3 символа для поиска</div>
+            : showRecentBlock && qTrim.length === 0 ?
+              <div className="px-3 pb-2 text-xs text-black/45">Выберите недавний запрос или начните вводить</div>
+            : null}
+
+            {keyboardLayoutHint && qTrim.length >= MIN_LISTING_SUGGEST_CHARS ?
+              <div className="border-b border-gray-100 px-3 py-2 text-sm text-black/55">
+                Искать:{" "}
+                <span className="font-medium text-black/80">{keyboardLayoutHint}</span>
+              </div>
             : null}
 
             {showListingBlock ?
@@ -478,7 +634,7 @@ export function GlobalHeaderSearch({
             : null}
           </div>
 
-          {showExternalBlock ?
+          {showExternalBlock && !showRecentBlock ?
             <div
               className={`shrink-0 border-t border-gray-100 bg-white px-3 py-2 ${
                 !showListingBlock && !showShortQueryHint ? "pt-3" : ""
@@ -528,24 +684,9 @@ export function GlobalHeaderSearch({
                   type="search"
                   value={q}
                   onChange={(e) => onInputChange(e.target.value)}
+                  onInput={(e) => onInputChange(e.currentTarget.value)}
                   onKeyDown={onKeyDown}
-                  onFocus={() => {
-                    if (!suggestPages) return;
-                    const t = q.trim();
-                    if (t.length === 0) return;
-                    setSuggestOpen(true);
-                    if (
-                      t.length >= MIN_LISTING_SUGGEST_CHARS &&
-                      suggestions.length === 0 &&
-                      !suggestLoading
-                    ) {
-                      if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
-                      debounceRef.current = window.setTimeout(() => {
-                        void fetchSuggestions(q);
-                        debounceRef.current = null;
-                      }, SUGGEST_DEBOUNCE_MS);
-                    }
-                  }}
+                  onFocus={openSuggestOnFocus}
                   placeholder="Что вы ищете? Услуги, товары, задачи…"
                   className={heroInputCls}
                   role="combobox"
@@ -586,19 +727,7 @@ export function GlobalHeaderSearch({
         onChange={(e) => onInputChange(e.target.value)}
         onInput={(e) => onInputChange(e.currentTarget.value)}
         onKeyDown={onKeyDown}
-        onFocus={() => {
-          if (!suggestPages) return;
-          const t = q.trim();
-          if (t.length === 0) return;
-          setSuggestOpen(true);
-          if (t.length >= MIN_LISTING_SUGGEST_CHARS && suggestions.length === 0 && !suggestLoading) {
-            if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
-            debounceRef.current = window.setTimeout(() => {
-              void fetchSuggestions(q);
-              debounceRef.current = null;
-            }, SUGGEST_DEBOUNCE_MS);
-          }
-        }}
+        onFocus={openSuggestOnFocus}
         placeholder="Поиск по объявлениям"
         className={headerInputCls}
         role="combobox"

@@ -1,5 +1,7 @@
 /** Client-side recent search queries (localStorage). */
 
+import { bestGlobalSearchQueryText } from "./globalSearchNormalize";
+
 export const RECENT_SEARCHES_STORAGE_KEY = "haliwali_recent_searches";
 export const RECENT_SEARCHES_CHANGED_EVENT = "haliwali-recent-searches-changed";
 export const RECENT_SEARCHES_MAX = 10;
@@ -46,7 +48,7 @@ export function readRecentSearches(): string[] {
 
 /** Save on explicit search submit only; moves duplicate to top. */
 export function pushRecentSearch(raw: string): string[] {
-  const q = normalizeRecentSearchQuery(raw);
+  const q = normalizeRecentSearchQuery(bestGlobalSearchQueryText(raw));
   if (q.length < RECENT_SEARCH_MIN_LENGTH) return readRecentSearches();
 
   const key = recentSearchDedupeKey(q);

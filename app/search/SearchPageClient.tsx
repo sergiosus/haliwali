@@ -246,10 +246,10 @@ export function SearchPageClient() {
         </ul>
 
         {marketplaceLinks.length > 0 ?
-          <section className="mt-8 border-t border-gray-200 pt-6" aria-label="Поиск на других площадках">
-            <h2 className="text-sm font-semibold text-black">Искать также на других площадках</h2>
+          <section className="mt-8 border-t border-gray-200 pt-6" aria-label="Поиск в интернете">
+            <h2 className="text-sm font-semibold text-black">Поиск в интернете</h2>
             <p className="mt-1 text-xs leading-snug text-black/50">
-              Ссылки ведут на внешние сайты. Haliwali не отвечает за их объявления.
+              Ссылки открываются на Яндексе и Google с учётом раскладки клавиатуры.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {marketplaceLinks.map((link) => (

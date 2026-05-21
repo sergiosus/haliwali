@@ -108,10 +108,13 @@ export function normalizeGlobalSearchQuery(raw: string): GlobalSearchNormalizedQ
   }
 
   let transliterated: string | null = null;
-  const latRu = latinTypingToRussianApprox(original);
-  if (latRu && latRu !== primary && latRu !== keyboardFixed) {
-    transliterated = latRu;
-    unique.add(latRu);
+  /** Phonetic Latin→RU only when layout fix did not apply (avoids h→х vs layout h→р). */
+  if (!keyboardFixed) {
+    const latRu = latinTypingToRussianApprox(original);
+    if (latRu && latRu !== primary) {
+      transliterated = latRu;
+      unique.add(latRu);
+    }
   }
 
   for (const v of buildSearchVariants(original)) {
@@ -134,6 +137,21 @@ export function normalizeGlobalSearchQuery(raw: string): GlobalSearchNormalizedQ
 /** Client/server helper: all match variants for a raw query string. */
 export function getSearchQueryVariants(raw: string): string[] {
   return normalizeGlobalSearchQuery(raw).normalizedUniqueVariants;
+}
+
+/** Best query for search URL, outbound links, and recent-search storage. */
+export function bestGlobalSearchQueryText(raw: string): string {
+  const n = normalizeGlobalSearchQuery(raw);
+  if (n.keyboardFixed) return n.keyboardFixed;
+  if (n.transliterated) return n.transliterated;
+  return n.primary || n.original;
+}
+
+/** Hint text when EN keyboard layout maps to different RU text (e.g. jv → ом). */
+export function keyboardLayoutSearchHint(raw: string): string | null {
+  const n = normalizeGlobalSearchQuery(raw);
+  if (!n.keyboardFixed || n.keyboardFixed === n.primary) return null;
+  return n.keyboardFixed;
 }
 
 export function globalSearchNormalizedPayload(n: GlobalSearchNormalizedQuery) {

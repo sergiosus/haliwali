@@ -14,6 +14,7 @@ import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchSuggestItem } from "../lib/globalSearchTypes";
 import { searchDebugLog } from "../lib/searchMatch";
 import { getHeaderSuggestExternalSearchLinks } from "../lib/externalSearchLinks";
+import { pushRecentSearch } from "../lib/recentSearches";
 import { useSearchScope } from "../lib/useStoredCity";
 
 const MIN_LISTING_SUGGEST_CHARS = 3;
@@ -205,6 +206,7 @@ export function GlobalHeaderSearch({
       suggestAbortRef.current = null;
       suggestSeqRef.current += 1;
       setSuggestOpen(false);
+      pushRecentSearch(t);
       const p = new URLSearchParams({ q: t });
       const scopeP = globalSearchScopeToQueryParams(searchScope);
       for (const [k, v] of scopeP.entries()) p.set(k, v);

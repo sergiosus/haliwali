@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Listing, ProductListing, ServiceListing, TaskListing } from "./lib/listings";
 import {
   dedupeListingsById,
@@ -91,6 +91,11 @@ import { resolveRussiaCityFromName } from "./lib/resolveRussiaCityFromStatic";
 import { getCurrentUserId, refreshAuthFromServer } from "./lib/auth";
 import { AuthContinueModal } from "./components/AuthContinueModal";
 import { GlobalHeaderSearch } from "./components/GlobalHeaderSearch";
+import {
+  clearRecentSearches,
+  readRecentSearches,
+  RECENT_SEARCHES_CHANGED_EVENT,
+} from "./lib/recentSearches";
 export default function Home() {
   return (
     <Suspense
@@ -109,9 +114,71 @@ type OfferListing = ServiceListing;
 type ProductKind = "Продам" | "Куплю";
 
 const EMPTY_SEARCH_RESULTS: Listing[] = [];
-const RECENT_LISTINGS_LIMIT = 10;
 
 type HomeGridColumnHeading = "Задачи" | "Услуги" | "Товары";
+
+function HomeRecentSearchesBlock({ hidden }: { hidden: boolean }) {
+  const router = useRouter();
+  const [queries, setQueries] = useState<string[]>([]);
+
+  const refresh = useCallback(() => {
+    setQueries(readRecentSearches());
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const onChange = () => refresh();
+    window.addEventListener(RECENT_SEARCHES_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(RECENT_SEARCHES_CHANGED_EVENT, onChange);
+  }, [refresh]);
+
+  if (hidden || queries.length === 0) return null;
+
+  function runRecentSearch(query: string) {
+    const t = query.trim();
+    if (!t) return;
+    const params = new URLSearchParams(
+      typeof window !== "undefined" ? window.location.search : "",
+    );
+    params.delete("q");
+    params.set("q", t);
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+  }
+
+  return (
+    <section className="mb-4 w-full min-w-0 max-w-full box-border">
+      <div className="box-border w-full min-w-0 rounded-2xl border border-black/10 bg-white px-4 py-3 sm:px-5 sm:py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-medium text-black/70">Недавние поиски</div>
+          <button
+            type="button"
+            onClick={() => {
+              clearRecentSearches();
+              refresh();
+            }}
+            className="shrink-0 text-xs font-medium text-black/45 underline-offset-2 transition-colors hover:text-black/70 hover:underline"
+          >
+            Очистить
+          </button>
+        </div>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {queries.map((query) => (
+            <button
+              key={query}
+              type="button"
+              onClick={() => runRecentSearch(query)}
+              className="inline-flex max-w-full items-center rounded-full border border-black/12 bg-zinc-50 px-3 py-1.5 text-left text-sm font-medium text-black/82 transition-colors hover:border-orange-200 hover:bg-orange-50 hover:text-orange-800"
+              title={query}
+            >
+              <span className="min-w-0 truncate">{query}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function isHomeGridColumnHeading(s: string): s is HomeGridColumnHeading {
   return s === "Задачи" || s === "Услуги" || s === "Товары";
@@ -409,15 +476,6 @@ function HaliwaliLanding() {
       .slice(0, 30);
   }, [directorySearch, homeSearchActive, uniqueListings, loaded, homepageSearchScope]);
 
-  /** Latest public listings when homepage search is empty (newest first, max 10). */
-  const recentListings = useMemo(() => {
-    if (homeSearchActive || !loaded) return EMPTY_SEARCH_RESULTS;
-    return uniqueListings
-      .filter((l) => isListingPubliclyListed(l))
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, RECENT_LISTINGS_LIMIT);
-  }, [homeSearchActive, loaded, uniqueListings]);
-
   const homeSearchHasCategoryHits = useMemo(() => {
     if (!homeSearchActive) return false;
     return homeCategoryGridFiltered.some((section) => section.links.length > 0);
@@ -435,8 +493,6 @@ function HaliwaliLanding() {
   }, [directorySearch, homeSearchActive, publishedSearchResults.length, homeSearchHasCategoryHits]);
 
   const { viewCounts, publicByUserId } = useCompactListingEnrichment(publishedSearchResults);
-  const { viewCounts: recentViewCounts, publicByUserId: recentPublicByUserId } =
-    useCompactListingEnrichment(recentListings);
 
   const taskTitleRef = useRef<HTMLInputElement | null>(null);
   const offerTitleRef = useRef<HTMLInputElement | null>(null);
@@ -755,36 +811,7 @@ function HaliwaliLanding() {
             </section>
           ) : null}
 
-          {!homeSearchActive ?
-            loaded ?
-              recentListings.length > 0 ?
-                <section className="mb-4 w-full min-w-0 max-w-full overflow-x-hidden box-border">
-                  <div className="box-border w-full min-w-0 max-w-full rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
-                    <div className="text-sm font-medium text-black/70">Недавние объявления</div>
-                    <div className="mt-3 grid w-full min-w-0 max-w-full grid-cols-1 gap-4 box-border md:grid-cols-2">
-                      {recentListings.map((l) => {
-                        const oid = (l.ownerId ?? "").trim();
-                        return (
-                          <div key={l.id} className="min-w-0 w-full max-w-full">
-                            <CompactListingCard
-                              listing={l}
-                              href={appendReturnUrlQuery(listingPath(l.id, l.title), "/")}
-                              viewCount={recentViewCounts[l.id] ?? 0}
-                              publicAuthor={oid ? recentPublicByUserId[oid] : null}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </section>
-              : (
-                <p className="mb-4 text-center text-sm text-black/50">Пока нет объявлений</p>
-              )
-            : (
-              <div className="mb-4 text-sm text-black/60">Загрузка…</div>
-            )
-          : null}
+          <HomeRecentSearchesBlock hidden={homeSearchActive} />
 
           <div className="mb-6 flex min-w-0 w-full justify-center sm:mb-8 sm:justify-end">
             <Link

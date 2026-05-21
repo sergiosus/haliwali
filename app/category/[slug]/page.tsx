@@ -7,7 +7,6 @@ import { useParams } from "next/navigation";
 import { isPublicStatus, useListingsStore } from "../../lib/listings";
 import { allDirectoryItems, getDirectoryItemBySlug, normalizeQuery } from "../../lib/directory";
 import { listingMatchesDirectoryCategorySlug } from "../../lib/categoryLegacyMap";
-import { getHomeParentGroup, homeParentSlugForLeafSlug } from "../../lib/categories";
 import { matchesListingQuery } from "../../lib/search";
 import { CompactListingCard } from "../../components/CompactListingCard";
 import { appendReturnUrlQuery } from "../../lib/returnNavigation";
@@ -201,12 +200,6 @@ export default function CategoryPage() {
   void setQ;
 
   const categoryTitle = item?.title ?? "Категория";
-  const parentGroup = useMemo(() => {
-    const direct = getHomeParentGroup(slug);
-    if (direct) return direct;
-    const parentSlug = homeParentSlugForLeafSlug(slug);
-    return parentSlug ? getHomeParentGroup(parentSlug) : null;
-  }, [slug]);
   const selectedCityName = (city ?? "").trim();
   const cityDisplayLabel = homepageLocationLabelFromScope(searchScope);
   function resetFilters({ keepCity }: { keepCity: boolean }) {
@@ -237,29 +230,7 @@ export default function CategoryPage() {
           <span className="text-black/60">{categoryTitle}</span>
         </nav>
 
-        {parentGroup && parentGroup.links.length > 1 ? (
-          <div className="mb-3 flex flex-wrap gap-2" aria-label="Подкатегории">
-            <Link
-              href={`/category/${parentGroup.parentSlug}`}
-              className="inline-flex rounded-full border border-black/15 bg-white px-3 py-1 text-xs font-medium text-black/80 hover:bg-black/[0.03]"
-            >
-              Все
-            </Link>
-            {parentGroup.links
-              .filter((child) => child.slug !== parentGroup.parentSlug)
-              .map((child) => (
-                <Link
-                  key={child.slug}
-                  href={`/category/${child.slug}`}
-                  className="inline-flex rounded-full border border-black/10 bg-zinc-50/90 px-3 py-1 text-xs font-medium text-black/75 hover:bg-zinc-100/80"
-                >
-                  {child.label}
-                </Link>
-              ))}
-          </div>
-        ) : null}
-
-        <div className="mb-2 mt-1 flex items-center justify-between gap-3 md:hidden">
+        <div className="mb-2 flex items-center justify-between gap-3 md:hidden">
           <button
             type="button"
             onClick={() => setFilterOpen(true)}

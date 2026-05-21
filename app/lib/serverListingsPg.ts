@@ -62,10 +62,10 @@ export async function pgInsertListing(listing: Listing): Promise<void> {
       id, edit_token, owner_id, type, status, moderation_reason, deal_status,
       title, description, category_name, category_slug, city, address, latitude, longitude,
       address_public, specialization, price, phone, photos, created_at, updated_at, author_public_name,
-      listing_lifecycle, deleted_at, delete_permanently_at, archived_at, deleted_snapshot
+      listing_lifecycle, deleted_at, delete_permanently_at, archived_at, deleted_snapshot, attributes
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22,$23,
-      $24,$25,$26,$27,$28::jsonb
+      $24,$25,$26,$27,$28::jsonb,$29::jsonb
     )`,
     [
       r.id,
@@ -96,6 +96,7 @@ export async function pgInsertListing(listing: Listing): Promise<void> {
       r.delete_permanently_at ?? null,
       r.archived_at ?? null,
       r.deleted_snapshot ? JSON.stringify(r.deleted_snapshot) : null,
+      JSON.stringify(r.attributes && typeof r.attributes === "object" ? r.attributes : {}),
     ],
   );
 }
@@ -130,7 +131,8 @@ export async function pgReplaceListing(listing: Listing): Promise<void> {
       deleted_at = $25,
       delete_permanently_at = $26,
       archived_at = $27,
-      deleted_snapshot = $28::jsonb
+      deleted_snapshot = $28::jsonb,
+      attributes = $29::jsonb
     WHERE id = $1`,
     [
       r.id,
@@ -161,6 +163,7 @@ export async function pgReplaceListing(listing: Listing): Promise<void> {
       r.delete_permanently_at ?? null,
       r.archived_at ?? null,
       r.deleted_snapshot ? JSON.stringify(r.deleted_snapshot) : null,
+      JSON.stringify(r.attributes && typeof r.attributes === "object" ? r.attributes : {}),
     ],
   );
 }

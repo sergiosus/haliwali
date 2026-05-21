@@ -8,6 +8,7 @@ import type {
   ProductListing,
   ServiceListing,
 } from "./listingModel";
+import { parseListingAttributesJson } from "./listingAttributes";
 import { publicListingImageSrc } from "./listingCardMeta";
 
 export function parsePhotosJson(raw: unknown): string[] {
@@ -82,6 +83,7 @@ export function listingFromPersistentRow(row: Record<string, unknown>): Listing 
   const deletePermanentlyAt = readOptionalMillis(row.deletePermanentlyAt ?? row.delete_permanently_at);
   const archivedAt = readOptionalMillis(row.archivedAt ?? row.archived_at);
   const deletedSnapshot = parseDeletedSnapshot(row.deletedSnapshot ?? row.deleted_snapshot);
+  const attributes = parseListingAttributesJson(row.attributes);
 
   const base = {
     id,
@@ -110,6 +112,7 @@ export function listingFromPersistentRow(row: Record<string, unknown>): Listing 
     ...(typeof deletePermanentlyAt === "number" ? { deletePermanentlyAt } : {}),
     ...(typeof archivedAt === "number" ? { archivedAt } : {}),
     ...(deletedSnapshot ? { deletedSnapshot } : {}),
+    ...(attributes ? { attributes } : {}),
   };
 
   const city = base.city;
@@ -172,6 +175,8 @@ export function listingToPersistentRow(listing: Listing): Record<string, unknown
     delete_permanently_at: listing.deletePermanentlyAt ?? null,
     archived_at: listing.archivedAt ?? null,
     deleted_snapshot: listing.deletedSnapshot ?? null,
+    attributes:
+      listing.attributes && Object.keys(listing.attributes).length > 0 ? listing.attributes : {},
   };
   if (listing.type === "service") {
     row.specialization = listing.specialization ?? "";

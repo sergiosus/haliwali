@@ -36,6 +36,11 @@ type PostPageLocationPublishExtras = {
 };
 import { isUploadFail } from "../../lib/uploadClient";
 import { listingsSubmitUserMessage } from "../../lib/listings";
+import { ListingAttributesFields } from "../../components/ListingAttributesFields";
+import {
+  sanitizeListingAttributesForListing,
+  type ListingAttributes,
+} from "../../lib/listingAttributes";
 
 type ProductKind = "Продам" | "Куплю";
 
@@ -66,6 +71,7 @@ export default function PostProductPage() {
       longitude?: number;
       phone: string;
       photos: string[];
+      attributes?: ListingAttributes;
     } & PostPageLocationPublishExtras,
   ) {
     if (submittedRef.current) return;
@@ -171,7 +177,7 @@ export default function PostProductPage() {
                 />
               </div>
 
-              <div className="my-6 flex items-center gap-3">
+              <div id="listing-manual-form" className="my-6 flex items-center gap-3 scroll-mt-4">
                 <div className="h-px flex-1 bg-black/10" />
                 <span className="shrink-0 text-xs font-medium text-black/45">Или заполните вручную</span>
                 <div className="h-px flex-1 bg-black/10" />
@@ -251,12 +257,14 @@ function ProductPostForm({
   const [title, setTitle] = useState(prefill?.title ?? "");
   const [description, setDescription] = useState(prefill?.description ?? "");
   const [categoryName, setCategoryName] = useState<(typeof productCategories)[number]>(productCategories[0]);
+  const [attributes, setAttributes] = useState<ListingAttributes>({});
   const [price, setPrice] = useState(
     prefill?.price != null && Number.isFinite(prefill.price) && prefill.price > 0 ?
       String(Math.round(prefill.price))
     : "",
   );
   const showPhotoHint = Boolean(prefill?.showPhotoHint);
+  const sourceUrl = (prefill?.sourceUrl ?? "").trim();
   const [locationDraft, setLocationDraft] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
   const [locationMsg, setLocationMsg] = useState<string | null>(null);
@@ -326,11 +334,18 @@ function ProductPostForm({
             try {
               const urls = files.length > 0 ? await uploadFiles(files) : [];
               const wr = wholeRussia;
+              const sellType = kind === "Продам" ? "product_sell" : "product_buy";
+              const catSlug = categoryToSlug(categoryName, sellType);
+              const attrs = sanitizeListingAttributesForListing(
+                { categoryName, categorySlug: catSlug, type: sellType },
+                attributes,
+              );
               await onSubmit({
                 kind,
                 title: title.trim(),
                 description: description.trim(),
                 categoryName,
+                ...(attrs ? { attributes: attrs } : {}),
                 price: Number(price || 0),
                 city: selectedLocation?.city ?? "",
                 address: wr ? undefined : selectedLocation?.displayName ?? undefined,
@@ -371,6 +386,12 @@ function ProductPostForm({
         })();
       }}
     >
+      {prefill?.manualFallback && sourceUrl ?
+        <p className="rounded-xl border border-amber-200/80 bg-amber-50/50 px-3 py-2 text-sm text-amber-900">
+          Ссылка на исходное объявление сохранена. Заполните поля ниже вручную.
+          <span className="mt-1 block truncate text-xs text-amber-800/80">{sourceUrl}</span>
+        </p>
+      : null}
       <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
         <Field label="Тип">
           <select
@@ -451,6 +472,16 @@ function ProductPostForm({
           </div>
         </Field>
       </div>
+
+      <ListingAttributesFields
+        key={`${kind}-${categoryToSlug(categoryName, kind === "Продам" ? "product_sell" : "product_buy")}`}
+        categoryName={categoryName}
+        categorySlug={categoryToSlug(categoryName, kind === "Продам" ? "product_sell" : "product_buy")}
+        listingType={kind === "Продам" ? "product_sell" : "product_buy"}
+        value={attributes}
+        onChange={setAttributes}
+        disabled={disabled || submitting}
+      />
 
       <div ref={locWrapRef} className="w-full">
         <ListingLocationSection

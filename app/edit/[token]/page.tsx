@@ -17,6 +17,11 @@ import {
   prepareListingPhotoForPicker,
 } from "../../lib/uploadImagePrepare";
 import { isUploadFail, uploadFiles } from "../../lib/uploadClient";
+import { ListingAttributesFields } from "../../components/ListingAttributesFields";
+import {
+  sanitizeListingAttributesForListing,
+  type ListingAttributes,
+} from "../../lib/listingAttributes";
 
 /** Saved gallery URL vs local file queued for upload (preview via `objectUrl` only — never persisted). */
 type EditPhotoSlot =
@@ -125,6 +130,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
   const [title, setTitle] = useState(listing.title);
   const [description, setDescription] = useState(listing.description);
   const [categoryName, setCategoryName] = useState(listing.categoryName);
+  const [attributes, setAttributes] = useState<ListingAttributes>(() => ({ ...(listing.attributes ?? {}) }));
   const [address, setAddress] = useState(
     ((listing.address ?? "").trim() || listing.city.trim()).trim(),
   );
@@ -188,6 +194,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
       title.trim() !== baseline.title ||
       description.trim() !== baseline.description ||
       categoryName.trim() !== baseline.categoryName ||
+      JSON.stringify(attributes) !== JSON.stringify(listing.attributes ?? {}) ||
       (selectedLocation?.city ?? "").trim() !== baseline.city ||
       address.trim() !== baseline.address ||
       (selectedLocation?.latitude ?? undefined) !== baseline.latitude ||
@@ -309,12 +316,18 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                       address.trim() ||
                       locMerged.displayName;
 
+                  const catSlug = categoryToSlug(categoryName.trim(), listing.type);
+                  const attrs = sanitizeListingAttributesForListing(
+                    { categoryName: categoryName.trim(), categorySlug: catSlug, type: listing.type },
+                    attributes,
+                  );
+
                   const next: Listing = {
                     ...listing,
                     title: title.trim(),
                     description: description.trim(),
                     categoryName: categoryName.trim(),
-                    categorySlug: categoryToSlug(categoryName.trim(), listing.type),
+                    categorySlug: catSlug,
                     city: locMerged.city,
                     address: addrLine || undefined,
                     latitude: hasGeo ? lat : undefined,
@@ -335,6 +348,8 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                           source: selectedLocation?.source,
                         },
                   } as Listing;
+                  if (attrs) next.attributes = attrs;
+                  else delete next.attributes;
 
                   await Promise.resolve(onSave(next));
 
@@ -407,6 +422,18 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                   </div>
                 </Field>
               </div>
+
+              <ListingAttributesFields
+                categoryName={categoryName}
+                categorySlug={categoryToSlug(categoryName.trim(), listing.type)}
+                listingType={listing.type}
+                value={attributes}
+                onChange={(next) => {
+                  setSaveError(false);
+                  setAttributes(next);
+                }}
+                disabled={isSaving}
+              />
 
               <div className="w-full">
                 <ListingLocationSection

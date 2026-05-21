@@ -25,7 +25,7 @@ function userMessage(code: ListingUrlImportErrorCode): string {
     case "RESPONSE_TOO_LARGE":
     case "FETCH_FAILED":
     default:
-      return "Не удалось получить данные. Попробуйте другую ссылку.";
+      return "Не удалось автоматически получить данные. Можно создать черновик и заполнить вручную.";
   }
 }
 

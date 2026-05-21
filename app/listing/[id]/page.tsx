@@ -26,6 +26,7 @@ import { extractListingPhotos, formatViewCountRu } from "../../lib/listingCardMe
 import { recordListingViewOnce } from "../../lib/listingViewClient";
 import { listingPath } from "../../lib/seo";
 import { ListingStatsModal } from "../../components/ListingStatsModal";
+import { ListingAttributesSummary } from "../../components/ListingAttributesSummary";
 
 export default function ListingPage() {
   const params = useParams<{ id: string }>();
@@ -374,6 +375,7 @@ function ListingDetail({
                     </>
                   ) : null}
                 </div>
+                <ListingAttributesSummary listing={listing} className="mt-2 text-sm text-black/60" />
               </div>
 
               {ownerId ? (

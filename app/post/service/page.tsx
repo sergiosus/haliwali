@@ -36,6 +36,11 @@ type PostPageLocationPublishExtras = {
 };
 import { isUploadFail } from "../../lib/uploadClient";
 import { listingsSubmitUserMessage } from "../../lib/listings";
+import { ListingAttributesFields } from "../../components/ListingAttributesFields";
+import {
+  sanitizeListingAttributesForListing,
+  type ListingAttributes,
+} from "../../lib/listingAttributes";
 
 export default function PostServicePage() {
   const router = useRouter();
@@ -62,6 +67,7 @@ export default function PostServicePage() {
       longitude?: number;
       phone: string;
       photos: string[];
+      attributes?: ListingAttributes;
     } & PostPageLocationPublishExtras,
   ) {
     if (submittedRef.current) return;
@@ -110,6 +116,7 @@ export default function PostServicePage() {
       description: form.description,
       categoryName: form.categoryName,
       categorySlug: categoryToSlug(form.categoryName, "service"),
+      ...(form.attributes ? { attributes: form.attributes } : {}),
       city: locNorm.city,
       address: displayLocation,
       latitude: hasGeo ? form.latitude : undefined,
@@ -165,7 +172,7 @@ export default function PostServicePage() {
                 />
               </div>
 
-              <div className="my-6 flex items-center gap-3">
+              <div id="listing-manual-form" className="my-6 flex items-center gap-3 scroll-mt-4">
                 <div className="h-px flex-1 bg-black/10" />
                 <span className="shrink-0 text-xs font-medium text-black/45">Или заполните вручную</span>
                 <div className="h-px flex-1 bg-black/10" />
@@ -235,6 +242,7 @@ function ServicePostForm({
     longitude?: number;
     phone: string;
     photos: string[];
+    attributes?: ListingAttributes;
   } & PostPageLocationPublishExtras) => void | Promise<void>;
   onNeedAuth: (resume: () => void) => void;
   disabled?: boolean;
@@ -242,7 +250,9 @@ function ServicePostForm({
   const [title, setTitle] = useState(prefill?.title ?? "");
   const [description, setDescription] = useState(prefill?.description ?? "");
   const [categoryName, setCategoryName] = useState<(typeof serviceCategories)[number]>(serviceCategories[0]);
+  const [attributes, setAttributes] = useState<ListingAttributes>({});
   const showPhotoHint = Boolean(prefill?.showPhotoHint);
+  const sourceUrl = (prefill?.sourceUrl ?? "").trim();
   const [locationDraft, setLocationDraft] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
   const [locationMsg, setLocationMsg] = useState<string | null>(null);
@@ -312,10 +322,16 @@ function ServicePostForm({
             try {
               const urls = files.length > 0 ? await uploadFiles(files) : [];
               const wr = wholeRussia;
+              const catSlug = categoryToSlug(categoryName, "service");
+              const attrs = sanitizeListingAttributesForListing(
+                { categoryName, categorySlug: catSlug, type: "service" },
+                attributes,
+              );
               await onSubmit({
                 title: title.trim(),
                 description: description.trim(),
                 categoryName,
+                ...(attrs ? { attributes: attrs } : {}),
                 city: selectedLocation?.city ?? "",
                 address: wr ? undefined : selectedLocation?.displayName ?? undefined,
                 region: wr ? "Вся Россия" : selectedLocation?.region ?? "",
@@ -355,6 +371,12 @@ function ServicePostForm({
         })();
       }}
     >
+      {prefill?.manualFallback && sourceUrl ?
+        <p className="rounded-xl border border-amber-200/80 bg-amber-50/50 px-3 py-2 text-sm text-amber-900">
+          Ссылка на исходное объявление сохранена. Заполните поля ниже вручную.
+          <span className="mt-1 block truncate text-xs text-amber-800/80">{sourceUrl}</span>
+        </p>
+      : null}
       <div ref={titleWrapRef}>
         <Field label="Название услуги">
         <Input
@@ -412,6 +434,16 @@ function ServicePostForm({
           </div>
         </Field>
       </div>
+
+      <ListingAttributesFields
+        key={categoryToSlug(categoryName, "service")}
+        categoryName={categoryName}
+        categorySlug={categoryToSlug(categoryName, "service")}
+        listingType="service"
+        value={attributes}
+        onChange={setAttributes}
+        disabled={disabled || submitting}
+      />
 
       <div ref={locWrapRef} className="w-full">
         <ListingLocationSection

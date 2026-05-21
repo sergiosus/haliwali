@@ -1,8 +1,13 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getCurrentUserId, refreshAuthFromServer } from "../lib/auth";
-import type { ListingTransferDraftPrefill } from "../lib/listingTransferDraft";
+import {
+  buildManualTransferDraft,
+  TRANSFER_FETCH_FAILED_HINT,
+  type ListingTransferDraftPrefill,
+} from "../lib/listingTransferDraft";
+import { validatePublicHttpUrl } from "../lib/listingUrlImport";
 
 type SourceKey = "avito" | "drom" | "other" | null;
 
@@ -51,6 +56,28 @@ function instructionsFor(source: Exclude<SourceKey, null>): { title: string; ste
   };
 }
 
+function scrollToManualForm() {
+  try {
+    document.getElementById("listing-manual-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch {
+    /* noop */
+  }
+}
+
+function applyDraftAndFinish(
+  draft: ListingTransferDraftPrefill,
+  onDraftReady: (draft: ListingTransferDraftPrefill) => void,
+  setSuccess: (v: boolean) => void,
+  setActiveSource: (v: SourceKey) => void,
+  setUrl: (v: string) => void,
+) {
+  onDraftReady(draft);
+  setSuccess(true);
+  setActiveSource(null);
+  setUrl("");
+  queueMicrotask(() => scrollToManualForm());
+}
+
 export function TransferListingBlock({
   onDraftReady,
   onNeedAuth,
@@ -62,16 +89,21 @@ export function TransferListingBlock({
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   const runImport = useCallback(async () => {
     setError(null);
+    setInfo(null);
     setSuccess(false);
     const t = url.trim();
-    if (t.length < 8) {
+
+    const validated = validatePublicHttpUrl(t);
+    if (!validated.ok) {
       setError("Некорректная ссылка");
       return;
     }
+    const canonicalUrl = validated.url.toString();
 
     const run = async () => {
       setLoading(true);
@@ -80,7 +112,7 @@ export function TransferListingBlock({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: t }),
+          body: JSON.stringify({ url: canonicalUrl }),
         });
         const d = (await r.json().catch(() => null)) as {
           ok?: boolean;
@@ -88,25 +120,47 @@ export function TransferListingBlock({
           message?: string;
           error?: string;
         };
-        if (!r.ok || !d.ok || !d.draft) {
-          setError(
-            typeof d.message === "string" && d.message.trim() ?
-              d.message.trim()
-            : "Не удалось получить данные. Попробуйте другую ссылку.",
+
+        if (r.ok && d.ok && d.draft) {
+          applyDraftAndFinish(
+            {
+              title: d.draft.title,
+              description: d.draft.description,
+              price: typeof d.draft.price === "number" ? d.draft.price : undefined,
+              showPhotoHint: true,
+              sourceUrl: canonicalUrl,
+              manualFallback: false,
+            },
+            onDraftReady,
+            setSuccess,
+            setActiveSource,
+            setUrl,
           );
           return;
         }
-        setSuccess(true);
-        onDraftReady({
-          title: d.draft.title,
-          description: d.draft.description,
-          price: typeof d.draft.price === "number" ? d.draft.price : undefined,
-          showPhotoHint: true,
-        });
-        setActiveSource(null);
-        setUrl("");
+
+        if (r.status === 401) {
+          setError(typeof d.message === "string" && d.message.trim() ? d.message.trim() : "Войдите в аккаунт");
+          return;
+        }
+        if (r.status === 429) {
+          setError(
+            typeof d.message === "string" && d.message.trim() ?
+              d.message.trim()
+            : "Слишком много попыток. Подождите немного и попробуйте снова.",
+          );
+          return;
+        }
+        if (d.error === "INVALID_URL" || d.error === "BLOCKED_URL") {
+          setError("Некорректная ссылка");
+          return;
+        }
+
+        setInfo(TRANSFER_FETCH_FAILED_HINT);
+        applyDraftAndFinish(buildManualTransferDraft(canonicalUrl), onDraftReady, setSuccess, setActiveSource, setUrl);
       } catch {
-        setError("Не удалось получить данные. Попробуйте другую ссылку.");
+        setInfo(TRANSFER_FETCH_FAILED_HINT);
+        applyDraftAndFinish(buildManualTransferDraft(canonicalUrl), onDraftReady, setSuccess, setActiveSource, setUrl);
       } finally {
         setLoading(false);
       }
@@ -123,20 +177,70 @@ export function TransferListingBlock({
   }, [url, onDraftReady, onNeedAuth]);
 
   const panel = activeSource ? instructionsFor(activeSource) : null;
+  const [expanded, setExpanded] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isOpen = mounted && expanded;
 
   return (
     <section
-      className="rounded-2xl border border-orange-200/80 bg-gradient-to-b from-orange-50/90 to-white p-4 shadow-sm sm:p-5"
+      className={[
+        "rounded-2xl border border-orange-200/80 bg-gradient-to-b from-orange-50/90 to-white shadow-sm",
+        isOpen ? "p-4 sm:p-5" : "px-4 py-3",
+        mounted ? "transition-[padding] duration-300 ease-out" : "",
+      ].join(" ")}
       aria-labelledby="transfer-listing-heading"
     >
-      <h2 id="transfer-listing-heading" className="text-lg font-semibold text-gray-900 sm:text-xl">
-        Перенести объявление
-      </h2>
-      <p className="mt-1.5 text-sm leading-snug text-black/60">
-        Скопируйте ваше объявление с другой площадки — мы попробуем заполнить всё автоматически
-      </p>
+      <button
+        type="button"
+        className="flex w-full items-start gap-3 text-left"
+        aria-expanded={isOpen}
+        aria-controls="transfer-listing-panel"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="min-w-0 flex-1">
+          <h2 id="transfer-listing-heading" className="text-base font-semibold text-gray-900 sm:text-lg">
+            Перенести объявление с другой площадки
+          </h2>
+          <p className="mt-1 text-xs leading-snug text-black/55 sm:text-sm">
+            Ссылка с Авито, Дрома или другого сайта — черновик заполнится автоматически
+          </p>
+        </span>
+        <span
+          className={[
+            "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-orange-200/80 bg-white/80 text-orange-700",
+            mounted ? "transition-transform duration-300 ease-out" : "",
+            isOpen ? "rotate-180" : "rotate-0",
+          ].join(" ")}
+          aria-hidden
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="block">
+            <path
+              d="M6 9l6 6 6-6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      </button>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+      <div
+        id="transfer-listing-panel"
+        className={[
+          "grid",
+          mounted ? "transition-[grid-template-rows,opacity] duration-300 ease-out" : "",
+          isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        ].join(" ")}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="pt-4">
+      <div className="grid gap-2 sm:grid-cols-3">
         {SOURCE_CARDS.map((card) => {
           const open = activeSource === card.key;
           return (
@@ -146,6 +250,7 @@ export function TransferListingBlock({
               onClick={() => {
                 setActiveSource(open ? null : card.key);
                 setError(null);
+                setInfo(null);
                 setSuccess(false);
               }}
               className={`flex min-h-[4.25rem] flex-col items-start justify-center rounded-xl border px-3 py-3 text-left transition-colors ${
@@ -180,6 +285,7 @@ export function TransferListingBlock({
               onChange={(e) => {
                 setUrl(e.target.value);
                 setError(null);
+                setInfo(null);
                 setSuccess(false);
               }}
               placeholder="Вставьте ссылку на объявление"
@@ -190,6 +296,11 @@ export function TransferListingBlock({
           {error ?
             <p className="mt-2 text-sm text-[#c2410c]" role="alert">
               {error}
+            </p>
+          : null}
+          {info ?
+            <p className="mt-2 text-sm text-amber-800" role="status">
+              {info}
             </p>
           : null}
           {success ?
@@ -208,6 +319,9 @@ export function TransferListingBlock({
           </button>
         </div>
       : null}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

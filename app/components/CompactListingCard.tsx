@@ -14,6 +14,7 @@ import {
 import { ListingAuthorLine } from "./ListingAuthorLine";
 import { ListingFavoriteButton } from "./ListingFavoriteButton";
 import { ListingTypeBadge } from "./ListingTypeBadge";
+import { ListingAttributesCompactLine } from "./ListingAttributesSummary";
 
 export function CompactListingCard({
   listing,
@@ -131,6 +132,8 @@ export function CompactListingCard({
           {description ? (
             <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-black/55">{description}</p>
           ) : null}
+
+          <ListingAttributesCompactLine listing={listing} className="mt-1 line-clamp-1 text-[12px] text-black/50" />
 
           <div className="mt-1.5 truncate text-[12px] text-black/50">
             <span>{metaTailParts.join(" · ")}</span>

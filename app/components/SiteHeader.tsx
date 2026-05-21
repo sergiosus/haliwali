@@ -27,6 +27,7 @@ import {
 import { AccountCredentialsModal } from "./AccountCredentialsModal";
 import { AccountSwitcherModal } from "./AccountSwitcherModal";
 import { GlobalHeaderSearch } from "./GlobalHeaderSearch";
+import { PostListingMenu } from "./PostListingMenu";
 
 /** Temporary account-menu tap debug: `localStorage.setItem("debugAccountMenu","1")` or development build. */
 function isAccountMenuDebugOn(): boolean {
@@ -347,15 +348,6 @@ export function SiteHeader() {
     };
   }, [menuOpen, accountSwitcherOpen]);
 
-  const postCta = (
-    <Link
-      href="/post"
-      className="inline-flex w-full max-w-full items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600 md:w-auto"
-    >
-      Разместить объявление
-    </Link>
-  );
-
   /** Avoid showing «Войти» while auth is syncing or during SSR/hydration. Logged-in users see the menu whenever `userId` is set (includes `loading` re-fetch after `refreshAuthFromServer`). */
   const authHeaderPlaceholder = (
     <span className="inline-block min-h-[36px] min-w-0 shrink-0 sm:min-w-[120px]" aria-hidden />
@@ -577,7 +569,11 @@ export function SiteHeader() {
             </Link>
             <div className="min-w-0 shrink">{authBlock}</div>
           </div>
-          {suppressUserChromeForAdmin ? null : <div className="w-full min-w-0 max-w-full">{postCta}</div>}
+          {suppressUserChromeForAdmin ? null : (
+            <div className="w-full min-w-0 max-w-full">
+              <PostListingMenu />
+            </div>
+          )}
           {hideHeaderSearch ? null : <GlobalHeaderSearch iconLeftClassName="left-3.5" />}
         </div>
 
@@ -589,7 +585,7 @@ export function SiteHeader() {
             <GlobalHeaderSearch className="min-w-0 max-w-[500px] flex-1 px-2" />
           )}
           <div className="flex shrink-0 items-center gap-8">
-            {suppressUserChromeForAdmin ? null : postCta}
+            {suppressUserChromeForAdmin ? null : <PostListingMenu />}
             {authBlock}
           </div>
         </div>

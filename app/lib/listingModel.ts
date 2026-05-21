@@ -10,6 +10,7 @@ import {
   normalizeRussiaLocationLookupKey,
   resolveRussiaCityRegionDisplay,
 } from "./locationDisplay";
+import type { ListingAttributes } from "./listingAttributes";
 import type { SelectedLocationSource } from "./selectedLocation";
 
 export type ListingStatus = "pending" | "auto" | "approved" | "rejected";
@@ -53,6 +54,8 @@ export type BaseListing = {
   description: string;
   categoryName: string;
   categorySlug: string;
+  /** Optional category-specific fields; empty object or omitted for legacy listings. */
+  attributes?: ListingAttributes;
   city: string;
   /** Свободный текст адреса; необязательно */
   address?: string;

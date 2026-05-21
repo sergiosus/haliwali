@@ -6,6 +6,7 @@ import { adminPrivilegesActive } from "../../lib/serverAdminSession";
 import { moderationBlockedForbidden } from "../../lib/serverUserModerationBlock";
 import { getUserIdFromSessionCookie } from "../../lib/serverSession";
 import { readUsersDb } from "../../lib/serverUsersStore";
+import { sanitizeListingAttributesForListing } from "../../lib/listingAttributes";
 import type { Listing, ListingDealStatus, ListingStatus, ListingType } from "../../lib/listingModel";
 import { authorPublicNameForNewListing } from "../../lib/listingAuthorPublic";
 import { denyIfMutationOriginForbidden } from "../../lib/serverCsrf";
@@ -60,6 +61,9 @@ export function parseListingBody(body: unknown, ownerIdFromSession: string): Lis
   const addressPublic = o.addressPublic === true;
   const moderationReason = typeof o.moderationReason === "string" ? o.moderationReason : "";
 
+  const draftForAttrs = { categoryName, categorySlug, type };
+  const attributes = sanitizeListingAttributesForListing(draftForAttrs, o.attributes);
+
   const base = {
     id,
     editToken,
@@ -72,6 +76,7 @@ export function parseListingBody(body: unknown, ownerIdFromSession: string): Lis
     description,
     categoryName,
     categorySlug,
+    ...(attributes ? { attributes } : {}),
     city,
     address,
     latitude: lat,

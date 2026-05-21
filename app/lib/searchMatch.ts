@@ -5,6 +5,7 @@
 
 import { allDirectoryItems } from "./categoryDirectory";
 import { collapseSearchSpaces, getSearchQueryVariants, normalizeGlobalSearchQuery } from "./globalSearchNormalize";
+import { listingAttributesSearchText } from "./listingAttributes";
 import type { Listing } from "./listingModel";
 import type { GlobalSearchSuggestItem } from "./globalSearchTypes";
 import { filterGlobalRussiaCitiesByQuery } from "./staticRussiaCities";
@@ -63,6 +64,7 @@ export function buildListingSearchHaystack(listing: Listing): string {
       listing.address,
       region,
       spec,
+      listingAttributesSearchText(listing),
       listing.type,
     ].join(" "),
   );

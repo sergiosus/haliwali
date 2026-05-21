@@ -109,6 +109,7 @@ type OfferListing = ServiceListing;
 type ProductKind = "Продам" | "Куплю";
 
 const EMPTY_SEARCH_RESULTS: Listing[] = [];
+const RECENT_LISTINGS_LIMIT = 10;
 
 type HomeGridColumnHeading = "Задачи" | "Услуги" | "Товары";
 
@@ -197,7 +198,8 @@ function HaliwaliLanding() {
   }, []);
 
   const searchParams = useSearchParams();
-  const directorySearch = searchParams.get("q") ?? "";
+  const directorySearch = (searchParams.get("q") ?? "").trim();
+  const homeSearchActive = hasActiveSearchQuery(directorySearch);
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [locationModalInitialScope, setLocationModalInitialScope] = useState<BrowseLocationScope | null>(null);
   const [activeLocationColumn, setActiveLocationColumn] = useState<HomeGridColumnHeading | null>(null);
@@ -343,7 +345,7 @@ function HaliwaliLanding() {
   const uniqueListings = useMemo(() => dedupeListingsById(listings), [listings]);
 
   const homeCategoryGridFiltered = useMemo(() => {
-    const q = hasActiveSearchQuery(directorySearch);
+    const q = homeSearchActive;
     return homeCategoryGridSections
       .map((section) => {
         if (!q) {
@@ -360,7 +362,7 @@ function HaliwaliLanding() {
         return { heading: section.heading, links, groups };
       })
       .filter((s) => s.links.length > 0);
-  }, [directorySearch]);
+  }, [directorySearch, homeSearchActive]);
 
   const categoryCounts = useMemo(() => {
     const out: Record<string, number> = {};
@@ -384,7 +386,7 @@ function HaliwaliLanding() {
   const categoryCountsLoading = false;
 
   const publishedSearchResults = useMemo(() => {
-    if (!hasActiveSearchQuery(directorySearch)) return EMPTY_SEARCH_RESULTS;
+    if (!homeSearchActive) return EMPTY_SEARCH_RESULTS;
     if (!loaded) return [];
     const scope = homepageSearchScope;
     scopeLocationDebugLog("listing-filter-scope", {
@@ -405,15 +407,24 @@ function HaliwaliLanding() {
         return b.createdAt - a.createdAt;
       })
       .slice(0, 30);
-  }, [directorySearch, uniqueListings, loaded, homepageSearchScope]);
+  }, [directorySearch, homeSearchActive, uniqueListings, loaded, homepageSearchScope]);
+
+  /** Latest public listings when homepage search is empty (newest first, max 10). */
+  const recentListings = useMemo(() => {
+    if (homeSearchActive || !loaded) return EMPTY_SEARCH_RESULTS;
+    return uniqueListings
+      .filter((l) => isListingPubliclyListed(l))
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, RECENT_LISTINGS_LIMIT);
+  }, [homeSearchActive, loaded, uniqueListings]);
 
   const homeSearchHasCategoryHits = useMemo(() => {
-    if (!hasActiveSearchQuery(directorySearch)) return false;
+    if (!homeSearchActive) return false;
     return homeCategoryGridFiltered.some((section) => section.links.length > 0);
-  }, [directorySearch, homeCategoryGridFiltered]);
+  }, [directorySearch, homeSearchActive, homeCategoryGridFiltered]);
 
   useEffect(() => {
-    if (!hasActiveSearchQuery(directorySearch)) return;
+    if (!homeSearchActive) return;
     const n = normalizeGlobalSearchQuery(directorySearch);
     searchDebugLog("homepage", {
       raw: n.original,
@@ -421,9 +432,11 @@ function HaliwaliLanding() {
       listingCount: publishedSearchResults.length,
       categoryHits: homeSearchHasCategoryHits,
     });
-  }, [directorySearch, publishedSearchResults.length, homeSearchHasCategoryHits]);
+  }, [directorySearch, homeSearchActive, publishedSearchResults.length, homeSearchHasCategoryHits]);
 
   const { viewCounts, publicByUserId } = useCompactListingEnrichment(publishedSearchResults);
+  const { viewCounts: recentViewCounts, publicByUserId: recentPublicByUserId } =
+    useCompactListingEnrichment(recentListings);
 
   const taskTitleRef = useRef<HTMLInputElement | null>(null);
   const offerTitleRef = useRef<HTMLInputElement | null>(null);
@@ -689,8 +702,11 @@ function HaliwaliLanding() {
       </section>
 
       <main className="mx-auto w-full min-w-0 max-w-full max-w-[1200px] px-4 pb-16 pt-2 sm:px-6 sm:pt-3">
-          {hasActiveSearchQuery(directorySearch) ? (
-            <section className="mb-4 w-full min-w-0 max-w-full overflow-x-hidden box-border">
+          {homeSearchActive ? (
+            <section
+              key={`home-search-${directorySearch}`}
+              className="mb-4 w-full min-w-0 max-w-full overflow-x-hidden box-border"
+            >
               <div
                 className={`box-border w-full min-w-0 rounded-3xl border border-black/10 bg-white p-4 sm:p-5 ${
                   publishedSearchResults.length <= 1 ? "max-w-xl"
@@ -738,6 +754,37 @@ function HaliwaliLanding() {
               </div>
             </section>
           ) : null}
+
+          {!homeSearchActive ?
+            loaded ?
+              recentListings.length > 0 ?
+                <section className="mb-4 w-full min-w-0 max-w-full overflow-x-hidden box-border">
+                  <div className="box-border w-full min-w-0 max-w-full rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
+                    <div className="text-sm font-medium text-black/70">Недавние объявления</div>
+                    <div className="mt-3 grid w-full min-w-0 max-w-full grid-cols-1 gap-4 box-border md:grid-cols-2">
+                      {recentListings.map((l) => {
+                        const oid = (l.ownerId ?? "").trim();
+                        return (
+                          <div key={l.id} className="min-w-0 w-full max-w-full">
+                            <CompactListingCard
+                              listing={l}
+                              href={appendReturnUrlQuery(listingPath(l.id, l.title), "/")}
+                              viewCount={recentViewCounts[l.id] ?? 0}
+                              publicAuthor={oid ? recentPublicByUserId[oid] : null}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </section>
+              : (
+                <p className="mb-4 text-center text-sm text-black/50">Пока нет объявлений</p>
+              )
+            : (
+              <div className="mb-4 text-sm text-black/60">Загрузка…</div>
+            )
+          : null}
 
           <div className="mb-6 flex min-w-0 w-full justify-center sm:mb-8 sm:justify-end">
             <Link

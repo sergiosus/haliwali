@@ -115,7 +115,7 @@ export function GlobalHeaderSearch({
   const suggestAbortRef = useRef<AbortController | null>(null);
   const suggestSeqRef = useRef(0);
 
-  const qFromUrl = sp.get("q") ?? "";
+  const qFromUrl = (sp.get("q") ?? "").trim();
   useEffect(() => {
     if (isHome || isSearchPage) {
       queueMicrotask(() => setQ(qFromUrl));
@@ -124,37 +124,73 @@ export function GlobalHeaderSearch({
     }
   }, [isHome, isSearchPage, qFromUrl]);
 
+  /** Live URL params (avoids stale useSearchParams when clearing q). */
+  const liveSearchParams = useCallback((): URLSearchParams => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search);
+    }
+    return new URLSearchParams(sp.toString());
+  }, [sp]);
+
+  const pathWithQuery = useCallback((basePath: string, params: URLSearchParams) => {
+    const qs = params.toString();
+    return qs ? `${basePath}?${qs}` : basePath;
+  }, []);
+
+  const resetSuggestState = useCallback(() => {
+    if (debounceRef.current != null) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    suggestAbortRef.current?.abort();
+    suggestAbortRef.current = null;
+    suggestSeqRef.current += 1;
+    setSuggestions([]);
+    setSuggestLoading(false);
+    setActiveIdx(-1);
+    setSuggestOpen(false);
+    setSubmitHint(false);
+  }, []);
+
   const replaceHomeQ = useCallback(
     (raw: string) => {
       if (!isHome) return;
-      const next = new URLSearchParams();
-      for (const [k, v] of sp.entries()) {
-        if (k === "q") continue;
-        next.set(k, v);
-      }
+      const next = liveSearchParams();
+      next.delete("q");
       const t = raw.trim();
       if (t) next.set("q", t);
-      const qs = next.toString();
-      router.replace(qs ? `/?${qs}` : "/");
+      router.replace(pathWithQuery(pathname, next), { scroll: false });
     },
-    [isHome, router, sp],
+    [isHome, router, liveSearchParams, pathWithQuery, pathname],
   );
 
   const replaceSearchPageQ = useCallback(
     (raw: string) => {
       if (!isSearchPage) return;
-      const next = new URLSearchParams();
-      for (const [k, v] of sp.entries()) {
-        if (k === "q") continue;
-        next.set(k, v);
-      }
+      const next = liveSearchParams();
+      next.delete("q");
       const t = raw.trim();
       if (t) next.set("q", t);
-      const qs = next.toString();
-      router.replace(qs ? `/search?${qs}` : "/search");
+      router.replace(pathWithQuery("/search", next), { scroll: false });
     },
-    [isSearchPage, router, sp],
+    [isSearchPage, router, liveSearchParams, pathWithQuery],
   );
+
+  const clearHomeOrSearchUrlQuery = useCallback(() => {
+    resetSuggestState();
+    setQ("");
+    if (isHome) {
+      const next = liveSearchParams();
+      next.delete("q");
+      router.replace(pathWithQuery(pathname, next), { scroll: false });
+      return;
+    }
+    if (isSearchPage) {
+      const next = liveSearchParams();
+      next.delete("q");
+      router.replace(pathWithQuery("/search", next), { scroll: false });
+    }
+  }, [isHome, isSearchPage, router, liveSearchParams, pathWithQuery, pathname, resetSuggestState]);
 
   /** Navigate to /search (global search). */
   const applySearchQueryAndNavigate = useCallback(
@@ -258,9 +294,16 @@ export function GlobalHeaderSearch({
   }, [q, suggestPages, applySearchQueryAndNavigate]);
 
   function onInputChange(value: string) {
+    const t = value.trim();
     setQ(value);
     setActiveIdx(-1);
-    if (value.trim().length >= MIN_LISTING_SUGGEST_CHARS) setSubmitHint(false);
+    if (t.length >= MIN_LISTING_SUGGEST_CHARS) setSubmitHint(false);
+
+    if (t.length === 0) {
+      clearHomeOrSearchUrlQuery();
+      return;
+    }
+
     suggestAbortRef.current?.abort();
     suggestAbortRef.current = null;
     suggestSeqRef.current += 1;
@@ -268,14 +311,6 @@ export function GlobalHeaderSearch({
     if (isSearchPage) replaceSearchPageQ(value);
 
     if (!suggestPages) {
-      setSuggestOpen(false);
-      setSuggestions([]);
-      setSuggestLoading(false);
-      return;
-    }
-
-    const t = value.trim();
-    if (t.length === 0) {
       setSuggestOpen(false);
       setSuggestions([]);
       setSuggestLoading(false);
@@ -313,6 +348,11 @@ export function GlobalHeaderSearch({
       return;
     }
     if (e.key === "Escape") {
+      if ((isHome || isSearchPage) && (qTrim.length > 0 || qFromUrl.length > 0)) {
+        e.preventDefault();
+        clearHomeOrSearchUrlQuery();
+        return;
+      }
       setSuggestOpen(false);
       return;
     }
@@ -542,6 +582,7 @@ export function GlobalHeaderSearch({
         type="search"
         value={q}
         onChange={(e) => onInputChange(e.target.value)}
+        onInput={(e) => onInputChange(e.currentTarget.value)}
         onKeyDown={onKeyDown}
         onFocus={() => {
           if (!suggestPages) return;

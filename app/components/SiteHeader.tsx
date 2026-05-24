@@ -27,6 +27,7 @@ import {
 import { AccountCredentialsModal } from "./AccountCredentialsModal";
 import { AccountSwitcherModal } from "./AccountSwitcherModal";
 import { GlobalHeaderSearch } from "./GlobalHeaderSearch";
+import { SiteModeNav } from "./SiteModeNav";
 import { PostListingMenu } from "./PostListingMenu";
 
 /** Temporary account-menu tap debug: `localStorage.setItem("debugAccountMenu","1")` or development build. */
@@ -70,8 +71,10 @@ export function SiteHeader() {
   const pathname = usePathname();
   /** Полноэкранный вход в админку — без меню обычного пользователя и без «Привет, …». */
   const suppressUserChromeForAdmin = pathname === "/admin";
-  /** Homepage + /marketplaces use in-page search only — no header duplicate. */
-  const hideHeaderSearch = pathname === "/" || pathname === "/marketplaces";
+  /** In-page search only on these routes — no header duplicate. */
+  const hideHeaderSearch =
+    pathname === "/" || pathname === "/marketplaces" || pathname.startsWith("/catalogs");
+  const showSiteModeNav = !suppressUserChromeForAdmin;
 
   const auth = useAuth();
   const [userLabel, setUserLabel] = useState<string>("");
@@ -569,6 +572,7 @@ export function SiteHeader() {
             </Link>
             <div className="min-w-0 shrink">{authBlock}</div>
           </div>
+          {showSiteModeNav ? <SiteModeNav /> : null}
           {suppressUserChromeForAdmin ? null : (
             <div className="w-full min-w-0 max-w-full">
               <PostListingMenu />
@@ -577,10 +581,13 @@ export function SiteHeader() {
           {hideHeaderSearch ? null : <GlobalHeaderSearch iconLeftClassName="left-3.5" />}
         </div>
 
-        <div className="hidden min-w-0 items-center justify-between gap-6 md:flex">
-          <Link href="/" className="inline-flex shrink-0 items-center leading-none">
-            <HeaderHaliwaliLogo />
-          </Link>
+        <div className="hidden min-w-0 items-center justify-between gap-4 md:flex lg:gap-6">
+          <div className="flex shrink-0 items-center gap-3">
+            <Link href="/" className="inline-flex shrink-0 items-center leading-none">
+              <HeaderHaliwaliLogo />
+            </Link>
+            {showSiteModeNav ? <SiteModeNav /> : null}
+          </div>
           {hideHeaderSearch ? null : (
             <GlobalHeaderSearch className="min-w-0 max-w-[500px] flex-1 px-2" />
           )}

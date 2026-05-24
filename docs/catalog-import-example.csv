@@ -1,0 +1,3 @@
+name,category,city,address,phone,email,website,description,latitude,longitude,image_url
+ООО Пример,remont,Москва,ул. Примерная 1,+79991234567,info@example.ru,https://example.ru,Ремонт квартир,55.75,37.61,https://example.ru/logo.png
+ИП Тест,auto,Санкт-Петербург,Невский пр. 1,+78121234567,,https://auto-example.ru,Автосервис,59.93,30.31,

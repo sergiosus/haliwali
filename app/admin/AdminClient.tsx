@@ -14,6 +14,7 @@ import { listingDealStatusBadgeRu } from "../lib/listingCardMeta";
 import type { Listing, ListingStatus } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { inferredSupportSenderType, supportMessageLabelAdminPanel } from "../lib/supportUiLabels";
+import { AdminCatalogPanel } from "./AdminCatalogPanel";
 
 const statusLabel: Record<ListingStatus, string> = {
   pending: "На проверке",
@@ -147,7 +148,14 @@ function ListingCard({
   );
 }
 
-type AdminTab = "pending" | "published" | "rejected" | "reports" | "support" | "users";
+type AdminTab =
+  | "pending"
+  | "published"
+  | "rejected"
+  | "reports"
+  | "support"
+  | "users"
+  | "catalog";
 
 const supportCategoryRu: Record<string, string> = {
   listing_problem: "Проблема с объявлением",
@@ -315,6 +323,7 @@ function Tabs({
     { key: "reports", label: "Жалобы", counter: counts.reports },
     { key: "support", label: "Обращения", counter: counts.support },
     { key: "users", label: "Пользователи", counter: counts.users },
+    { key: "catalog", label: "Каталоги" },
   ];
 
   return (
@@ -473,7 +482,7 @@ export default function AdminClient() {
     if (tab === "pending") return sorted.filter((l) => l.status === "pending");
     if (tab === "rejected") return sorted.filter((l) => l.status === "rejected");
     if (tab === "published") return sorted.filter((l) => l.status === "auto" || l.status === "approved");
-    if (tab === "support" || tab === "users" || tab === "reports") return [];
+    if (tab === "support" || tab === "users" || tab === "reports" || tab === "catalog") return [];
     return [];
   }, [sorted, tab]);
 
@@ -1225,6 +1234,8 @@ export default function AdminClient() {
             </div>
           ) : null}
         </div>
+      ) : tab === "catalog" ? (
+        <AdminCatalogPanel />
       ) : tab === "support" ? (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1 space-y-3">

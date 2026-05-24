@@ -1,0 +1,91 @@
+import { usesPostgres } from "./pgPool";
+import type {
+  CatalogCategory,
+  CatalogCompanyAdminItem,
+  CatalogCompanyImportRow,
+  CatalogCompanyListItem,
+  CatalogCompanyProfile,
+  CatalogReport,
+} from "./catalogTypes";
+import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
+import * as pg from "./serverCatalogPg";
+import * as json from "./serverCatalogJson";
+
+function categoriesFromSeed(): CatalogCategory[] {
+  return CATALOG_CATEGORY_SEED.map((c) => ({ ...c, companyCount: 0 }));
+}
+
+async function withPg<T>(fn: () => Promise<T>, fallback: () => Promise<T>): Promise<T> {
+  if (!usesPostgres()) return fallback();
+  try {
+    return await fn();
+  } catch (e) {
+    if (process.env.NODE_ENV === "production") throw e;
+    return fallback();
+  }
+}
+
+export async function listCatalogCategories(): Promise<CatalogCategory[]> {
+  return withPg(() => pg.pgListCategories(), () => json.jsonListCategories());
+}
+
+export async function getCatalogCategory(slug: string): Promise<CatalogCategory | null> {
+  return withPg(() => pg.pgGetCategory(slug), () => json.jsonGetCategory(slug));
+}
+
+export async function searchCatalogCompanies(opts: {
+  categorySlug?: string;
+  q?: string;
+  limit?: number;
+}): Promise<CatalogCompanyListItem[]> {
+  return withPg(() => pg.pgSearchCompanies(opts), () => json.jsonSearchCompanies(opts));
+}
+
+export async function getCatalogCompanyBySlug(slug: string): Promise<CatalogCompanyProfile | null> {
+  return withPg(() => pg.pgGetCompanyBySlug(slug), () => json.jsonGetCompanyBySlug(slug));
+}
+
+export async function getRelatedCatalogCompanies(
+  categorySlug: string,
+  excludeSlug: string,
+  limit = 4,
+): Promise<CatalogCompanyListItem[]> {
+  return withPg(
+    () => pg.pgGetRelatedCompanies(categorySlug, excludeSlug, limit),
+    () => json.jsonGetRelatedCompanies(categorySlug, excludeSlug, limit),
+  );
+}
+
+export async function importCatalogCompaniesFromCsv(
+  rows: CatalogCompanyImportRow[],
+): Promise<{ imported: number; skipped: number }> {
+  if (usesPostgres()) {
+    try {
+      return await pg.pgImportCompanies(rows);
+    } catch (e) {
+      if (process.env.NODE_ENV === "production") throw e;
+    }
+  }
+  return json.jsonImportCompanies(rows);
+}
+
+export async function listCatalogReportsAdmin(): Promise<CatalogReport[]> {
+  return withPg(() => pg.pgListCatalogReports(), () => json.jsonListCatalogReports());
+}
+
+export async function listCatalogCompaniesAdmin(): Promise<CatalogCompanyAdminItem[]> {
+  return withPg(() => pg.pgListAllCompaniesAdmin(), () => json.jsonListAllCompaniesAdmin());
+}
+
+export async function ensureCatalogReady(): Promise<void> {
+  if (usesPostgres()) {
+    try {
+      await pg.pgEnsureCategoriesSeeded();
+      return;
+    } catch {
+      /* tables may be missing until migration */
+    }
+  }
+}
+
+export { categoriesFromSeed };

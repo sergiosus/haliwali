@@ -22,6 +22,10 @@ import {
   sanitizeListingAttributesForListing,
   type ListingAttributes,
 } from "../../lib/listingAttributes";
+import {
+  listingEditSaveErrorMessage,
+  normalizeListingPhotosForSave,
+} from "../../lib/listingEditSave";
 
 /** Saved gallery URL vs local file queued for upload (preview via `objectUrl` only — never persisted). */
 type EditPhotoSlot =
@@ -176,7 +180,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [errors, setErrors] = useState<{
     title?: string;
@@ -257,7 +261,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                 setErrors(nextErrors);
                 if (Object.keys(nextErrors).length > 0) return;
 
-                setSaveError(false);
+                setSaveError(null);
                 setIsSaving(true);
                 try {
                   await new Promise((r) => window.setTimeout(r, 0));
@@ -280,7 +284,10 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                       throw uploadErr;
                     }
                   }
-                  const finalPhotos = [...existingUrls, ...uploadedUrls].slice(0, 10);
+                  const finalPhotos = normalizeListingPhotosForSave([
+                    ...existingUrls,
+                    ...uploadedUrls,
+                  ]);
 
                   const locCityRaw = (selectedLocation?.city ?? "").trim();
                   const locMerged = wholeRussia
@@ -361,7 +368,10 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                   setSaveSuccess(true);
                 } catch (err) {
                   console.error("[edit listing] save failed", err);
-                  setSaveError(true);
+                  const { userMessage, devDetail } = listingEditSaveErrorMessage(err, {
+                    devDetail: process.env.NODE_ENV !== "production",
+                  });
+                  setSaveError(devDetail ? `${userMessage} (${devDetail})` : userMessage);
                 } finally {
                   setIsSaving(false);
                 }
@@ -371,7 +381,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                 <Input
                   value={title}
                   onChange={(e) => {
-                    setSaveError(false);
+                    setSaveError(null);
                     setTitle(e.target.value);
                   }}
                   required
@@ -386,7 +396,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                 <Textarea
                   value={description}
                   onChange={(e) => {
-                    setSaveError(false);
+                    setSaveError(null);
                     setDescription(e.target.value);
                   }}
                   required
@@ -405,7 +415,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                   <select
                     value={categoryName}
                     onChange={(e) => {
-                      setSaveError(false);
+                      setSaveError(null);
                       setCategoryName(e.target.value);
                     }}
                     className="box-border h-[52px] w-full appearance-none rounded-xl border border-black/15 bg-white px-4 text-sm leading-normal outline-none focus:border-black/30 focus:ring-2 focus:ring-[rgba(255,122,0,0.25)]"
@@ -429,7 +439,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                 listingType={listing.type}
                 value={attributes}
                 onChange={(next) => {
-                  setSaveError(false);
+                  setSaveError(null);
                   setAttributes(next);
                 }}
                 disabled={isSaving}
@@ -439,14 +449,14 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                 <ListingLocationSection
                   draftText={address}
                   onDraftTextChange={(v) => {
-                    setSaveError(false);
+                    setSaveError(null);
                     setAddress(v);
                     setLocationMsg(null);
                     if (errors.location) setErrors((p) => ({ ...p, location: undefined }));
                   }}
                   selectedLocation={selectedLocation}
                   onSelectedLocationChange={(loc) => {
-                    setSaveError(false);
+                    setSaveError(null);
                     setSelectedLocation(loc);
                   }}
                   cities={russianCities}
@@ -465,7 +475,7 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                   <Input
                     value={phone}
                     onChange={(e) => {
-                      setSaveError(false);
+                      setSaveError(null);
                       setPhone(e.target.value);
                     }}
                     required
@@ -486,18 +496,18 @@ function EditForm({ listing, onSave }: { listing: Listing; onSave: (next: Listin
                 <EditPhotos
                   photoSlots={photoSlots}
                   setPhotoSlots={(next) => {
-                    setSaveError(false);
+                    setSaveError(null);
                     setPhotoSlots(next);
                   }}
                 />
               </Field>
 
               <div className="mt-4 space-y-2">
-                {saveError ? (
-                  <div className="text-sm text-red-700">
-                    Не удалось сохранить. Попробуйте ещё раз.
+                {saveError ?
+                  <div className="text-sm text-red-700" role="alert">
+                    {saveError}
                   </div>
-                ) : null}
+                : null}
                 <div className="flex justify-end">
                 <button
                   type="submit"

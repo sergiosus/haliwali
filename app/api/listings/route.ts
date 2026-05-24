@@ -7,6 +7,7 @@ import { moderationBlockedForbidden } from "../../lib/serverUserModerationBlock"
 import { getUserIdFromSessionCookie } from "../../lib/serverSession";
 import { readUsersDb } from "../../lib/serverUsersStore";
 import { sanitizeListingAttributesForListing } from "../../lib/listingAttributes";
+import { publicListingImageSrc } from "../../lib/listingCardMeta";
 import type { Listing, ListingDealStatus, ListingStatus, ListingType } from "../../lib/listingModel";
 import { authorPublicNameForNewListing } from "../../lib/listingAuthorPublic";
 import { denyIfMutationOriginForbidden } from "../../lib/serverCsrf";
@@ -25,8 +26,61 @@ function asListingType(raw: unknown): ListingType | null {
 
 function asListingStatus(raw: unknown): ListingStatus | null {
   const s = typeof raw === "string" ? raw.trim() : "";
+  if (s === "published") return "approved";
   if (s === "pending" || s === "auto" || s === "approved" || s === "rejected") return s;
   return null;
+}
+
+export type ListingBodyRejectReason =
+  | "not_object"
+  | "missing_id"
+  | "missing_edit_token"
+  | "invalid_type"
+  | "invalid_status"
+  | "missing_title"
+  | "missing_description"
+  | "missing_category_name"
+  | "missing_category_slug"
+  | "invalid_product_price";
+
+/** Non-sensitive diagnostics when parseListingBody returns null. */
+export function diagnoseListingBodyReject(body: unknown): ListingBodyRejectReason | null {
+  if (!body || typeof body !== "object") return "not_object";
+  const o = body as Record<string, unknown>;
+  if (typeof o.id !== "string" || !o.id.trim()) return "missing_id";
+  if (typeof o.editToken !== "string" || !o.editToken.trim()) return "missing_edit_token";
+  if (!asListingType(o.type)) return "invalid_type";
+  if (!asListingStatus(o.status)) return "invalid_status";
+  if (typeof o.title !== "string" || !o.title.trim()) return "missing_title";
+  if (typeof o.description !== "string" || !o.description.trim()) return "missing_description";
+  if (typeof o.categoryName !== "string" || !o.categoryName.trim()) return "missing_category_name";
+  if (typeof o.categorySlug !== "string" || !o.categorySlug.trim()) return "missing_category_slug";
+  const type = asListingType(o.type);
+  if (type === "product_sell" || type === "product_buy") {
+    const priceRaw = o.price;
+    const price =
+      typeof priceRaw === "number" && Number.isFinite(priceRaw) ? priceRaw : Number(priceRaw);
+    if (!Number.isFinite(price)) return "invalid_product_price";
+  }
+  return null;
+}
+
+function normalizePhotosFromBody(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of raw) {
+    if (typeof x !== "string") continue;
+    const u = publicListingImageSrc(x.trim());
+    if (!u) continue;
+    const lower = u.toLowerCase();
+    if (lower.startsWith("blob:") || lower.startsWith("data:")) continue;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+    if (out.length >= 10) break;
+  }
+  return out;
 }
 
 function asDealStatus(raw: unknown): ListingDealStatus {
@@ -51,7 +105,7 @@ export function parseListingBody(body: unknown, ownerIdFromSession: string): Lis
   // City is optional for «Вся Россия» style listings; client enforces location when not in whole-Russia mode.
   if (!id || !editToken || !type || !status || !title || !description || !categoryName || !categorySlug) return null;
 
-  const photos = Array.isArray(o.photos) ? o.photos.filter((x): x is string => typeof x === "string") : [];
+  const photos = normalizePhotosFromBody(o.photos);
   const createdAt = typeof o.createdAt === "number" && Number.isFinite(o.createdAt) ? o.createdAt : Date.now();
   const updatedAt = typeof o.updatedAt === "number" && Number.isFinite(o.updatedAt) ? o.updatedAt : createdAt;
   const phone = typeof o.phone === "string" ? o.phone.trim() : "";
@@ -104,10 +158,11 @@ export function parseListingBody(body: unknown, ownerIdFromSession: string): Lis
   const priceRaw = o.price;
   const price = typeof priceRaw === "number" && Number.isFinite(priceRaw) ? priceRaw : Number(priceRaw);
   if (!Number.isFinite(price)) return null;
+  const safePrice = price < 0 ? 0 : price;
   return {
     ...base,
     type,
-    price,
+    price: safePrice,
   } as Listing;
 }
 

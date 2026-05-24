@@ -5,6 +5,7 @@ import type { Listing, ListingStatus, ProductListing, ServiceListing, TaskListin
 import { dedupeListingsById, isListingPubliclyListed } from "./listingModel";
 import { getCurrentUserId } from "./auth";
 import { isDebugAuthClient } from "./debugAuth";
+import { buildListingUpdateBody } from "./listingEditSave";
 
 export * from "./listingModel";
 
@@ -231,14 +232,39 @@ export function useListingsStore() {
       const prev = listingsRef.current.find((l) => l.id === id) ?? null;
       if (!prev) throw new Error("NOT_FOUND");
       const next = { ...updater(prev), updatedAt: Date.now() } as Listing;
+      const patchBody = buildListingUpdateBody(next);
       const r = await fetch(`/api/listings/${encodeURIComponent(id)}`, {
         method: "PATCH",
         credentials: "include",
         cache: "no-store",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(next),
+        body: JSON.stringify(patchBody),
       });
-      if (!r.ok) throw new Error("UPDATE_FAILED");
+      const status = r.status;
+      const rawText = await r.text().catch(() => "");
+      let parsedBody: (ApiErrorPayload & { ok?: boolean; reason?: string }) | null = null;
+      try {
+        parsedBody = rawText
+          ? ((JSON.parse(rawText) as ApiErrorPayload & { ok?: boolean; reason?: string }) ?? null)
+          : null;
+      } catch {
+        parsedBody = null;
+      }
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[LISTING_EDIT] client PATCH", {
+          listingId: id,
+          status,
+          photosCount: Array.isArray(patchBody.photos) ? (patchBody.photos as unknown[]).length : 0,
+          error: typeof parsedBody?.error === "string" ? parsedBody.error : undefined,
+          reason: typeof parsedBody?.reason === "string" ? parsedBody.reason : undefined,
+        });
+      }
+      if (!r.ok) {
+        let msg = "UPDATE_FAILED";
+        if (typeof parsedBody?.error === "string") msg = parsedBody.error;
+        else if (typeof parsedBody?.message === "string") msg = parsedBody.message;
+        throw new ListingsApiError(msg, status, parsedBody);
+      }
       await refresh();
     },
     [refresh],

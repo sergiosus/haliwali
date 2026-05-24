@@ -22,7 +22,7 @@ import {
   softDeleteListingById,
 } from "../../../lib/serverListingsStore";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
-import { parseListingBody } from "../route";
+import { diagnoseListingBodyReject, parseListingBody } from "../route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -124,8 +124,38 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ error: "LISTING_NOT_EDITABLE" }, { status: 400 });
   }
 
-  const parsed = parseListingBody(body, uid);
-  if (!parsed || parsed.id !== id) return NextResponse.json({ error: "BAD_REQUEST" }, { status: 400 });
+  const bodyId =
+    body && typeof body === "object" && typeof (body as Record<string, unknown>).id === "string"
+      ? normalizeListingId(String((body as Record<string, unknown>).id))
+      : "";
+  const parsed = parseListingBody(
+    body && typeof body === "object" ? { ...(body as object), id: bodyId || id } : body,
+    uid,
+  );
+  if (!parsed || normalizeListingId(parsed.id) !== id) {
+    const reject = diagnoseListingBodyReject(body);
+    const bodyRec = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const photosRaw = bodyRec.photos;
+    const photoCount = Array.isArray(photosRaw) ? photosRaw.length : 0;
+    const photoTypes = Array.isArray(photosRaw)
+      ? [...new Set(photosRaw.map((x) => typeof x))].join(",")
+      : "";
+    console.log("[LISTING_EDIT]", {
+      listingId: id,
+      bodyId: bodyId || null,
+      parsedId: parsed?.id ?? null,
+      reject,
+      payloadKeys: Object.keys(bodyRec),
+      photoCount,
+      photoTypes,
+      type: typeof bodyRec.type === "string" ? bodyRec.type : null,
+      hasPrice: "price" in bodyRec,
+    });
+    return NextResponse.json(
+      { error: "BAD_REQUEST", reason: reject ?? "id_mismatch" },
+      { status: 400 },
+    );
+  }
 
   const auth = await assertListingOwnerOrAdmin(id, uid, admin);
   if (!auth.ok) return NextResponse.json({ error: auth.status === 404 ? "NOT_FOUND" : "FORBIDDEN" }, { status: auth.status });
@@ -143,6 +173,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   try {
     await replaceListing(listing);
   } catch (e) {
+    const msg = e instanceof Error ? e.message : "replace_failed";
+    console.log("[LISTING_EDIT]", { listingId: id, stage: "replace", error: msg });
     console.error(e);
     return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }

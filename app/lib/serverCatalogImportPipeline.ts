@@ -1,5 +1,6 @@
+import { logCatalogImport } from "./catalogCatalogLog";
 import { usesPostgres } from "./pgPool";
-import type { CatalogImportDraft, CatalogImportDraftInput } from "./catalogImportTypes";
+import type { CatalogImportDraft, CatalogImportDraftInput, CatalogImportUpsertResult } from "./catalogImportTypes";
 import type { CatalogImportSource, CatalogSourceType } from "./catalogExtractionTypes";
 import * as pg from "./serverCatalogImportDraftPg";
 import * as json from "./serverCatalogImportDraftJson";
@@ -9,8 +10,9 @@ async function withPg<T>(fn: () => Promise<T>, fallback: () => Promise<T>): Prom
   try {
     return await fn();
   } catch (e) {
-    if (process.env.NODE_ENV === "production") throw e;
-    return fallback();
+    const msg = e instanceof Error ? e.message : String(e);
+    logCatalogImport("pg_pipeline_error", { error: msg.slice(0, 300) });
+    throw e;
   }
 }
 
@@ -67,7 +69,24 @@ export async function upsertExtractedDrafts(
     existingDraftId?: number;
   }[],
 ): Promise<CatalogImportDraft[]> {
-  return withPg(() => pg.pgUpsertImportDraftsV2(items), () => json.jsonUpsertImportDraftsV2(items));
+  const result = await upsertExtractedDraftsWithMeta(items);
+  return result.drafts;
+}
+
+export async function upsertExtractedDraftsWithMeta(
+  items: {
+    input: CatalogImportDraftInput;
+    duplicateHint: string | null;
+    duplicateOfCompanyId: number | null;
+    needsReview: boolean;
+    sourceId: number;
+    existingDraftId?: number;
+  }[],
+): Promise<CatalogImportUpsertResult> {
+  return withPg(
+    () => pg.pgUpsertImportDraftsWithMeta(items),
+    () => json.jsonUpsertImportDraftsWithMeta(items),
+  );
 }
 
 export async function mergeDraftIntoCompany(

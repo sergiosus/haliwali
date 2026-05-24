@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logCatalogDrafts } from "../../../../../lib/catalogCatalogLog";
 import { listCatalogImportDrafts } from "../../../../../lib/serverCatalogImportDraftStore";
 import type { CatalogImportDraftStatus } from "../../../../../lib/catalogImportTypes";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
@@ -6,7 +7,13 @@ import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VALID_STATUS = new Set<CatalogImportDraftStatus>(["new", "saved", "published", "rejected"]);
+const VALID_STATUS = new Set<CatalogImportDraftStatus>([
+  "draft",
+  "saved",
+  "approved",
+  "rejected",
+  "published",
+]);
 
 export async function GET(req: Request) {
   const deny = restDenyPrivilegedAdminResponse(await getAdminPrivilegedFailure());
@@ -19,5 +26,6 @@ export async function GET(req: Request) {
       (statusParam as CatalogImportDraftStatus)
     : undefined;
   const drafts = await listCatalogImportDrafts(status ? { status } : undefined);
+  logCatalogDrafts("loaded_drafts_count", { count: drafts.length, status: status ?? "all" });
   return NextResponse.json({ ok: true, drafts });
 }

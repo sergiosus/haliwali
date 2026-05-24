@@ -35,3 +35,7 @@ export function logCatalogParse(message: string, meta?: Record<string, unknown>)
 export function logCatalogPublish(message: string, meta?: Record<string, unknown>): void {
   console.info(`[CATALOG_PUBLISH] ${message}${safeMeta(meta)}`);
 }
+
+export function logCatalogDrafts(message: string, meta?: Record<string, unknown>): void {
+  console.info(`[CATALOG_DRAFTS] ${message}${safeMeta(meta)}`);
+}

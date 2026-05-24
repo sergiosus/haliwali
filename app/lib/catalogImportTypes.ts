@@ -1,9 +1,7 @@
 import type { CatalogSocialLink, CatalogSourceType } from "./catalogExtractionTypes";
 
-export type CatalogImportDraftStatus = "new" | "saved" | "published" | "rejected";
-
-/** @deprecated Legacy DB values mapped on read */
-export type CatalogImportDraftStatusLegacy = "draft" | "approved";
+/** Canonical statuses stored in catalog_company_import_drafts.status */
+export type CatalogImportDraftStatus = "draft" | "saved" | "approved" | "rejected" | "published";
 
 export type CatalogImportSession = {
   id: number;
@@ -14,11 +12,32 @@ export type CatalogImportSession = {
   createdAt: string;
 };
 
+/** Map DB / legacy values to canonical status for API + UI. */
 export function normalizeDraftStatus(raw: string): CatalogImportDraftStatus {
-  if (raw === "new" || raw === "saved" || raw === "published" || raw === "rejected") return raw;
-  if (raw === "draft") return "new";
-  if (raw === "approved") return "saved";
-  return "new";
+  const s = raw.trim().toLowerCase();
+  if (s === "draft" || s === "saved" || s === "approved" || s === "rejected" || s === "published") {
+    return s;
+  }
+  if (s === "new") return "draft";
+  return "draft";
+}
+
+/** Values accepted in list filter (includes legacy aliases). */
+export function draftStatusDbValues(canonical: CatalogImportDraftStatus): string[] {
+  switch (canonical) {
+    case "draft":
+      return ["draft", "new"];
+    case "saved":
+      return ["saved"];
+    case "approved":
+      return ["approved"];
+    case "rejected":
+      return ["rejected"];
+    case "published":
+      return ["published"];
+    default:
+      return ["draft"];
+  }
 }
 
 export type CatalogImportDraftInput = {
@@ -57,3 +76,10 @@ export type CatalogImportDraft = CatalogImportDraftInput & {
 };
 
 export type CatalogImportParseKind = "csv" | "text" | "url" | "urls";
+
+export type CatalogImportUpsertResult = {
+  drafts: CatalogImportDraft[];
+  createdIds: number[];
+  updatedIds: number[];
+  sourcesCreated: number;
+};

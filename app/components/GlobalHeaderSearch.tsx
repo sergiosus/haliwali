@@ -22,14 +22,9 @@ import {
 } from "../lib/globalSearchNormalize";
 import { searchDebugLog } from "../lib/searchMatch";
 import { getHeaderSuggestExternalSearchLinks } from "../lib/externalSearchLinks";
-import {
-  clearRecentSearches,
-  pushRecentSearch,
-  readRecentSearches,
-  RECENT_SEARCHES_CHANGED_EVENT,
-  RECENT_SEARCH_MIN_LENGTH,
-} from "../lib/recentSearches";
+import { pushRecentSearch, RECENT_SEARCH_MIN_LENGTH } from "../lib/recentSearches";
 import { useSearchScope } from "../lib/useStoredCity";
+import { RecentSearchesDropdown, useRecentSearches } from "./RecentSearchesDropdown";
 
 const MIN_LISTING_SUGGEST_CHARS = 3;
 const MIN_EXTERNAL_SUGGEST_CHARS = 2;
@@ -43,24 +38,6 @@ type ListingTypeOrder = "product" | "service" | "task";
 const SECTION_ORDER: ListingTypeOrder[] = ["product", "service", "task"];
 const HALIWALI_LISTINGS_LABEL = "Объявления Haliwali";
 const MARKETPLACE_SECTION_LABEL = "Товары с маркетплейсов";
-
-function RecentSearchIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="8" />
-      <path d="M12 8v4l2.5 1.5" />
-    </svg>
-  );
-}
 
 function SearchIcon({ className }: { className?: string }) {
   return (
@@ -144,7 +121,7 @@ export function GlobalHeaderSearch({
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
   const [submitHint, setSubmitHint] = useState(false);
-  const [recentQueries, setRecentQueries] = useState<string[]>([]);
+  const { queries: recentQueries, refresh: refreshRecentQueries } = useRecentSearches();
   const [mpCards, setMpCards] = useState<MarketplaceDisplayCard[]>([]);
   const [mpLoading, setMpLoading] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -175,17 +152,6 @@ export function GlobalHeaderSearch({
       queueMicrotask(() => setQ(""));
     }
   }, [isHome, isSearchPage, qFromUrl]);
-
-  const refreshRecentQueries = useCallback(() => {
-    setRecentQueries(readRecentSearches());
-  }, []);
-
-  useEffect(() => {
-    refreshRecentQueries();
-    const onChange = () => refreshRecentQueries();
-    window.addEventListener(RECENT_SEARCHES_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(RECENT_SEARCHES_CHANGED_EVENT, onChange);
-  }, [refreshRecentQueries]);
 
   /** Live URL params (avoids stale useSearchParams when clearing q). */
   const liveSearchParams = useCallback((): URLSearchParams => {
@@ -248,7 +214,7 @@ export function GlobalHeaderSearch({
     [isSearchPage, router, liveSearchParams, pathWithQuery],
   );
 
-  /** Clear URL query and restore idle homepage/search UI. */
+  /** Clear URL query; keep dropdown open when input stays focused (recent searches). */
   const clearUrlQueryKeepRecentPanel = useCallback(() => {
     if (debounceRef.current != null) {
       window.clearTimeout(debounceRef.current);
@@ -271,7 +237,11 @@ export function GlobalHeaderSearch({
     setMpLoading(false);
     setActiveIdx(-1);
     setSubmitHint(false);
-    setSuggestOpen(false);
+    if (inputFocusedRef.current) {
+      setSuggestOpen(true);
+    } else {
+      setSuggestOpen(false);
+    }
     if (isHome) {
       const next = liveSearchParams();
       next.delete("q");
@@ -342,24 +312,18 @@ export function GlobalHeaderSearch({
     (query: string) => {
       const t = query.trim();
       if (t.length < RECENT_SEARCH_MIN_LENGTH) return;
-      resetSuggestState();
+      setSubmitHint(false);
+      suggestAbortRef.current?.abort();
+      suggestAbortRef.current = null;
+      suggestSeqRef.current += 1;
+      setSuggestions([]);
+      setSuggestLoading(false);
+      setActiveIdx(-1);
+      setSuggestOpen(false);
       setQ(t);
-      if (isHome) {
-        replaceHomeQ(t);
-      } else if (isSearchPage) {
-        replaceSearchPageQ(t);
-      } else {
-        applySearchQueryAndNavigate(t);
-      }
+      applySearchQueryAndNavigate(t);
     },
-    [
-      resetSuggestState,
-      isHome,
-      isSearchPage,
-      replaceHomeQ,
-      replaceSearchPageQ,
-      applySearchQueryAndNavigate,
-    ],
+    [applySearchQueryAndNavigate],
   );
 
   const fetchSuggestions = useCallback(
@@ -595,26 +559,33 @@ export function GlobalHeaderSearch({
 
   const headerExternalLinks = useMemo(() => getHeaderSuggestExternalSearchLinks(q), [q]);
 
-  const showListingBlock =
-    qTrim.length >= MIN_LISTING_SUGGEST_CHARS && (suggestLoading || flat.length > 0);
-  const showMarketplaceBlock =
-    qTrim.length >= MIN_LISTING_SUGGEST_CHARS && mpCards.length > 0;
-  const showRecentBlock = suggestEnabled && recentQueries.length > 0;
-  const showSuggestPanel = suggestEnabled && suggestOpen;
   const showShortQueryHint = qTrim.length > 0 && qTrim.length < MIN_LISTING_SUGGEST_CHARS;
   const showExternalBlock =
     headerExternalLinks.length > 0 && qTrim.length >= MIN_EXTERNAL_SUGGEST_CHARS;
   const showCorrectionBlock =
     Boolean(correctionHint) && qTrim.length >= MIN_EXTERNAL_SUGGEST_CHARS;
+  const showListingBlock =
+    qTrim.length >= MIN_LISTING_SUGGEST_CHARS && (suggestLoading || flat.length > 0);
+  const showMarketplaceBlock =
+    qTrim.length >= MIN_LISTING_SUGGEST_CHARS && mpCards.length > 0;
+  const showRecentBlock = qTrim.length === 0 && recentQueries.length > 0;
+  const showSuggestExtras =
+    suggestEnabled &&
+    (showShortQueryHint ||
+      showCorrectionBlock ||
+      showListingBlock ||
+      showMarketplaceBlock ||
+      showExternalBlock);
+  const showSuggestPanel = suggestOpen && (showRecentBlock || showSuggestExtras);
   const showSubmitValidation =
     submitHint && qTrim.length > 0 && qTrim.length < MIN_LISTING_SUGGEST_CHARS;
 
   const openSuggestOnFocus = useCallback(() => {
     inputFocusedRef.current = true;
-    if (!suggestEnabled) return;
     refreshRecentQueries();
     setSuggestOpen(true);
     const t = q.trim();
+    if (!suggestEnabled) return;
     if (t.length >= MIN_LISTING_SUGGEST_CHARS && suggestions.length === 0 && !suggestLoading) {
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
@@ -648,39 +619,11 @@ export function GlobalHeaderSearch({
             onMouseDown={(e) => e.preventDefault()}
           >
             {showRecentBlock ?
-              <div role="group" aria-label="Недавние поиски">
-                <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-black/40">
-                    Недавние поиски
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      clearRecentSearches();
-                      refreshRecentQueries();
-                    }}
-                    className="shrink-0 text-[11px] font-medium text-black/45 underline-offset-2 transition-colors hover:text-black/70 hover:underline"
-                  >
-                    Очистить
-                  </button>
-                </div>
-                {recentQueries.map((query) => (
-                  <button
-                    key={query}
-                    type="button"
-                    className="flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left text-sm text-black/85 transition-colors hover:bg-orange-50"
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      applyRecentSearch(query);
-                    }}
-                  >
-                    <RecentSearchIcon className="h-4 w-4 shrink-0 text-black/35" />
-                    <span className="min-w-0 truncate font-medium">{query}</span>
-                  </button>
-                ))}
-              </div>
+              <RecentSearchesDropdown
+                open
+                onPick={applyRecentSearch}
+                className="border-0 shadow-none ring-0"
+              />
             : null}
 
             {showShortQueryHint ?
@@ -854,6 +797,9 @@ export function GlobalHeaderSearch({
         onInput={(e) => onInputChange(e.currentTarget.value)}
         onKeyDown={onKeyDown}
         onFocus={openSuggestOnFocus}
+        onBlur={() => {
+          inputFocusedRef.current = false;
+        }}
         placeholder="Поиск по объявлениям"
         className={headerInputCls}
         role="combobox"

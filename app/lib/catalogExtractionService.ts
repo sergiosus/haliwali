@@ -19,12 +19,13 @@ import {
 import { mergeDraftInputs, mergeExtractedCompanyDrafts } from "./catalogImportMerge";
 import { classifySourceUrl } from "./catalogSourceClassifier";
 import { buildDraftWarnings } from "./catalogImportEnrich";
+import type { CatalogImportUpsertResult } from "./catalogImportTypes";
 import {
   createImportSource,
   failImportSource,
   loadDedupSeedData,
   parsedImportSource,
-  upsertExtractedDrafts,
+  upsertExtractedDraftsWithMeta,
 } from "./serverCatalogImportPipeline";
 
 export const MAX_URLS_PER_BATCH = 20;
@@ -182,27 +183,41 @@ function mapExtractionError(e: unknown): string {
 export async function processUrlBatch(
   urls: string[],
   defaults: ExtractionDefaults,
-): Promise<{ drafts: CatalogImportDraft[]; errors: { url: string; error: string }[] }> {
+): Promise<{
+  drafts: CatalogImportDraft[];
+  errors: { url: string; error: string }[];
+  upsert: CatalogImportUpsertResult;
+}> {
   const limited = urls.slice(0, MAX_URLS_PER_BATCH);
   const seed = await loadDedupSeedData();
   const dedupIndex = buildDedupIndex(seed.published, seed.drafts);
   const allDrafts: CatalogImportDraft[] = [];
   const errors: { url: string; error: string }[] = [];
   const byDomain = groupUrlsByDomain(limited);
+  const agg: CatalogImportUpsertResult = {
+    drafts: [],
+    createdIds: [],
+    updatedIds: [],
+    sourcesCreated: 0,
+  };
 
   logCatalogImport("url_batch_start", { urlCount: limited.length, domainCount: byDomain.size });
 
-  for (const [domain, domainUrls] of byDomain) {
+  for (const [, domainUrls] of byDomain) {
     const { sourceId, draft, error } = await extractCompanyForDomain(domainUrls, defaults);
     if (error || !draft) {
-      errors.push({ url: domainUrls[0] ?? domain, error: error ?? "NO_COMPANY_EXTRACTED" });
+      errors.push({ url: domainUrls[0] ?? "", error: error ?? "NO_COMPANY_EXTRACTED" });
       continue;
     }
-    const saved = await persistExtractedBatch([draft], sourceId, dedupIndex, defaults);
-    allDrafts.push(...saved);
+    const batch = await persistExtractedBatchWithMeta([draft], sourceId, dedupIndex, defaults);
+    allDrafts.push(...batch.drafts);
+    agg.drafts.push(...batch.drafts);
+    agg.createdIds.push(...batch.createdIds);
+    agg.updatedIds.push(...batch.updatedIds);
+    agg.sourcesCreated += batch.sourcesCreated;
   }
 
-  return { drafts: allDrafts, errors };
+  return { drafts: allDrafts, errors, upsert: agg };
 }
 
 export async function processTextInput(
@@ -279,12 +294,12 @@ export async function processCsvInput(
   return persistExtractedBatch(extracted, source.id, dedupIndex, defaults);
 }
 
-async function persistExtractedBatch(
+async function persistExtractedBatchWithMeta(
   extracted: ExtractedCompanyDraft[],
   sourceId: number,
   dedupIndex: ReturnType<typeof buildDedupIndex>,
   defaults: ExtractionDefaults,
-): Promise<CatalogImportDraft[]> {
+): Promise<CatalogImportUpsertResult> {
   const items: {
     input: CatalogImportDraftInput;
     duplicateHint: string | null;
@@ -310,10 +325,19 @@ async function persistExtractedBatch(
     });
   }
 
-  const saved = await upsertExtractedDrafts(items);
-  for (let i = 0; i < saved.length; i++) {
+  const result = await upsertExtractedDraftsWithMeta(items);
+  for (let i = 0; i < result.drafts.length; i++) {
     const ex = extracted[i];
-    if (ex) registerInDedupIndex(dedupIndex, ex, saved[i]!.id);
+    if (ex) registerInDedupIndex(dedupIndex, ex, result.drafts[i]!.id);
   }
-  return saved;
+  return result;
+}
+
+async function persistExtractedBatch(
+  extracted: ExtractedCompanyDraft[],
+  sourceId: number,
+  dedupIndex: ReturnType<typeof buildDedupIndex>,
+  defaults: ExtractionDefaults,
+): Promise<CatalogImportDraft[]> {
+  return (await persistExtractedBatchWithMeta(extracted, sourceId, dedupIndex, defaults)).drafts;
 }

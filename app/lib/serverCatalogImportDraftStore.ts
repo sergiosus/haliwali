@@ -1,15 +1,23 @@
+import { logCatalogImport } from "./catalogCatalogLog";
 import { usesPostgres } from "./pgPool";
-import type { CatalogImportDraft, CatalogImportDraftInput, CatalogImportDraftStatus } from "./catalogImportTypes";
+import type {
+  CatalogImportDraft,
+  CatalogImportDraftInput,
+  CatalogImportDraftStatus,
+  CatalogImportUpsertResult,
+} from "./catalogImportTypes";
 import * as pg from "./serverCatalogImportDraftPg";
 import * as json from "./serverCatalogImportDraftJson";
 
+/** When Postgres is configured, always use PG (no silent JSON fallback). */
 async function withPg<T>(fn: () => Promise<T>, fallback: () => Promise<T>): Promise<T> {
   if (!usesPostgres()) return fallback();
   try {
     return await fn();
   } catch (e) {
-    if (process.env.NODE_ENV === "production") throw e;
-    return fallback();
+    const msg = e instanceof Error ? e.message : String(e);
+    logCatalogImport("pg_store_error", { error: msg.slice(0, 300) });
+    throw e;
   }
 }
 
@@ -60,4 +68,24 @@ export async function saveCatalogImportDraft(
 
 export async function deleteCatalogImportDrafts(ids: number[]): Promise<number> {
   return withPg(() => pg.pgDeleteImportDrafts(ids), () => json.jsonDeleteImportDrafts(ids));
+}
+
+export async function countCatalogImportDraftsInDb(): Promise<number> {
+  return withPg(() => pg.pgCountImportDrafts(), () => json.jsonCountImportDrafts());
+}
+
+export async function upsertExtractedDraftsWithMeta(
+  items: {
+    input: CatalogImportDraftInput;
+    duplicateHint: string | null;
+    duplicateOfCompanyId: number | null;
+    needsReview: boolean;
+    sourceId: number;
+    existingDraftId?: number;
+  }[],
+): Promise<CatalogImportUpsertResult> {
+  return withPg(
+    () => pg.pgUpsertImportDraftsWithMeta(items),
+    () => json.jsonUpsertImportDraftsWithMeta(items),
+  );
 }

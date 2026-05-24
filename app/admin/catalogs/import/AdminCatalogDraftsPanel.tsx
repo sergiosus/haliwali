@@ -9,15 +9,17 @@ import type { CatalogImportDraft, CatalogImportDraftStatus, CatalogImportSession
 import type { CatalogCompanyAdminItem } from "../../../lib/catalogTypes";
 
 const STATUS_LABEL: Record<CatalogImportDraftStatus, string> = {
-  new: "Новый",
+  draft: "Черновик",
   saved: "Сохранён",
+  approved: "Одобрен",
   rejected: "Отклонён",
   published: "Опубликован",
 };
 
 const TABS: { id: CatalogImportDraftStatus; label: string }[] = [
-  { id: "new", label: "Новые" },
+  { id: "draft", label: "Новые" },
   { id: "saved", label: "Сохранённые" },
+  { id: "approved", label: "Одобренные" },
   { id: "published", label: "Опубликованные" },
   { id: "rejected", label: "Отклонённые" },
 ];
@@ -48,7 +50,7 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportLink?: boolean }) {
-  const [tab, setTab] = useState<CatalogImportDraftStatus>("new");
+  const [tab, setTab] = useState<CatalogImportDraftStatus>("draft");
   const [drafts, setDrafts] = useState<CatalogImportDraft[]>([]);
   const [sessions, setSessions] = useState<CatalogImportSession[]>([]);
   const [companies, setCompanies] = useState<CatalogCompanyAdminItem[]>([]);
@@ -87,7 +89,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
     setSelected(new Set());
   }, [loadDrafts, loadSessions, loadCompanies]);
 
-  async function runAction(action: "save" | "reject" | "publish", ids: number[]) {
+  async function runAction(action: "save" | "approve" | "reject" | "publish", ids: number[]) {
     if (ids.length === 0) return;
     setBusy(true);
     setMessage(null);
@@ -170,7 +172,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         setEditingId(null);
         setMessage("Сохранено");
         loadDrafts();
-        if (tab === "new") setTab("saved");
+        if (tab === "draft") setTab("saved");
       }
     } finally {
       setBusy(false);
@@ -218,9 +220,10 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
     }
   }
 
-  const canPublish = tab === "saved";
-  const canReject = tab === "new" || tab === "saved";
-  const canMarkSaved = tab === "new";
+  const canReject = tab === "draft" || tab === "saved" || tab === "approved";
+  const canApprove = tab === "draft" || tab === "saved";
+  const selectedCount = selectedIds.length;
+  const tabLabel = TABS.find((t) => t.id === tab)?.label ?? tab;
 
   return (
     <div className="space-y-4">
@@ -274,51 +277,63 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">
-          {TABS.find((t) => t.id === tab)?.label} ({drafts.length})
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {canMarkSaved ?
-            <button
-              type="button"
-              disabled={busy || selectedIds.length === 0}
-              onClick={() => void runAction("save", selectedIds)}
-              className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium disabled:opacity-40"
-            >
-              В сохранённые
-            </button>
-          : null}
-          {canReject ?
-            <button
-              type="button"
-              disabled={busy || selectedIds.length === 0}
-              onClick={() => void runAction("reject", selectedIds)}
-              className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium disabled:opacity-40"
-            >
-              Отклонить
-            </button>
-          : null}
-          {canPublish ?
-            <button
-              type="button"
-              disabled={busy || selectedIds.length === 0}
-              onClick={() => void runAction("publish", selectedIds)}
-              className="rounded-full bg-black px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
-            >
-              Опубликовать выбранные
-            </button>
-          : null}
-          <button
-            type="button"
-            disabled={busy || selectedIds.length === 0}
-            onClick={() => void runDelete(selectedIds)}
-            className="rounded-full border border-red-200 px-3 py-1.5 text-sm font-medium text-red-800 disabled:opacity-40"
-          >
-            Удалить выбранные
-          </button>
+      <section className="rounded-2xl border border-black/10 bg-white p-4">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h2 className="text-lg font-semibold">Черновики</h2>
+          <span className="text-sm text-black/55">
+            {tabLabel} · {drafts.length}
+          </span>
         </div>
-      </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-black/10 pt-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-black">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              disabled={busy || drafts.length === 0}
+              onChange={toggleSelectAll}
+              className="h-4 w-4 shrink-0 rounded border-black/30"
+            />
+            Выделить все
+          </label>
+          {selectedCount > 0 ?
+            <span className="text-sm font-medium text-black/70">Выбрано: {selectedCount}</span>
+          : null}
+        </div>
+
+        {selectedCount > 0 ?
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-black/10 pt-3">
+            {canApprove ?
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void runAction("approve", selectedIds)}
+                className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium hover:bg-black/5 disabled:opacity-40"
+              >
+                Одобрить выбранные
+              </button>
+            : null}
+            {canReject ?
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void runAction("reject", selectedIds)}
+                className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium hover:bg-black/5 disabled:opacity-40"
+              >
+                Отклонить выбранные
+              </button>
+            : null}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void runDelete(selectedIds)}
+              className="rounded-full border border-red-200 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-50 disabled:opacity-40"
+            >
+              Удалить выбранные
+            </button>
+          </div>
+        : null}
+      </section>
 
       {message ?
         <p className="text-sm font-medium text-black/70">{message}</p>
@@ -336,6 +351,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                 type="checkbox"
                 checked={selected.has(d.id)}
                 disabled={busy}
+                aria-label={`Выбрать ${d.name || "черновик"}`}
                 onChange={() => {
                   setSelected((prev) => {
                     const next = new Set(prev);
@@ -344,7 +360,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     return next;
                   });
                 }}
-                className="mt-1"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-black/30"
               />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -410,7 +426,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                 </p>
               </div>
               <div className="flex flex-col gap-2">
-                {d.status === "new" ?
+                {d.status === "draft" ?
                   <>
                     <button
                       type="button"
@@ -462,6 +478,24 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     >
                       Сохранить
                     </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      onClick={() => void runAction("approve", [d.id])}
+                    >
+                      Одобрить
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      onClick={() => void runAction("reject", [d.id])}
+                    >
+                      Отклонить
+                    </button>
+                  </>
+                : null}
+                {d.status === "approved" ?
+                  <>
                     <button
                       type="button"
                       className="rounded-full bg-black px-2.5 py-1 text-xs font-semibold text-white"

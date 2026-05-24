@@ -108,7 +108,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, ...result });
   }
 
-  const status: CatalogImportDraftStatus = action === "approve" ? "saved" : "rejected";
+  const status: CatalogImportDraftStatus = action === "approve" ? "approved" : "rejected";
   const updated = await setCatalogImportDraftStatuses(ids, status);
   return NextResponse.json({ ok: true, updated });
 }

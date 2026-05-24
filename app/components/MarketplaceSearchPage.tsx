@@ -25,7 +25,9 @@ import { buildProviderSearchActions } from "../lib/marketplacePageSearch";
 import { MarketplaceLinkOnlyActions } from "./MarketplaceLinkOnlyActions";
 import { MarketplacePreviewSection } from "./MarketplacePreviewSection";
 import { MarketplaceProviderFilters } from "./MarketplaceProviderFilters";
+import { RecentSearchesDropdown } from "./RecentSearchesDropdown";
 import { getMarketplaceChipVisual } from "../lib/marketplaceDiscoveryContent";
+import { pushRecentSearch, RECENT_SEARCH_MIN_LENGTH } from "../lib/recentSearches";
 
 type PageApiResponse = {
   ok?: boolean;
@@ -92,6 +94,8 @@ export function MarketplaceSearchPage() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(initialQ.length >= 2);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
   const fetchGen = useRef(0);
   const didInitialSearch = useRef(false);
 
@@ -169,10 +173,39 @@ export function MarketplaceSearchPage() {
   );
 
   const submitSearch = useCallback(() => {
+    const trimmed = query.trim();
+    if (trimmed.length >= RECENT_SEARCH_MIN_LENGTH) {
+      pushRecentSearch(trimmed);
+    }
     syncUrl(query, selectedProviders);
     void runSearch(query, selectedProviders);
     setMobileFiltersOpen(false);
+    setSearchFocused(false);
   }, [query, selectedProviders, syncUrl, runSearch]);
+
+  const applyRecentMarketplaceSearch = useCallback(
+    (recentQuery: string) => {
+      const trimmed = recentQuery.trim();
+      if (trimmed.length < 2) return;
+      setQuery(trimmed);
+      setSearchFocused(false);
+      syncUrl(trimmed, selectedProviders);
+      void runSearch(trimmed, selectedProviders);
+      setMobileFiltersOpen(false);
+    },
+    [selectedProviders, syncUrl, runSearch],
+  );
+
+  useEffect(() => {
+    function onDocPointerDown(e: PointerEvent) {
+      const node = e.target;
+      if (!(node instanceof Node)) return;
+      if (searchWrapRef.current?.contains(node)) return;
+      setSearchFocused(false);
+    }
+    document.addEventListener("pointerdown", onDocPointerDown, false);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown, false);
+  }, []);
 
   useEffect(() => {
     if (didInitialSearch.current) return;
@@ -187,7 +220,9 @@ export function MarketplaceSearchPage() {
     [submittedQuery],
   );
 
-  const canSearch = query.trim().length >= 2 && selectedProviders.length > 0;
+  const queryTrim = query.trim();
+  const canSearch = queryTrim.length >= 2 && selectedProviders.length > 0;
+  const showRecentDropdown = searchFocused && queryTrim.length === 0;
   const showPreviewSection =
     searched && realCardsSelected.length > 0 && (loading || items.length > 0);
   const showProviderGateway = searched && displayQuery.length >= 2 && actions.length > 0;
@@ -213,13 +248,14 @@ export function MarketplaceSearchPage() {
           <div className="sticky top-[3.25rem] z-20 mt-5 sm:top-[4.5rem] sm:mt-7">
             <div className="rounded-2xl border border-black/[0.08] bg-white p-2 shadow-[0_12px_48px_rgba(255,122,0,0.12)] ring-1 ring-black/[0.04]">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
-                <div className="relative min-w-0 flex-1">
+                <div ref={searchWrapRef} className="relative min-w-0 flex-1">
                   <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-black/30 sm:h-6 sm:w-6" />
                   <input
                     id="marketplace-page-search"
                     type="search"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
+                    onFocus={() => setSearchFocused(true)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && canSearch) {
                         e.preventDefault();
@@ -230,6 +266,11 @@ export function MarketplaceSearchPage() {
                     autoComplete="off"
                     className="h-14 w-full rounded-xl bg-transparent pl-12 pr-3 text-base text-black outline-none placeholder:text-black/35 sm:h-[3.75rem] sm:pl-14 sm:text-lg"
                   />
+                  {showRecentDropdown ?
+                    <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[200]">
+                      <RecentSearchesDropdown open onPick={applyRecentMarketplaceSearch} />
+                    </div>
+                  : null}
                 </div>
                 <button
                   type="button"

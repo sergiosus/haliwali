@@ -5,7 +5,8 @@ import type {
   CatalogImportDraftStatus,
   CatalogImportSession,
 } from "./catalogImportTypes";
-import { normalizeDraftStatus } from "./catalogImportTypes";
+import { draftStatusDbValues, normalizeDraftStatus } from "./catalogImportTypes";
+import type { CatalogImportUpsertResult } from "./catalogImportTypes";
 import type { CatalogImportSource, CatalogSocialLink, CatalogSourceType } from "./catalogExtractionTypes";
 import { draftDomainKey } from "./catalogImportDedup";
 import { mergeDraftInputs } from "./catalogImportMerge";
@@ -204,11 +205,8 @@ export async function pgListImportDrafts(opts?: {
   const params: unknown[] = [];
   let where = "";
   if (opts?.status) {
-    params.push(opts.status);
-    const n = params.length;
-    where = `WHERE d.status = $${n}
-      OR ($${n} = 'new' AND d.status = 'draft')
-      OR ($${n} = 'saved' AND d.status = 'approved')`;
+    params.push(draftStatusDbValues(opts.status));
+    where = `WHERE d.status = ANY($${params.length}::text[])`;
   }
   const { rows } = await pool.query<DraftRow>(
     `${DRAFT_SELECT} ${where} ORDER BY d.created_at DESC LIMIT 500`,
@@ -226,7 +224,9 @@ type ImportDraftWriteItem = {
   existingDraftId?: number;
 };
 
-async function pgWriteImportDraftItem(item: ImportDraftWriteItem): Promise<CatalogImportDraft | null> {
+async function pgWriteImportDraftItem(
+  item: ImportDraftWriteItem,
+): Promise<{ draft: CatalogImportDraft; created: boolean } | null> {
   const pool = getPool();
   const domain = String(item.input.rawPayload?.rootDomain ?? "").trim().toLowerCase()
     || draftDomainKey({
@@ -270,9 +270,10 @@ async function pgWriteImportDraftItem(item: ImportDraftWriteItem): Promise<Catal
           [existingId, item.duplicateHint],
         );
         const { rows: again } = await pool.query<DraftRow>(`${DRAFT_SELECT} WHERE d.id = $1`, [existingId]);
-        return again[0] ? rowToDraft(again[0]) : updated;
+        const draft = again[0] ? rowToDraft(again[0]) : updated;
+        return { draft, created: false };
       }
-      return updated;
+      if (updated) return { draft: updated, created: false };
     }
   }
 
@@ -285,7 +286,7 @@ async function pgWriteImportDraftItem(item: ImportDraftWriteItem): Promise<Catal
       latitude, longitude, image_url, source_url, social_links, confidence_score,
       raw_payload, duplicate_hint, duplicate_of_company_id, needs_review
     ) VALUES (
-      'new', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16::jsonb, $17, $18, $19
+        'draft', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16::jsonb, $17, $18, $19
     )
     RETURNING *
     `,
@@ -314,21 +315,47 @@ async function pgWriteImportDraftItem(item: ImportDraftWriteItem): Promise<Catal
   const row = rows[0];
   if (!row) return null;
   const full = await pool.query<DraftRow>(`${DRAFT_SELECT} WHERE d.id = $1`, [row.id]);
-  return full.rows[0] ? rowToDraft(full.rows[0]) : null;
+  const draft = full.rows[0] ? rowToDraft(full.rows[0]) : null;
+  return draft ? { draft, created: true } : null;
+}
+
+export async function pgUpsertImportDraftsWithMeta(
+  items: ImportDraftWriteItem[],
+): Promise<CatalogImportUpsertResult> {
+  const drafts: CatalogImportDraft[] = [];
+  const createdIds: number[] = [];
+  const updatedIds: number[] = [];
+  const sourceIds = new Set<number>();
+  for (const item of items) {
+    if (item.sourceId > 0) sourceIds.add(item.sourceId);
+    const result = await pgWriteImportDraftItem(item);
+    if (!result) continue;
+    drafts.push(result.draft);
+    if (result.created) createdIds.push(result.draft.id);
+    else updatedIds.push(result.draft.id);
+  }
+  return {
+    drafts,
+    createdIds,
+    updatedIds,
+    sourcesCreated: sourceIds.size,
+  };
 }
 
 export async function pgUpsertImportDraftsV2(items: ImportDraftWriteItem[]): Promise<CatalogImportDraft[]> {
-  if (items.length === 0) return [];
-  const out: CatalogImportDraft[] = [];
-  for (const item of items) {
-    const d = await pgWriteImportDraftItem(item);
-    if (d) out.push(d);
-  }
-  return out;
+  return (await pgUpsertImportDraftsWithMeta(items)).drafts;
 }
 
 export async function pgInsertImportDraftsV2(items: ImportDraftWriteItem[]): Promise<CatalogImportDraft[]> {
   return pgUpsertImportDraftsV2(items);
+}
+
+export async function pgCountImportDrafts(): Promise<number> {
+  const pool = getPool();
+  const { rows } = await pool.query<{ count: number }>(
+    `SELECT COUNT(*)::int AS count FROM catalog_company_import_drafts`,
+  );
+  return rows[0]?.count ?? 0;
 }
 
 /** @deprecated */
@@ -552,7 +579,7 @@ export async function pgPublishImportDrafts(ids: number[]): Promise<{
       skipped += 1;
       continue;
     }
-    if (normalizeDraftStatus(d.status) !== "saved") {
+    if (normalizeDraftStatus(d.status) !== "approved") {
       skipped += 1;
       continue;
     }

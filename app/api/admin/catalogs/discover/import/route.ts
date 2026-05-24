@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { logCatalogDiscover, logCatalogImport } from "../../../../../lib/catalogCatalogLog";
 import { MAX_URLS_PER_BATCH, processUrlBatch } from "../../../../../lib/catalogExtractionService";
 import { recordCatalogImportSession } from "../../../../../lib/serverCatalogImportSessionStore";
+import { countCatalogImportDraftsInDb } from "../../../../../lib/serverCatalogImportDraftStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 import { checkIpRateLimit, extractIp } from "../../../../../lib/serverAbuse";
 
@@ -45,10 +46,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "TOO_MANY_URLS", max: MAX_URLS_PER_BATCH }, { status: 400 });
   }
 
+  logCatalogImport("selected_count", { count: urls.length });
   logCatalogDiscover("import_batch", { urlCount: urls.length, categorySlug, city: city.slice(0, 40) });
 
   const searchQuery = String(body.searchQuery ?? body.query ?? "").trim();
-  const { drafts, errors } = await processUrlBatch(urls, { categorySlug, city });
+  const { drafts, errors, upsert } = await processUrlBatch(urls, { categorySlug, city });
+
+  logCatalogImport("inserted_sources_count", { count: upsert.sourcesCreated });
+  logCatalogImport("inserted_drafts_count", {
+    count: drafts.length,
+    created: upsert.createdIds.length,
+    updated: upsert.updatedIds.length,
+  });
 
   await recordCatalogImportSession({
     query: searchQuery || urls.slice(0, 5).join("\n"),
@@ -57,13 +66,20 @@ export async function POST(req: Request) {
     resultCount: drafts.length,
   });
 
-  logCatalogImport("drafts_created", { count: drafts.length, errors: errors.length });
+  const dbDraftCount = await countCatalogImportDraftsInDb();
+  logCatalogImport("db_drafts_verify", { count: dbDraftCount });
 
   return NextResponse.json({
     ok: true,
     drafts,
+    draftIds: drafts.map((d) => d.id),
+    createdIds: upsert.createdIds,
+    updatedIds: upsert.updatedIds,
     count: drafts.length,
+    created: upsert.createdIds.length,
+    updated: upsert.updatedIds.length,
     errors,
-    importUrl: "/admin/catalogs/import",
+    dbDraftCount,
+    importUrl: "/admin/catalogs/import/drafts",
   });
 }

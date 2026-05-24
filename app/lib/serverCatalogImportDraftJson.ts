@@ -2,7 +2,8 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
 import type { CatalogImportDraft, CatalogImportDraftInput, CatalogImportDraftStatus } from "./catalogImportTypes";
-import { normalizeDraftStatus } from "./catalogImportTypes";
+import { draftStatusDbValues, normalizeDraftStatus } from "./catalogImportTypes";
+import type { CatalogImportUpsertResult } from "./catalogImportTypes";
 import type { CatalogImportSource, CatalogSocialLink, CatalogSourceType } from "./catalogExtractionTypes";
 import { draftDomainKey } from "./catalogImportDedup";
 import { normalizeImportDomain } from "./catalogImportDomain";
@@ -181,7 +182,10 @@ export async function jsonListImportDrafts(opts?: {
 }): Promise<CatalogImportDraft[]> {
   const store = await readStore();
   let list = store.drafts;
-  if (opts?.status) list = list.filter((d) => normalizeDraftStatus(d.status) === opts.status);
+  if (opts?.status) {
+    const allowed = new Set(draftStatusDbValues(opts.status));
+    list = list.filter((d) => allowed.has(d.status) || normalizeDraftStatus(d.status) === opts.status);
+  }
   return list.map((d) => toDraft(store, d)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -206,13 +210,19 @@ function jsonFindDraftByDomain(store: JsonStore, domain: string): JsonDraft | un
   );
 }
 
-export async function jsonUpsertImportDraftsV2(items: JsonImportWriteItem[]): Promise<CatalogImportDraft[]> {
+export async function jsonUpsertImportDraftsWithMeta(
+  items: JsonImportWriteItem[],
+): Promise<CatalogImportUpsertResult> {
   const store = await readStore();
   const now = new Date().toISOString();
-  const out: CatalogImportDraft[] = [];
+  const drafts: CatalogImportDraft[] = [];
+  const createdIds: number[] = [];
+  const updatedIds: number[] = [];
+  const sourceIds = new Set<number>();
   const src = sourceById(store, items[0]?.sourceId ?? null);
 
   for (const item of items) {
+    if (item.sourceId > 0) sourceIds.add(item.sourceId);
     const domain = draftDomainKey({
       website: item.input.website,
       sourceUrl: item.input.sourceUrl ?? "",
@@ -234,14 +244,15 @@ export async function jsonUpsertImportDraftsV2(items: JsonImportWriteItem[]): Pr
           buildDraftWarnings({ ...existing, ...patch }).length > 0 ||
           Boolean(item.duplicateHint),
       });
-      out.push(toDraft(store, existing));
+      drafts.push(toDraft(store, existing));
+      updatedIds.push(existing.id);
       continue;
     }
 
     const w = buildDraftWarnings(item.input);
     const d: JsonDraft = {
       id: store.nextDraftId++,
-      status: "new",
+      status: "draft",
       sourceId: item.sourceId > 0 ? item.sourceId : null,
       sourceType: (item.input.rawPayload?.sourceType as CatalogSourceType) ?? src?.sourceType ?? null,
       ...item.input,
@@ -255,14 +266,24 @@ export async function jsonUpsertImportDraftsV2(items: JsonImportWriteItem[]): Pr
       updatedAt: now,
     };
     store.drafts.push(d);
-    out.push(toDraft(store, d));
+    drafts.push(toDraft(store, d));
+    createdIds.push(d.id);
   }
   await writeStore(store);
-  return out;
+  return { drafts, createdIds, updatedIds, sourcesCreated: sourceIds.size };
+}
+
+export async function jsonUpsertImportDraftsV2(items: JsonImportWriteItem[]): Promise<CatalogImportDraft[]> {
+  return (await jsonUpsertImportDraftsWithMeta(items)).drafts;
 }
 
 export async function jsonInsertImportDraftsV2(items: JsonImportWriteItem[]): Promise<CatalogImportDraft[]> {
   return jsonUpsertImportDraftsV2(items);
+}
+
+export async function jsonCountImportDrafts(): Promise<number> {
+  const store = await readStore();
+  return store.drafts.length;
 }
 
 export async function jsonUpdateImportDraft(
@@ -363,7 +384,7 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
       !d ||
       d.status === "rejected" ||
       d.publishedCompanySlug ||
-      normalizeDraftStatus(d.status) !== "saved"
+      normalizeDraftStatus(d.status) !== "approved"
     ) {
       skipped += 1;
       continue;

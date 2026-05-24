@@ -7,15 +7,30 @@ import {
 } from "../lib/marketplaceProviderGateway";
 import { getMarketplaceChipVisual } from "../lib/marketplaceDiscoveryContent";
 
-function ProviderGatewayCard({ action }: { action: MarketplaceProviderSearchAction }) {
+function platformCountPhrase(count: number): string {
+  const n = Math.abs(count);
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return `Подготовили поиск на ${n} площадках`;
+  if (mod10 === 1) return `Подготовили поиск на ${n} площадке`;
+  if (mod10 >= 2 && mod10 <= 4) return `Подготовили поиск на ${n} площадки`;
+  return `Подготовили поиск на ${n} площадках`;
+}
+
+function ProviderGatewayCard({
+  action,
+  query,
+}: {
+  action: MarketplaceProviderSearchAction;
+  query: string;
+}) {
   const visual = getMarketplaceChipVisual(action.providerId);
-  const q = action.normalizedQuery.trim();
 
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-black/[0.08] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_4px_20px_rgba(0,0,0,0.07)]">
+    <article className="flex h-full flex-col rounded-2xl border border-black/[0.08] bg-white p-4 shadow-[0_2px_14px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_6px_24px_rgba(0,0,0,0.07)]">
       <div className="flex gap-3">
         <span
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[11px] font-bold text-white shadow-sm"
+          className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-sm"
           style={{ backgroundColor: visual.brandColor }}
           aria-hidden="true"
         >
@@ -23,25 +38,22 @@ function ProviderGatewayCard({ action }: { action: MarketplaceProviderSearchActi
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold leading-tight text-black">{action.name}</h3>
-          <p className="mt-0.5 text-xs text-black/50">{action.regionLabel}</p>
-          <p className="mt-1.5 text-xs leading-snug text-black/45">{action.deliveryNote}</p>
-          {action.deliveryBadge ?
-            <span className="mt-2 inline-block rounded-md bg-black/[0.04] px-2 py-0.5 text-[11px] font-medium text-black/55">
-              {action.deliveryBadge}
-            </span>
-          : null}
+          <p className="mt-1 text-xs text-black/50">{action.regionLabel}</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-black/45">{action.deliveryNote}</p>
         </div>
       </div>
 
-      <p className="mt-4 text-sm text-black/60">
-        Искать «<span className="font-medium text-black/80">{q}</span>» на {action.name}
-      </p>
+      {query ?
+        <p className="mt-4 text-[11px] leading-snug text-black/40">
+          Поиск по запросу: <span className="font-medium text-black/65">{query}</span>
+        </p>
+      : null}
 
       <a
         href={action.href}
         target="_blank"
         rel="noopener noreferrer nofollow"
-        className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-xl border border-black/[0.1] bg-black/[0.03] text-sm font-medium text-black/80 transition-colors hover:border-black/[0.16] hover:bg-black/[0.06]"
+        className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-xl bg-[#ff7a00] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#f07000] active:bg-[#e56800]"
       >
         Открыть поиск
       </a>
@@ -51,45 +63,38 @@ function ProviderGatewayCard({ action }: { action: MarketplaceProviderSearchActi
 
 export function MarketplaceLinkOnlyActions({
   actions,
-  queryLabel,
+  query,
 }: {
   actions: readonly MarketplaceProviderSearchAction[];
-  /** Shown above groups when search is active (e.g. normalized query). */
-  queryLabel?: string;
+  /** Original user query for headings and card subtitles. */
+  query: string;
 }) {
   const groups = useMemo(() => groupProviderSearchActions(actions), [actions]);
+  const trimmedQuery = query.trim();
+  const totalActions = actions.length;
 
-  if (groups.length === 0) return null;
+  if (groups.length === 0 || !trimmedQuery) return null;
 
   return (
-    <section className="mt-8" aria-labelledby="marketplace-gateway-actions-heading">
-      <div className="mb-5">
+    <section className="space-y-6" aria-labelledby="marketplace-gateway-heading">
+      <header className="space-y-1.5">
         <h2
-          id="marketplace-gateway-actions-heading"
-          className="text-base font-semibold text-black"
+          id="marketplace-gateway-heading"
+          className="text-xl font-bold tracking-tight text-black sm:text-2xl"
         >
-          Поиск на выбранных площадках
+          Где искать «{trimmedQuery}»
         </h2>
-        <p className="mt-0.5 text-xs text-black/40">
-          Откройте поиск на маркетплейсе — Haliwali не подменяет каталог площадки.
-        </p>
-        {queryLabel ?
-          <p className="mt-1 text-sm text-black/50">
-            Запрос: <span className="font-medium text-black/75">«{queryLabel}»</span>
-          </p>
-        : null}
-      </div>
+        <p className="text-sm text-black/50">{platformCountPhrase(totalActions)}</p>
+      </header>
 
       <div className="space-y-8">
         {groups.map((group) => (
           <div key={group.groupId}>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-black/45">
-              {group.groupTitle}
-            </h3>
-            <ul className="grid gap-3 sm:grid-cols-2">
+            <h3 className="mb-3 text-sm font-semibold text-black/70">{group.groupTitle}</h3>
+            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {group.actions.map((action) => (
                 <li key={action.providerId}>
-                  <ProviderGatewayCard action={action} />
+                  <ProviderGatewayCard action={action} query={trimmedQuery} />
                 </li>
               ))}
             </ul>

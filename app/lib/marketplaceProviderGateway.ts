@@ -158,10 +158,10 @@ export const MARKETPLACE_REGION_GROUPS: readonly MarketplaceRegionGroup[] = [
 ] as const;
 
 export const MARKETPLACE_GATEWAY_NOTE =
-  "Единый поиск по маркетплейсам: Haliwali подберёт запрос и откроет поиск на выбранных площадках. Карточки товаров на странице — только с проверенных источников.";
+  "Введите запрос один раз — мы подготовим поиск на выбранных площадках по всему миру.";
 
 export const MARKETPLACE_EMPTY_QUERY_HINT =
-  "Введите запрос и нажмите «Найти» — появятся кнопки поиска по странам и площадкам. Слева отметьте нужные маркетплейсы.";
+  "Введите запрос и нажмите «Найти». Слева выберите страны и площадки — появятся карточки с кнопкой «Открыть поиск».";
 
 export function findGatewayRegionGroup(
   id: MarketplaceProviderId,

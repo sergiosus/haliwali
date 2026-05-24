@@ -74,14 +74,13 @@ export function MarketplaceProviderFilters({
   };
 
   const totalSelected = selectedSet.size;
-  const totalProviders = MARKETPLACE_REGION_GROUPS.reduce((n, g) => n + g.providers.length, 0);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 border-b border-black/[0.06] pb-3">
-        <p className="text-sm font-semibold text-black">Площадки</p>
-        <span className="text-xs font-medium text-black/45">
-          {totalSelected}/{totalProviders}
+        <p className="text-sm font-semibold text-black">Страны и площадки</p>
+        <span className="rounded-full bg-black/[0.04] px-2 py-0.5 text-xs font-medium text-black/55">
+          Выбрано {totalSelected}
         </span>
       </div>
 

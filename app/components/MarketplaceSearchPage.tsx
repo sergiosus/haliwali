@@ -11,9 +11,7 @@ import type { MarketplaceDisplayCard } from "../lib/marketplaceDisplay";
 import { filterRealMarketplaceCards } from "../lib/marketplaceCardQuality";
 import type { MarketplaceProviderId } from "../lib/externalMarketplaceProviders";
 import {
-  MARKETPLACE_DEFAULT_SELECTED_PROVIDER_IDS,
   MARKETPLACE_EMPTY_QUERY_HINT,
-  MARKETPLACE_GATEWAY_NOTE,
   MARKETPLACE_REGION_GROUPS,
   isRealCardsMarketplaceAdapter,
   sanitizeSelectedProviderIds,
@@ -81,10 +79,10 @@ function MarketplaceRegionOverview() {
         {MARKETPLACE_REGION_GROUPS.map((group) => (
           <div
             key={group.id}
-            className="rounded-xl border border-black/[0.06] bg-black/[0.02] px-4 py-3"
+            className="rounded-2xl border border-black/[0.06] bg-white px-4 py-3 shadow-sm"
           >
-            <p className="text-xs font-medium uppercase tracking-wide text-black/40">{group.title}</p>
-            <p className="mt-1.5 text-sm text-black/60">
+            <p className="text-xs font-semibold uppercase tracking-wide text-black/45">{group.title}</p>
+            <p className="mt-1.5 text-sm leading-relaxed text-black/55">
               {group.providers.map((p) => p.name).join(" · ")}
             </p>
           </div>
@@ -204,16 +202,16 @@ export function MarketplaceSearchPage() {
     void runSearch(initialQ, selectedProviders);
   }, [initialQ, selectedProviders, runSearch]);
 
-  const normalizedSubmitted = useMemo(
+  const displayQuery = useMemo(
     () =>
       submittedQuery.trim().length >= 2 ? marketplacePrimaryQueryText(submittedQuery) : "",
     [submittedQuery],
   );
 
   const canSearch = query.trim().length >= 2 && selectedProviders.length > 0;
-  const showCardSkeleton = loading && realCardsSelected.length > 0;
-  const showGateway = searched && (actions.length > 0 || loading);
-  const showResults = searched && !loading;
+  const showProductSkeleton = searched && loading && realCardsSelected.length > 0;
+  const showProductCards = searched && !loading && items.length > 0;
+  const showProviderGateway = searched && displayQuery.length >= 2 && actions.length > 0;
 
   const filterPanel = (
     <MarketplaceProviderFilters
@@ -227,9 +225,12 @@ export function MarketplaceSearchPage() {
       <div className="mx-auto max-w-7xl px-3 py-6 sm:px-6 sm:py-8">
         <header className="mb-6 max-w-3xl">
           <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">
-            Единый поиск по маркетплейсам
+            Поиск по маркетплейсам
           </h1>
-          <p className="mt-2 text-sm leading-relaxed text-black/50">{MARKETPLACE_GATEWAY_NOTE}</p>
+          <p className="mt-2 text-sm leading-relaxed text-black/50">
+            Один запрос — поиск на площадках по всему миру. Откройте каталог на выбранном
+            маркетплейсе в один клик.
+          </p>
         </header>
 
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
@@ -244,9 +245,9 @@ export function MarketplaceSearchPage() {
               <button
                 type="button"
                 onClick={() => setMobileFiltersOpen((o) => !o)}
-                className="mb-4 flex w-full items-center justify-between rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium text-black/80 shadow-sm"
+                className="mb-4 flex w-full items-center justify-between rounded-2xl border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium text-black/80 shadow-sm"
               >
-                <span>Площадки ({selectedProviders.length} выбрано)</span>
+                <span>Страны и площадки ({selectedProviders.length})</span>
                 <span className="text-black/40">{mobileFiltersOpen ? "▲" : "▼"}</span>
               </button>
               {mobileFiltersOpen ?
@@ -311,65 +312,48 @@ export function MarketplaceSearchPage() {
 
             {!searched ? <MarketplaceRegionOverview /> : null}
 
-            <div className="mt-6 min-h-[80px]">
-              {showCardSkeleton ?
-                <section aria-labelledby="marketplace-cards-heading">
-                  <h2
-                    id="marketplace-cards-heading"
-                    className="mb-3 text-sm font-medium text-black/70"
-                  >
-                    Карточки товаров
-                  </h2>
-                  <div className={marketplaceProductGridClassName}>
-                    {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
-                      <MarketplaceCardSkeleton key={i} />
-                    ))}
-                  </div>
-                </section>
-              : null}
+            {searched ?
+              <div className="mt-8 space-y-10">
+                {showProductSkeleton ?
+                  <section aria-labelledby="marketplace-cards-heading" aria-busy="true">
+                    <h2
+                      id="marketplace-cards-heading"
+                      className="mb-4 text-lg font-semibold text-black"
+                    >
+                      Карточки товаров
+                    </h2>
+                    <div className={marketplaceProductGridClassName}>
+                      {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
+                        <MarketplaceCardSkeleton key={i} />
+                      ))}
+                    </div>
+                  </section>
+                : null}
 
-              {showGateway && loading && actions.length > 0 ?
-                <MarketplaceLinkOnlyActions
-                  actions={actions}
-                  queryLabel={normalizedSubmitted || undefined}
-                />
-              : null}
+                {showProductCards ?
+                  <section className="space-y-4" aria-labelledby="marketplace-cards-heading">
+                    <h2
+                      id="marketplace-cards-heading"
+                      className="text-lg font-semibold text-black"
+                    >
+                      Карточки товаров
+                    </h2>
+                    <div className={marketplaceProductGridClassName}>
+                      {items.map((card) => (
+                        <MarketplaceProductCard
+                          key={`${card.providerId}-${card.externalUrl}`}
+                          card={card}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                : null}
 
-              {showResults ?
-                <>
-                  {items.length > 0 ?
-                    <section className="mb-2" aria-labelledby="marketplace-cards-heading">
-                      <h2
-                        id="marketplace-cards-heading"
-                        className="mb-3 text-sm font-medium text-black/70"
-                      >
-                        Карточки товаров
-                      </h2>
-                      {normalizedSubmitted ?
-                        <p className="mb-4 text-sm text-black/50">
-                          {items.length}{" "}
-                          {items.length === 1 ? "товар" : "товаров"} по запросу «
-                          <span className="font-medium text-black">{normalizedSubmitted}</span>»
-                        </p>
-                      : null}
-                      <div className={marketplaceProductGridClassName}>
-                        {items.map((card) => (
-                          <MarketplaceProductCard
-                            key={`${card.providerId}-${card.externalUrl}`}
-                            card={card}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  : null}
-
-                  <MarketplaceLinkOnlyActions
-                    actions={actions}
-                    queryLabel={normalizedSubmitted || undefined}
-                  />
-                </>
-              : null}
-            </div>
+                {showProviderGateway ?
+                  <MarketplaceLinkOnlyActions actions={actions} query={displayQuery} />
+                : null}
+              </div>
+            : null}
           </div>
         </div>
       </div>

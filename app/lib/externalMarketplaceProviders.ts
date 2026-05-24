@@ -3,6 +3,7 @@
  * Restricted providers: outbound search links only — never parsed here.
  */
 
+import { isEbayBrowseApiConfigured } from "./ebayBrowseApi";
 import { marketplacePrimaryQueryText } from "./marketplaceSearchPrepare";
 import { providerNameRu } from "./marketplaceProviderLabels";
 
@@ -333,16 +334,8 @@ export function canHtmlExtractMarketplaceProducts(provider: MarketplaceProvider)
   return false;
 }
 
-function isEbayApiConfigured(): boolean {
-  return Boolean(
-    process.env.EBAY_CLIENT_ID?.trim() ||
-      process.env.EBAY_APP_ID?.trim() ||
-      process.env.EBAY_OAUTH_CLIENT_ID?.trim(),
-  );
-}
-
 /** Providers allowed to return live preview cards on /marketplaces. */
 export function canFetchMarketplacePreviews(provider: MarketplaceProvider): boolean {
   if (canHtmlExtractMarketplaceProducts(provider)) return true;
-  return provider.id === "ebay" && isEbayApiConfigured();
+  return provider.id === "ebay" && isEbayBrowseApiConfigured();
 }

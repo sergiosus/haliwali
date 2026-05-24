@@ -149,6 +149,7 @@ export function isValidProductImageUrl(
   if (!u) return false;
   if (PLACEHOLDER_IMAGE.test(u)) return false;
   if (TRACKING_IMAGE.test(u)) return false;
+  if (providerId === "ebay" && /ebayimg\.com/i.test(u)) return true;
   if (!/\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(u) && !ALICDN_HOST.test(u)) return false;
   if (providerId === "aliexpress" && !ALICDN_HOST.test(u) && !/ae\d+\.alicdn/i.test(u)) {
     if (!/aliexpress/i.test(u)) return false;

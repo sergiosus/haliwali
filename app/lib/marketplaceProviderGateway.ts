@@ -3,6 +3,7 @@
  */
 
 import type { MarketplaceProviderId } from "./externalMarketplaceProviders";
+import { isEbayBrowseApiConfigured } from "./ebayBrowseApi";
 
 export type MarketplaceProviderSurfaceMode = "real_cards" | "link_only";
 
@@ -16,13 +17,9 @@ export type MarketplaceGatewayProvider = {
   surfaceMode: MarketplaceProviderSurfaceMode;
 };
 
-/** eBay product API — enable when official credentials are configured. */
+/** eBay Browse API previews — requires client id + secret. */
 export function isEbayRealCardsAdapterEnabled(): boolean {
-  return Boolean(
-    process.env.EBAY_CLIENT_ID?.trim() ||
-      process.env.EBAY_APP_ID?.trim() ||
-      process.env.EBAY_OAUTH_CLIENT_ID?.trim(),
-  );
+  return isEbayBrowseApiConfigured();
 }
 
 /** Providers that may return in-page product cards (strict quality gate). */

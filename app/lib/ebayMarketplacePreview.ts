@@ -1,15 +1,31 @@
 /**
- * eBay product previews via official API (when credentials are configured).
- * Returns empty until Browse API integration is added — gateway stays link-only.
+ * eBay product previews via Buy Browse API (official, no HTML scrape).
  */
 
+import { searchEbayItemSummaries, isEbayBrowseApiConfigured } from "./ebayBrowseApi";
 import type { ExternalMarketplaceCard, MarketplaceProvider } from "./externalMarketplaceProviders";
-import { isEbayRealCardsAdapterEnabled } from "./marketplaceProviderGateway";
+import { MARKETPLACE_PREVIEW_MAX_PER_PROVIDER } from "./marketplacePageConfig";
+import { filterRealMarketplaceCards } from "./marketplaceCardQuality";
+
+export { isEbayBrowseApiConfigured };
 
 export async function tryEbayApiPreview(
   _provider: MarketplaceProvider,
-  _normalizedQuery: string,
+  normalizedQuery: string,
 ): Promise<ExternalMarketplaceCard[]> {
-  if (!isEbayRealCardsAdapterEnabled()) return [];
-  return [];
+  if (!isEbayBrowseApiConfigured()) return [];
+
+  try {
+    const batch = await searchEbayItemSummaries(normalizedQuery, 8);
+    const accepted: ExternalMarketplaceCard[] = [];
+    for (const card of batch) {
+      if (accepted.length >= MARKETPLACE_PREVIEW_MAX_PER_PROVIDER) break;
+      if (filterRealMarketplaceCards([card], normalizedQuery).length > 0) {
+        accepted.push(card);
+      }
+    }
+    return accepted;
+  } catch {
+    return [];
+  }
 }

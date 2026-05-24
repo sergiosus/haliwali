@@ -7,55 +7,33 @@ import {
 } from "../lib/marketplaceProviderGateway";
 import { getMarketplaceChipVisual } from "../lib/marketplaceDiscoveryContent";
 
-function platformCountPhrase(count: number): string {
-  const n = Math.abs(count);
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 14) return `Подготовили поиск на ${n} площадках`;
-  if (mod10 === 1) return `Подготовили поиск на ${n} площадке`;
-  if (mod10 >= 2 && mod10 <= 4) return `Подготовили поиск на ${n} площадки`;
-  return `Подготовили поиск на ${n} площадках`;
-}
-
-function ProviderGatewayCard({
-  action,
-  query,
-}: {
-  action: MarketplaceProviderSearchAction;
-  query: string;
-}) {
+function ProviderGatewayTile({ action }: { action: MarketplaceProviderSearchAction }) {
   const visual = getMarketplaceChipVisual(action.providerId);
 
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-black/[0.08] bg-white p-4 shadow-[0_2px_14px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_6px_24px_rgba(0,0,0,0.07)]">
-      <div className="flex gap-3">
-        <span
-          className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-sm"
-          style={{ backgroundColor: visual.brandColor }}
-          aria-hidden="true"
-        >
-          {visual.abbr}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-base font-semibold leading-tight text-black">{action.name}</h3>
-          <p className="mt-1 text-xs text-black/50">{action.regionLabel}</p>
-          <p className="mt-1.5 text-xs leading-relaxed text-black/45">{action.deliveryNote}</p>
-        </div>
-      </div>
-
-      {query ?
-        <p className="mt-4 text-[11px] leading-snug text-black/40">
-          Поиск по запросу: <span className="font-medium text-black/65">{query}</span>
+    <article className="group flex items-center gap-3 rounded-xl border border-black/[0.06] bg-gradient-to-br from-white to-black/[0.02] p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200/40 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] sm:gap-3.5 sm:p-3.5">
+      <span
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-white shadow-sm transition-transform duration-200 group-hover:scale-105 sm:h-11 sm:w-11"
+        style={{ backgroundColor: visual.brandColor }}
+        aria-hidden="true"
+      >
+        {visual.abbr}
+      </span>
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate text-sm font-semibold text-black sm:text-[15px]">{action.name}</h3>
+        <p className="mt-0.5 truncate text-xs text-black/45">
+          {action.regionLabel}
+          <span className="mx-1 text-black/25">·</span>
+          <span className="text-black/40">{action.deliveryNote}</span>
         </p>
-      : null}
-
+      </div>
       <a
         href={action.href}
         target="_blank"
         rel="noopener noreferrer nofollow"
-        className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-xl bg-[#ff7a00] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#f07000] active:bg-[#e56800]"
+        className="inline-flex h-9 shrink-0 items-center justify-center rounded-lg bg-[#ff7a00] px-3.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#f07000] sm:h-10 sm:px-4 sm:text-sm"
       >
-        Открыть поиск
+        Открыть
       </a>
     </article>
   );
@@ -66,35 +44,30 @@ export function MarketplaceLinkOnlyActions({
   query,
 }: {
   actions: readonly MarketplaceProviderSearchAction[];
-  /** Original user query for headings and card subtitles. */
   query: string;
 }) {
   const groups = useMemo(() => groupProviderSearchActions(actions), [actions]);
   const trimmedQuery = query.trim();
-  const totalActions = actions.length;
 
   if (groups.length === 0 || !trimmedQuery) return null;
 
   return (
-    <section className="space-y-6" aria-labelledby="marketplace-gateway-heading">
-      <header className="space-y-1.5">
-        <h2
-          id="marketplace-gateway-heading"
-          className="text-xl font-bold tracking-tight text-black sm:text-2xl"
-        >
-          Где искать «{trimmedQuery}»
-        </h2>
-        <p className="text-sm text-black/50">{platformCountPhrase(totalActions)}</p>
-      </header>
+    <section className="space-y-5" aria-labelledby="marketplace-gateway-heading">
+      <h2
+        id="marketplace-gateway-heading"
+        className="text-lg font-bold tracking-tight text-black/85 sm:text-xl"
+      >
+        Где искать «{trimmedQuery}»
+      </h2>
 
-      <div className="space-y-8">
+      <div className="space-y-6">
         {groups.map((group) => (
           <div key={group.groupId}>
-            <h3 className="mb-3 text-sm font-semibold text-black/70">{group.groupTitle}</h3>
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <h3 className="mb-2.5 text-sm font-semibold text-black/60">{group.groupTitle}</h3>
+            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5">
               {group.actions.map((action) => (
                 <li key={action.providerId}>
-                  <ProviderGatewayCard action={action} query={trimmedQuery} />
+                  <ProviderGatewayTile action={action} />
                 </li>
               ))}
             </ul>

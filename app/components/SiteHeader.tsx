@@ -70,8 +70,8 @@ export function SiteHeader() {
   const pathname = usePathname();
   /** Полноэкранный вход в админку — без меню обычного пользователя и без «Привет, …». */
   const suppressUserChromeForAdmin = pathname === "/admin";
-  /** Homepage primary search lives in the hero — keep header compact. */
-  const hideHeaderSearch = pathname === "/";
+  /** Homepage + /marketplaces use in-page search only — no header duplicate. */
+  const hideHeaderSearch = pathname === "/" || pathname === "/marketplaces";
 
   const auth = useAuth();
   const [userLabel, setUserLabel] = useState<string>("");

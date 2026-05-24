@@ -11,7 +11,6 @@ import type { MarketplaceDisplayCard } from "../lib/marketplaceDisplay";
 import { filterRealMarketplaceCards } from "../lib/marketplaceCardQuality";
 import type { MarketplaceProviderId } from "../lib/externalMarketplaceProviders";
 import {
-  MARKETPLACE_EMPTY_QUERY_HINT,
   MARKETPLACE_REGION_GROUPS,
   isRealCardsMarketplaceAdapter,
   sanitizeSelectedProviderIds,
@@ -26,6 +25,7 @@ import { buildProviderSearchActions } from "../lib/marketplacePageSearch";
 import { MarketplaceLinkOnlyActions } from "./MarketplaceLinkOnlyActions";
 import { MarketplacePreviewSection } from "./MarketplacePreviewSection";
 import { MarketplaceProviderFilters } from "./MarketplaceProviderFilters";
+import { getMarketplaceChipVisual } from "../lib/marketplaceDiscoveryContent";
 
 type PageApiResponse = {
   ok?: boolean;
@@ -53,23 +53,20 @@ function SearchIcon({ className }: { className?: string }) {
   );
 }
 
-function MarketplaceRegionOverview() {
+function MarketplaceDiscoverStrip() {
   return (
-    <div className="mt-6 space-y-4">
-      <p className="text-sm leading-relaxed text-black/50">{MARKETPLACE_EMPTY_QUERY_HINT}</p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {MARKETPLACE_REGION_GROUPS.map((group) => (
-          <div
-            key={group.id}
-            className="rounded-2xl border border-black/[0.06] bg-white px-4 py-3 shadow-sm"
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-black/45">{group.title}</p>
-            <p className="mt-1.5 text-sm leading-relaxed text-black/55">
-              {group.providers.map((p) => p.name).join(" · ")}
-            </p>
-          </div>
-        ))}
-      </div>
+    <div className="mt-8 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
+      {MARKETPLACE_REGION_GROUPS.map((group) => (
+        <div
+          key={group.id}
+          className="rounded-xl border border-black/[0.05] bg-white/80 px-3 py-2.5 text-center shadow-sm backdrop-blur-sm"
+        >
+          <p className="text-xs font-semibold text-black/70 sm:text-sm">{group.title}</p>
+          <p className="mt-1 text-[10px] leading-tight text-black/40 sm:text-[11px]">
+            {group.providers.length} площадок
+          </p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -203,46 +200,21 @@ export function MarketplaceSearchPage() {
   );
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-b from-orange-50/30 via-white to-white">
-      <div className="mx-auto max-w-7xl px-3 py-6 sm:px-6 sm:py-8">
-        <header className="mb-6 max-w-3xl">
-          <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">
+    <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-b from-[#fff8f3] via-white to-white">
+      <div className="mx-auto w-full max-w-6xl px-3 pb-10 pt-4 sm:px-5 sm:pb-12 sm:pt-6">
+        <div className="mx-auto max-w-3xl text-center">
+          <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-4xl">
             Поиск по маркетплейсам
           </h1>
-          <p className="mt-2 text-sm leading-relaxed text-black/50">
-            Один запрос — поиск на площадках по всему миру. Откройте каталог на выбранном
-            маркетплейсе в один клик.
+          <p className="mt-2 text-sm text-black/55 sm:mt-3 sm:text-base">
+            Один запрос — поиск по площадкам по всему миру
           </p>
-        </header>
 
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
-          <aside className="hidden w-full shrink-0 lg:block lg:w-[300px]">
-            <div className="sticky top-20 rounded-2xl border border-black/[0.06] bg-white p-4 shadow-sm">
-              {filterPanel}
-            </div>
-          </aside>
-
-          <div className="min-w-0 flex-1">
-            <div className="lg:hidden">
-              <button
-                type="button"
-                onClick={() => setMobileFiltersOpen((o) => !o)}
-                className="mb-4 flex w-full items-center justify-between rounded-2xl border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium text-black/80 shadow-sm"
-              >
-                <span>Страны и площадки ({selectedProviders.length})</span>
-                <span className="text-black/40">{mobileFiltersOpen ? "▲" : "▼"}</span>
-              </button>
-              {mobileFiltersOpen ?
-                <div className="mb-4 rounded-2xl border border-black/[0.06] bg-white p-4 shadow-sm">
-                  {filterPanel}
-                </div>
-              : null}
-            </div>
-
-            <div className="rounded-2xl border border-black/[0.06] bg-white p-1 shadow-sm">
+          <div className="sticky top-[3.25rem] z-20 mt-5 sm:top-[4.5rem] sm:mt-7">
+            <div className="rounded-2xl border border-black/[0.08] bg-white p-2 shadow-[0_12px_48px_rgba(255,122,0,0.12)] ring-1 ring-black/[0.04]">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
                 <div className="relative min-w-0 flex-1">
-                  <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-black/35" />
+                  <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-black/30 sm:h-6 sm:w-6" />
                   <input
                     id="marketplace-page-search"
                     type="search"
@@ -254,28 +226,28 @@ export function MarketplaceSearchPage() {
                         submitSearch();
                       }
                     }}
-                    placeholder="Что ищете? Например, iPhone, шины…"
+                    placeholder="iPhone, кроссовки, инструмент…"
                     autoComplete="off"
-                    className="h-12 w-full rounded-xl bg-transparent pl-11 pr-3 text-base text-black outline-none placeholder:text-black/35"
+                    className="h-14 w-full rounded-xl bg-transparent pl-12 pr-3 text-base text-black outline-none placeholder:text-black/35 sm:h-[3.75rem] sm:pl-14 sm:text-lg"
                   />
                 </div>
                 <button
                   type="button"
                   disabled={!canSearch || loading}
                   onClick={submitSearch}
-                  className="inline-flex h-12 shrink-0 items-center justify-center rounded-xl bg-[#ff7a00] px-6 text-sm font-semibold text-white transition-colors hover:bg-[#f07000] disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-[7.5rem]"
+                  className="inline-flex h-14 shrink-0 items-center justify-center rounded-xl bg-[#ff7a00] px-8 text-base font-semibold text-white shadow-sm transition-colors hover:bg-[#f07000] disabled:cursor-not-allowed disabled:opacity-45 sm:h-[3.75rem] sm:min-w-[8.5rem]"
                 >
-                  {loading ? "Поиск…" : "Найти"}
+                  {loading ? "…" : "Найти"}
                 </button>
               </div>
             </div>
 
             {correctionDisplay ?
-              <p className="mt-2 text-sm text-black/50">
+              <p className="mt-2 text-center text-sm text-black/50">
                 Возможно, вы имели в виду:{" "}
                 <button
                   type="button"
-                  className="font-semibold text-black/80 hover:text-orange-700 hover:underline"
+                  className="font-semibold text-[#c25a00] hover:underline"
                   onClick={() => {
                     const next = correctionRaw!;
                     setQuery(next);
@@ -287,15 +259,61 @@ export function MarketplaceSearchPage() {
                 </button>
               </p>
             : null}
+          </div>
 
-            {selectedProviders.length === 0 ?
-              <p className="mt-4 text-sm text-black/50">Выберите хотя бы одну площадку слева.</p>
+          {!searched ?
+            <>
+              <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+                {MARKETPLACE_REGION_GROUPS.flatMap((g) => g.providers)
+                  .slice(0, 8)
+                  .map((p) => {
+                    const v = getMarketplaceChipVisual(p.id);
+                    return (
+                      <span
+                        key={p.id}
+                        className="inline-flex items-center gap-1 rounded-full border border-black/[0.06] bg-white px-2 py-1 text-[10px] font-medium text-black/55 shadow-sm sm:text-xs"
+                      >
+                        <span
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[7px] font-bold text-white"
+                          style={{ backgroundColor: v.brandColor }}
+                          aria-hidden
+                        >
+                          {v.abbr}
+                        </span>
+                        {p.name}
+                      </span>
+                    );
+                  })}
+              </div>
+              <MarketplaceDiscoverStrip />
+            </>
+          : null}
+        </div>
+
+        <div className="mt-6 flex flex-col gap-5 lg:mt-8 lg:flex-row lg:items-start lg:gap-6">
+          <aside className="hidden shrink-0 lg:block lg:w-[260px]">
+            <div className="sticky top-36 rounded-2xl border border-black/[0.06] bg-white/90 p-3 shadow-sm backdrop-blur-sm">
+              {filterPanel}
+            </div>
+          </aside>
+
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => setMobileFiltersOpen((o) => !o)}
+              className="mb-3 flex w-full items-center justify-between rounded-xl border border-black/[0.06] bg-white px-3.5 py-2.5 text-sm font-medium text-black/75 shadow-sm lg:hidden"
+            >
+              <span>Площадки · {selectedProviders.length}</span>
+              <span className="text-black/35">{mobileFiltersOpen ? "▲" : "▼"}</span>
+            </button>
+            {mobileFiltersOpen ?
+              <div className="mb-4 rounded-2xl border border-black/[0.06] bg-white p-3 shadow-sm lg:hidden">
+                {filterPanel}
+              </div>
             : null}
 
-            {!searched ? <MarketplaceRegionOverview /> : null}
-
             {searched ?
-              <div className="mt-8 space-y-10">
+              <div className="space-y-8 sm:space-y-10">
                 {showPreviewSection ?
                   <MarketplacePreviewSection
                     query={displayQuery}
@@ -305,9 +323,15 @@ export function MarketplaceSearchPage() {
                 : null}
 
                 {showProviderGateway ?
-                  <MarketplaceLinkOnlyActions actions={actions} query={displayQuery} />
+                  <div className="rounded-2xl border border-black/[0.04] bg-black/[0.015] p-3 sm:p-4">
+                    <MarketplaceLinkOnlyActions actions={actions} query={displayQuery} />
+                  </div>
                 : null}
               </div>
+            : selectedProviders.length === 0 ?
+              <p className="text-center text-sm text-black/45 lg:text-left">
+                Отметьте площадки в фильтре
+              </p>
             : null}
           </div>
         </div>

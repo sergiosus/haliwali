@@ -77,11 +77,9 @@ export function MarketplaceProviderFilters({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 border-b border-black/[0.06] pb-3">
-        <p className="text-sm font-semibold text-black">Страны и площадки</p>
-        <span className="rounded-full bg-black/[0.04] px-2 py-0.5 text-xs font-medium text-black/55">
-          Выбрано {totalSelected}
-        </span>
+      <div className="flex items-center justify-between gap-2 border-b border-black/[0.05] pb-2.5">
+        <p className="text-sm font-semibold text-black">Площадки</p>
+        <span className="text-xs font-semibold text-[#c25a00]">{totalSelected}</span>
       </div>
 
       {MARKETPLACE_REGION_GROUPS.map((group) => {
@@ -94,9 +92,9 @@ export function MarketplaceProviderFilters({
         return (
           <div
             key={group.id}
-            className="overflow-hidden rounded-xl border border-black/[0.06] bg-white"
+            className="overflow-hidden rounded-lg border border-black/[0.05] bg-black/[0.02]"
           >
-            <div className="flex items-center gap-2 px-3 py-2.5">
+            <div className="flex items-center gap-2 px-2.5 py-2">
               <button
                 type="button"
                 onClick={() => toggleGroupExpanded(group.id)}
@@ -144,9 +142,6 @@ export function MarketplaceProviderFilters({
                             {provider.abbr}
                           </span>
                           <span className="text-sm font-medium text-black/85">{provider.name}</span>
-                        </span>
-                        <span className="mt-0.5 block text-[11px] leading-snug text-black/45">
-                          {provider.deliveryNote}
                         </span>
                       </span>
                     </label>

@@ -10,13 +10,13 @@ const PREVIEW_SKELETON_COUNT = 4;
 
 function PreviewCardSkeleton() {
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
-      <div className="aspect-[4/3] animate-pulse bg-gradient-to-br from-black/[0.04] to-black/[0.02]" />
-      <div className="space-y-2 p-3.5">
-        <div className="h-3.5 w-full animate-pulse rounded-full bg-black/[0.06]" />
-        <div className="h-3.5 w-2/3 animate-pulse rounded-full bg-black/[0.06]" />
-        <div className="h-4 w-1/3 animate-pulse rounded-full bg-black/[0.06]" />
-        <div className="mt-2 h-10 w-full animate-pulse rounded-xl bg-black/[0.06]" />
+    <div className="w-full overflow-hidden rounded-2xl border border-black/[0.05] bg-white shadow-sm">
+      <div className="aspect-[5/4] animate-pulse bg-black/[0.04] sm:aspect-[4/3]" />
+      <div className="space-y-2.5 p-4">
+        <div className="h-4 w-full animate-pulse rounded-lg bg-black/[0.06]" />
+        <div className="h-4 w-3/4 animate-pulse rounded-lg bg-black/[0.06]" />
+        <div className="h-7 w-1/3 animate-pulse rounded-lg bg-black/[0.06]" />
+        <div className="h-11 w-full animate-pulse rounded-xl bg-black/[0.06]" />
       </div>
     </div>
   );
@@ -38,15 +38,17 @@ export function MarketplacePreviewSection({
   const visibleItems = items.filter((c) => Boolean(c.imageUrl));
 
   return (
-    <section className="space-y-4" aria-labelledby="marketplace-preview-heading" aria-busy={loading}>
-      <header className="space-y-1">
-        <h2 id="marketplace-preview-heading" className="text-lg font-bold tracking-tight text-black sm:text-xl">
-          Популярные предложения
-        </h2>
-        <p className="text-sm text-black/50">
-          Несколько реальных предложений по запросу «{trimmed}»
-        </p>
-      </header>
+    <section
+      className="space-y-4"
+      aria-labelledby="marketplace-preview-heading"
+      aria-busy={loading}
+    >
+      <h2
+        id="marketplace-preview-heading"
+        className="text-xl font-extrabold tracking-tight text-black sm:text-2xl"
+      >
+        Популярные предложения
+      </h2>
 
       {loading ?
         <div className={marketplacePreviewGridClassName}>

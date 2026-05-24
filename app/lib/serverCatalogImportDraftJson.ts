@@ -2,7 +2,11 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
 import type { CatalogImportDraft, CatalogImportDraftInput, CatalogImportDraftStatus } from "./catalogImportTypes";
+import { normalizeDraftStatus } from "./catalogImportTypes";
 import type { CatalogImportSource, CatalogSocialLink, CatalogSourceType } from "./catalogExtractionTypes";
+import { draftDomainKey } from "./catalogImportDedup";
+import { normalizeImportDomain } from "./catalogImportDomain";
+import { mergeDraftInputs } from "./catalogImportMerge";
 import { buildDraftWarnings } from "./catalogImportEnrich";
 import { uniqueCompanySlug } from "./catalogSlug";
 import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
@@ -66,7 +70,7 @@ function toDraft(store: JsonStore, d: JsonDraft): CatalogImportDraft {
   const warnings = buildDraftWarnings(d);
   return {
     id: d.id,
-    status: d.status,
+    status: normalizeDraftStatus(d.status),
     name: d.name,
     categorySlug: d.categorySlug,
     city: d.city,
@@ -177,28 +181,67 @@ export async function jsonListImportDrafts(opts?: {
 }): Promise<CatalogImportDraft[]> {
   const store = await readStore();
   let list = store.drafts;
-  if (opts?.status) list = list.filter((d) => d.status === opts.status);
+  if (opts?.status) list = list.filter((d) => normalizeDraftStatus(d.status) === opts.status);
   return list.map((d) => toDraft(store, d)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function jsonInsertImportDraftsV2(
-  items: {
-    input: CatalogImportDraftInput;
-    duplicateHint: string | null;
-    duplicateOfCompanyId: number | null;
-    needsReview: boolean;
-    sourceId: number;
-  }[],
-): Promise<CatalogImportDraft[]> {
+type JsonImportWriteItem = {
+  input: CatalogImportDraftInput;
+  duplicateHint: string | null;
+  duplicateOfCompanyId: number | null;
+  needsReview: boolean;
+  sourceId: number;
+  existingDraftId?: number;
+};
+
+function jsonFindDraftByDomain(store: JsonStore, domain: string): JsonDraft | undefined {
+  const dk = domain.trim().toLowerCase();
+  if (!dk) return undefined;
+  return store.drafts.find(
+    (d) =>
+      !["rejected", "published"].includes(normalizeDraftStatus(d.status)) &&
+      !d.publishedCompanySlug &&
+      (String(d.rawPayload?.rootDomain ?? "").toLowerCase() === dk ||
+        normalizeImportDomain(d.website || d.sourceUrl || "") === dk),
+  );
+}
+
+export async function jsonUpsertImportDraftsV2(items: JsonImportWriteItem[]): Promise<CatalogImportDraft[]> {
   const store = await readStore();
   const now = new Date().toISOString();
   const out: CatalogImportDraft[] = [];
   const src = sourceById(store, items[0]?.sourceId ?? null);
+
   for (const item of items) {
+    const domain = draftDomainKey({
+      website: item.input.website,
+      sourceUrl: item.input.sourceUrl ?? "",
+      rawPayload: item.input.rawPayload ?? {},
+    });
+    let existing =
+      item.existingDraftId ?
+        store.drafts.find((d) => d.id === item.existingDraftId)
+      : jsonFindDraftByDomain(store, domain);
+
+    if (existing) {
+      const patch = mergeDraftInputs(existing, item.input);
+      Object.assign(existing, patch, {
+        updatedAt: now,
+        duplicateHint: item.duplicateHint ?? existing.duplicateHint,
+        duplicateOfCompanyId: item.duplicateOfCompanyId ?? existing.duplicateOfCompanyId,
+        needsReview:
+          item.needsReview ||
+          buildDraftWarnings({ ...existing, ...patch }).length > 0 ||
+          Boolean(item.duplicateHint),
+      });
+      out.push(toDraft(store, existing));
+      continue;
+    }
+
     const w = buildDraftWarnings(item.input);
     const d: JsonDraft = {
       id: store.nextDraftId++,
-      status: "draft",
+      status: "new",
       sourceId: item.sourceId > 0 ? item.sourceId : null,
       sourceType: (item.input.rawPayload?.sourceType as CatalogSourceType) ?? src?.sourceType ?? null,
       ...item.input,
@@ -216,6 +259,10 @@ export async function jsonInsertImportDraftsV2(
   }
   await writeStore(store);
   return out;
+}
+
+export async function jsonInsertImportDraftsV2(items: JsonImportWriteItem[]): Promise<CatalogImportDraft[]> {
+  return jsonUpsertImportDraftsV2(items);
 }
 
 export async function jsonUpdateImportDraft(
@@ -257,6 +304,17 @@ export async function jsonSetImportDraftStatuses(
   }
   await writeStore(store);
   return n;
+}
+
+/** Permanently remove import draft rows only (never catalog_companies). */
+export async function jsonDeleteImportDrafts(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const store = await readStore();
+  const before = store.drafts.length;
+  store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
+  const deleted = before - store.drafts.length;
+  await writeStore(store);
+  return deleted;
 }
 
 export async function jsonPublishImportDrafts(ids: number[]): Promise<{
@@ -301,7 +359,12 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
 
   for (const id of ids) {
     const d = store.drafts.find((x) => x.id === id);
-    if (!d || d.status === "rejected" || d.publishedCompanySlug || d.status !== "approved") {
+    if (
+      !d ||
+      d.status === "rejected" ||
+      d.publishedCompanySlug ||
+      normalizeDraftStatus(d.status) !== "saved"
+    ) {
       skipped += 1;
       continue;
     }
@@ -350,6 +413,19 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
   );
   await writeStore(store);
   return { published, skipped, slugs };
+}
+
+export async function jsonSaveImportDraft(
+  id: number,
+  patch: Partial<CatalogImportDraftInput>,
+): Promise<CatalogImportDraft | null> {
+  const store = await readStore();
+  const idx = store.drafts.findIndex((d) => d.id === id);
+  if (idx < 0) return null;
+  const cur = store.drafts[idx]!;
+  const st = normalizeDraftStatus(cur.status);
+  if (st === "published" || st === "rejected") return null;
+  return jsonUpdateImportDraft(id, { ...patch, status: "saved" });
 }
 
 export async function jsonMergeDraftIntoCompany(

@@ -2,6 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { SettlementLocationField } from "../../../components/location/SettlementLocationField";
+import {
+  catalogDiscoverCityLabel,
+  persistCatalogDiscoverLocation,
+  readCatalogDiscoverLocation,
+  type CatalogDiscoverLocation,
+} from "../../../lib/catalogDiscoverLocationStorage";
 import type { CatalogImportDraft } from "../../../lib/catalogImportTypes";
 import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 
@@ -11,7 +18,7 @@ export default function AdminCatalogImportClient() {
   const [draftCount, setDraftCount] = useState(0);
   const [kind, setKind] = useState<InputKind>("urls");
   const [categorySlug, setCategorySlug] = useState("remont");
-  const [city, setCity] = useState("");
+  const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
   const [pastedText, setPastedText] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [urlsText, setUrlsText] = useState("");
@@ -29,7 +36,11 @@ export default function AdminCatalogImportClient() {
 
   useEffect(() => {
     loadDraftCount();
+    const saved = readCatalogDiscoverLocation();
+    if (saved) setLocation(saved);
   }, [loadDraftCount]);
+
+  const cityLabel = catalogDiscoverCityLabel(location);
 
   async function runParse(file?: File) {
     setBusy(true);
@@ -39,7 +50,7 @@ export default function AdminCatalogImportClient() {
       const fd = new FormData();
       fd.set("kind", kind === "url" ? "url" : kind);
       fd.set("categorySlug", categorySlug);
-      fd.set("city", city);
+      fd.set("city", cityLabel);
       if (kind === "csv" && file) fd.set("file", file);
       else if (kind === "csv") fd.set("csv", pastedText);
       else if (kind === "text") {
@@ -141,15 +152,15 @@ export default function AdminCatalogImportClient() {
               ))}
             </select>
           </label>
-          <label className="block text-sm">
-            <span className="text-black/60">Город / регион</span>
-            <input
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
+          <div className="sm:col-span-2">
+            <SettlementLocationField
+              value={location}
+              onChange={setLocation}
+              onPersist={persistCatalogDiscoverLocation}
+              label="Город / регион"
               placeholder="Ижевск"
-              className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
             />
-          </label>
+          </div>
         </div>
 
         {kind === "csv" ?

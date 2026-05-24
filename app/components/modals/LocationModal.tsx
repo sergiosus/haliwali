@@ -19,6 +19,7 @@ import type { MapCenter, MapSettlementMarker } from "../maps/YandexMapPicker";
 
 const YandexMapPickerLazy = dynamic(() => import("./LocationModalYandexEmbed"), { ssr: false });
 import { getYandexMapsApiKey } from "../../lib/maps/yandexLoader";
+import { fetchCitiesFromApi } from "../../lib/settlementCitySearch";
 import {
   filterGlobalRussiaCitiesByQuery,
   findStaticRussiaCityCoords,
@@ -151,23 +152,13 @@ async function fetchNearbyApi(
 }
 
 async function fetchCitiesApi(query: string): Promise<SettlementRecord[]> {
-  const q = query.trim();
-  if (q.length < 2) return [];
-  const url = `/api/cities?query=${encodeURIComponent(q)}`;
-  const r = await fetch(url, { cache: "no-store" });
-  const j = (await r.json().catch(() => null)) as { ok?: unknown; cities?: unknown } | null;
-  const ok = Boolean(j && typeof j === "object" && j.ok === true);
-  if (!ok) return [];
-  const arr = Array.isArray(j?.cities) ? (j!.cities as unknown[]) : [];
-  return arr
-    .map((x) => x as { name?: unknown; region?: unknown; lat?: unknown; lng?: unknown })
-    .map((x) => ({
-      name: String(x.name ?? "").trim(),
-      region: String(x.region ?? "").trim(),
-      lat: Number(x.lat),
-      lng: Number(x.lng),
-    }))
-    .filter((x) => x.name && x.region && Number.isFinite(x.lat + x.lng));
+  const rows = await fetchCitiesFromApi(query);
+  return rows.map((x) => ({
+    name: x.name,
+    region: x.region,
+    lat: x.lat,
+    lng: x.lng,
+  }));
 }
 
 function pickableFromSnapped(s: { name: string; region: string; lat: number; lng: number }): PickableSettlement {

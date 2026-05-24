@@ -1,6 +1,15 @@
 import { getPool } from "./pgPool";
-import type { CatalogImportDraft, CatalogImportDraftInput, CatalogImportDraftStatus } from "./catalogImportTypes";
+import type {
+  CatalogImportDraft,
+  CatalogImportDraftInput,
+  CatalogImportDraftStatus,
+  CatalogImportSession,
+} from "./catalogImportTypes";
+import { normalizeDraftStatus } from "./catalogImportTypes";
 import type { CatalogImportSource, CatalogSocialLink, CatalogSourceType } from "./catalogExtractionTypes";
+import { draftDomainKey } from "./catalogImportDedup";
+import { mergeDraftInputs } from "./catalogImportMerge";
+import { normalizeImportDomain } from "./catalogImportDomain";
 import { buildDraftWarnings } from "./catalogImportEnrich";
 import { slugifyCatalogText } from "./catalogSlug";
 import { pgEnsureCategoriesSeeded } from "./serverCatalogPg";
@@ -143,8 +152,11 @@ export async function pgLoadDedupSeedData(): Promise<{
     phone: string;
     website: string;
     address: string;
+    root_domain: string | null;
   }>(`
-    SELECT id, name, city, phone, website, address FROM catalog_company_import_drafts
+    SELECT id, name, city, phone, website, address,
+      COALESCE(NULLIF(raw_payload->>'rootDomain', ''), '') AS root_domain
+    FROM catalog_company_import_drafts
     WHERE status NOT IN ('rejected', 'published') AND published_company_slug IS NULL
   `);
   return {
@@ -156,8 +168,33 @@ export async function pgLoadDedupSeedData(): Promise<{
       website: r.website ?? "",
       address: r.address ?? "",
     })),
-    drafts: drafts.map((r) => ({ ...r, address: r.address ?? "" })),
+    drafts: drafts.map((r) => ({
+      ...r,
+      address: r.address ?? "",
+      rootDomain: r.root_domain || normalizeImportDomain(r.website),
+    })),
   };
+}
+
+export async function pgFindImportDraftByDomain(domain: string): Promise<CatalogImportDraft | null> {
+  const dk = domain.trim().toLowerCase();
+  if (!dk) return null;
+  const pool = getPool();
+  const { rows } = await pool.query<DraftRow>(
+    `
+    ${DRAFT_SELECT}
+    WHERE d.status NOT IN ('rejected', 'published')
+      AND d.published_company_slug IS NULL
+      AND (
+        LOWER(COALESCE(d.raw_payload->>'rootDomain', '')) = $1
+        OR LOWER(REGEXP_REPLACE(COALESCE(d.website, ''), '^https?://(www\\.)?', '')) LIKE $1 || '%'
+      )
+    ORDER BY d.updated_at DESC
+    LIMIT 1
+    `,
+    [dk],
+  );
+  return rows[0] ? rowToDraft(rows[0]) : null;
 }
 
 export async function pgListImportDrafts(opts?: {
@@ -168,7 +205,10 @@ export async function pgListImportDrafts(opts?: {
   let where = "";
   if (opts?.status) {
     params.push(opts.status);
-    where = `WHERE d.status = $${params.length}`;
+    const n = params.length;
+    where = `WHERE d.status = $${n}
+      OR ($${n} = 'new' AND d.status = 'draft')
+      OR ($${n} = 'saved' AND d.status = 'approved')`;
   }
   const { rows } = await pool.query<DraftRow>(
     `${DRAFT_SELECT} ${where} ORDER BY d.created_at DESC LIMIT 500`,
@@ -177,61 +217,118 @@ export async function pgListImportDrafts(opts?: {
   return rows.map(rowToDraft);
 }
 
-export async function pgInsertImportDraftsV2(
-  items: {
-    input: CatalogImportDraftInput;
-    duplicateHint: string | null;
-    duplicateOfCompanyId: number | null;
-    needsReview: boolean;
-    sourceId: number;
-  }[],
-): Promise<CatalogImportDraft[]> {
-  if (items.length === 0) return [];
+type ImportDraftWriteItem = {
+  input: CatalogImportDraftInput;
+  duplicateHint: string | null;
+  duplicateOfCompanyId: number | null;
+  needsReview: boolean;
+  sourceId: number;
+  existingDraftId?: number;
+};
+
+async function pgWriteImportDraftItem(item: ImportDraftWriteItem): Promise<CatalogImportDraft | null> {
   const pool = getPool();
-  const out: CatalogImportDraft[] = [];
-  for (const item of items) {
-    const w = buildDraftWarnings(item.input);
-    const needsReview = item.needsReview || w.length > 0 || Boolean(item.duplicateHint);
-    const { rows } = await pool.query<DraftRow>(
-      `
-      INSERT INTO catalog_company_import_drafts (
-        status, source_id, name, category_slug, city, address, phone, email, website, description,
-        latitude, longitude, image_url, source_url, social_links, confidence_score,
-        raw_payload, duplicate_hint, duplicate_of_company_id, needs_review
-      ) VALUES (
-        'draft', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16::jsonb, $17, $18, $19
-      )
-      RETURNING *
-      `,
-      [
-        item.sourceId > 0 ? item.sourceId : null,
-        item.input.name,
-        item.input.categorySlug,
-        item.input.city,
-        item.input.address,
-        item.input.phone,
-        item.input.email,
-        item.input.website,
-        item.input.description,
-        item.input.latitude,
-        item.input.longitude,
-        item.input.imageUrl,
-        item.input.sourceUrl,
-        JSON.stringify(item.input.socialLinks ?? []),
-        item.input.confidenceScore ?? 0.5,
-        item.input.rawPayload ?? {},
-        item.duplicateHint,
-        item.duplicateOfCompanyId,
-        needsReview,
-      ],
-    );
-    const row = rows[0];
+  const domain = String(item.input.rawPayload?.rootDomain ?? "").trim().toLowerCase()
+    || draftDomainKey({
+      website: item.input.website,
+      sourceUrl: item.input.sourceUrl ?? "",
+      rawPayload: item.input.rawPayload ?? {},
+    });
+
+  let existingId = item.existingDraftId;
+  if (!existingId && domain) {
+    const found = await pgFindImportDraftByDomain(domain);
+    existingId = found?.id;
+  }
+
+  if (existingId) {
+    const cur = await pool.query<DraftRow>(`${DRAFT_SELECT} WHERE d.id = $1`, [existingId]);
+    const row = cur.rows[0];
     if (row) {
-      const full = await pool.query<DraftRow>(`${DRAFT_SELECT} WHERE d.id = $1`, [row.id]);
-      if (full.rows[0]) out.push(rowToDraft(full.rows[0]));
+      const mergedInput: CatalogImportDraftInput = {
+        name: row.name,
+        categorySlug: row.category_slug,
+        city: row.city,
+        address: row.address,
+        phone: row.phone,
+        email: row.email,
+        website: row.website,
+        description: row.description,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        imageUrl: row.image_url,
+        sourceUrl: row.source_url,
+        socialLinks: row.social_links ?? [],
+        confidenceScore: row.confidence_score ?? 0.5,
+        rawPayload: row.raw_payload ?? {},
+      };
+      const patch = mergeDraftInputs(mergedInput, item.input);
+      const updated = await pgUpdateImportDraft(existingId, patch);
+      if (updated && item.duplicateHint) {
+        await pool.query(
+          `UPDATE catalog_company_import_drafts SET duplicate_hint = $2, updated_at = NOW() WHERE id = $1`,
+          [existingId, item.duplicateHint],
+        );
+        const { rows: again } = await pool.query<DraftRow>(`${DRAFT_SELECT} WHERE d.id = $1`, [existingId]);
+        return again[0] ? rowToDraft(again[0]) : updated;
+      }
+      return updated;
     }
   }
+
+  const w = buildDraftWarnings(item.input);
+  const needsReview = item.needsReview || w.length > 0 || Boolean(item.duplicateHint);
+  const { rows } = await pool.query<DraftRow>(
+    `
+    INSERT INTO catalog_company_import_drafts (
+      status, source_id, name, category_slug, city, address, phone, email, website, description,
+      latitude, longitude, image_url, source_url, social_links, confidence_score,
+      raw_payload, duplicate_hint, duplicate_of_company_id, needs_review
+    ) VALUES (
+      'new', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16::jsonb, $17, $18, $19
+    )
+    RETURNING *
+    `,
+    [
+      item.sourceId > 0 ? item.sourceId : null,
+      item.input.name,
+      item.input.categorySlug,
+      item.input.city,
+      item.input.address,
+      item.input.phone,
+      item.input.email,
+      item.input.website,
+      item.input.description,
+      item.input.latitude,
+      item.input.longitude,
+      item.input.imageUrl,
+      item.input.sourceUrl,
+      JSON.stringify(item.input.socialLinks ?? []),
+      item.input.confidenceScore ?? 0.5,
+      item.input.rawPayload ?? {},
+      item.duplicateHint,
+      item.duplicateOfCompanyId,
+      needsReview,
+    ],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const full = await pool.query<DraftRow>(`${DRAFT_SELECT} WHERE d.id = $1`, [row.id]);
+  return full.rows[0] ? rowToDraft(full.rows[0]) : null;
+}
+
+export async function pgUpsertImportDraftsV2(items: ImportDraftWriteItem[]): Promise<CatalogImportDraft[]> {
+  if (items.length === 0) return [];
+  const out: CatalogImportDraft[] = [];
+  for (const item of items) {
+    const d = await pgWriteImportDraftItem(item);
+    if (d) out.push(d);
+  }
   return out;
+}
+
+export async function pgInsertImportDraftsV2(items: ImportDraftWriteItem[]): Promise<CatalogImportDraft[]> {
+  return pgUpsertImportDraftsV2(items);
 }
 
 /** @deprecated */
@@ -321,6 +418,17 @@ export async function pgSetImportDraftStatuses(
   const { rowCount } = await pool.query(
     `UPDATE catalog_company_import_drafts SET status = $1, updated_at = NOW() WHERE id = ANY($2::int[])`,
     [status, ids],
+  );
+  return rowCount ?? 0;
+}
+
+/** Permanently remove import draft rows only (never catalog_companies). */
+export async function pgDeleteImportDrafts(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const pool = getPool();
+  const { rowCount } = await pool.query(
+    `DELETE FROM catalog_company_import_drafts WHERE id = ANY($1::int[])`,
+    [ids],
   );
   return rowCount ?? 0;
 }
@@ -444,7 +552,7 @@ export async function pgPublishImportDrafts(ids: number[]): Promise<{
       skipped += 1;
       continue;
     }
-    if (d.status !== "approved") {
+    if (normalizeDraftStatus(d.status) !== "saved") {
       skipped += 1;
       continue;
     }
@@ -501,4 +609,74 @@ export async function pgMergeDraftIntoCompany(
 
   const { rows } = await pool.query<DraftRow>(`${DRAFT_SELECT} WHERE d.id = $1`, [draftId]);
   return rows[0] ? rowToDraft(rows[0]) : null;
+}
+
+/** Persist edits and move to saved queue without publishing. */
+export async function pgSaveImportDraft(
+  id: number,
+  patch: Partial<CatalogImportDraftInput>,
+): Promise<CatalogImportDraft | null> {
+  const curStatus = await getPool().query<{ status: string }>(
+    `SELECT status FROM catalog_company_import_drafts WHERE id = $1`,
+    [id],
+  );
+  const st = curStatus.rows[0]?.status;
+  if (!st || st === "published" || st === "rejected") return null;
+  return pgUpdateImportDraft(id, { ...patch, status: "saved" });
+}
+
+export async function pgCreateImportSession(input: {
+  query: string;
+  city: string;
+  categorySlug: string;
+  resultCount: number;
+}): Promise<CatalogImportSession> {
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    id: number;
+    query: string;
+    city: string;
+    category_slug: string;
+    result_count: number;
+    created_at: Date;
+  }>(
+    `
+    INSERT INTO catalog_import_sessions (query, city, category_slug, result_count)
+    VALUES ($1, $2, $3, $4)
+    RETURNING *
+    `,
+    [input.query.slice(0, 2000), input.city.slice(0, 200), input.categorySlug.slice(0, 80), input.resultCount],
+  );
+  const r = rows[0]!;
+  return {
+    id: r.id,
+    query: r.query,
+    city: r.city,
+    categorySlug: r.category_slug,
+    resultCount: r.result_count,
+    createdAt: r.created_at.toISOString(),
+  };
+}
+
+export async function pgListImportSessions(limit = 30): Promise<CatalogImportSession[]> {
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    id: number;
+    query: string;
+    city: string;
+    category_slug: string;
+    result_count: number;
+    created_at: Date;
+  }>(
+    `SELECT * FROM catalog_import_sessions ORDER BY created_at DESC LIMIT $1`,
+    [limit],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    query: r.query,
+    city: r.city,
+    categorySlug: r.category_slug,
+    resultCount: r.result_count,
+    createdAt: r.created_at.toISOString(),
+  }));
 }

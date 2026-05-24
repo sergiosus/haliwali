@@ -6,13 +6,14 @@
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260521_catalogs.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260522_catalog_import_drafts.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260523_catalog_import_v2.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260524_catalog_import_workflow.sql
 ```
 
 ## Admin flow
 
 1. **Discover** — `/admin/catalogs/discover` — multi-query search, relevance score, domain filter
 2. **Select URLs** → «В импорт» → drafts created
-3. **Review** — `/admin/catalogs/import/drafts` — edit, approve, publish, merge
+3. **Review** — `/admin/catalogs/import/drafts` — tabs: Новые / Сохранённые / Опубликованные / Отклонённые; Сохранить (edits → saved), publish from saved, merge
 4. **Extract** — `/admin/catalogs/import` — URL(s), text/VK, CSV
 
 ## Environment
@@ -51,7 +52,7 @@ npm run dev
 3. Confirm queries list includes localized variants
 4. Check relevance scores and source type badges
 5. Select 2 URLs → «В импорт» → redirects to drafts
-6. Edit draft → Approve → Publish
+6. Edit draft → Сохранить → Опубликовать (from Сохранённые tab)
 7. Open `/catalogs/auto` — company visible
 8. Empty category shows «Найти источники» buttons
 

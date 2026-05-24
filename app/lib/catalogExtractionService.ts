@@ -4,13 +4,19 @@ import { parseCatalogImportCsv } from "./catalogCsvImport";
 import { csvRowToDraftInput } from "./catalogImportEnrich";
 import type { CatalogImportDraft, CatalogImportDraftInput } from "./catalogImportTypes";
 import { parseCatalogPastedText } from "./catalogTextParser";
-import { extractDirectoryFromHtml } from "./catalogExtractDirectory";
-import { extractListingFromHtml } from "./catalogExtractListing";
 import type { CatalogSourceType, ExtractedCompanyDraft, ExtractionDefaults } from "./catalogExtractionTypes";
 import { extractVkFromHtml, extractVkFromPastedText } from "./catalogExtractVk";
 import { extractWebsiteFromHtml } from "./catalogExtractWebsite";
+import { extractListingFromHtml } from "./catalogExtractListing";
 import { fetchPublicHtml } from "./catalogHtmlFetch";
 import { buildDedupIndex, findDuplicate, registerInDedupIndex } from "./catalogImportDedup";
+import {
+  domainSiteUrl,
+  findContactUrlInList,
+  normalizeImportDomain,
+  pickBestUrlForDomain,
+} from "./catalogImportDomain";
+import { mergeDraftInputs, mergeExtractedCompanyDrafts } from "./catalogImportMerge";
 import { classifySourceUrl } from "./catalogSourceClassifier";
 import { buildDraftWarnings } from "./catalogImportEnrich";
 import {
@@ -18,7 +24,7 @@ import {
   failImportSource,
   loadDedupSeedData,
   parsedImportSource,
-  saveExtractedDrafts,
+  upsertExtractedDrafts,
 } from "./serverCatalogImportPipeline";
 
 export const MAX_URLS_PER_BATCH = 20;
@@ -54,6 +60,7 @@ function extractedToInput(
   };
 }
 
+/** One company per page — never multi-card / category parsing. */
 async function extractFromFetched(
   sourceType: CatalogSourceType,
   fetched: Awaited<ReturnType<typeof fetchPublicHtml>>,
@@ -61,48 +68,106 @@ async function extractFromFetched(
 ): Promise<ExtractedCompanyDraft[]> {
   if (sourceType === "vk") return extractVkFromHtml(fetched, defaults);
   if (sourceType === "listing") return extractListingFromHtml(fetched, defaults);
-  const directory = extractDirectoryFromHtml(fetched, defaults);
-  if (directory.length >= 2) return directory;
   return extractWebsiteFromHtml(fetched, defaults);
+}
+
+function groupUrlsByDomain(urls: string[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const raw of urls) {
+    try {
+      const domain = normalizeImportDomain(raw);
+      if (!domain) continue;
+      const list = map.get(domain) ?? [];
+      list.push(raw);
+      map.set(domain, list);
+    } catch {
+      /* skip invalid */
+    }
+  }
+  return map;
+}
+
+function attachDomainMeta(draft: ExtractedCompanyDraft, domain: string): void {
+  draft.rawPayload.rootDomain = domain;
+  draft.website = domainSiteUrl(domain);
+}
+
+async function extractCompanyForDomain(
+  domainUrls: string[],
+  defaults: ExtractionDefaults,
+): Promise<{ sourceId: number; draft: ExtractedCompanyDraft | null; error?: string }> {
+  const primaryUrl = pickBestUrlForDomain(domainUrls);
+  if (!primaryUrl) return { sourceId: 0, draft: null, error: "URL_REQUIRED" };
+
+  const domain = normalizeImportDomain(primaryUrl);
+  const url = new URL(primaryUrl.startsWith("http") ? primaryUrl : `https://${primaryUrl}`);
+  const sourceType = classifySourceUrl(url);
+
+  if (sourceType === "vk" || sourceType === "listing") {
+    const { sourceId, drafts } = await extractFromUrl(primaryUrl, defaults);
+    const d = drafts[0];
+    if (d) attachDomainMeta(d, domain);
+    return { sourceId, draft: d ?? null };
+  }
+
+  const source = await createImportSource(domainSiteUrl(domain), sourceType);
+  try {
+    logCatalogParse("extract_domain_start", { domain, primaryUrl });
+    const fetched = await fetchPublicHtml(primaryUrl);
+    let extracted = await extractFromFetched(sourceType, fetched, defaults);
+    if (extracted.length === 0) extracted = extractWebsiteFromHtml(fetched, defaults);
+    let draft = extracted[0] ?? null;
+    if (!draft) {
+      await parsedImportSource(source.id);
+      return { sourceId: source.id, draft: null };
+    }
+    attachDomainMeta(draft, domain);
+
+    const contactUrl = findContactUrlInList(domainUrls);
+    if (contactUrl && contactUrl !== primaryUrl) {
+      try {
+        const contactFetched = await fetchPublicHtml(contactUrl);
+        const contactDrafts = await extractFromFetched(sourceType, contactFetched, defaults);
+        const contactDraft = contactDrafts[0];
+        if (contactDraft) {
+          attachDomainMeta(contactDraft, domain);
+          draft = mergeExtractedCompanyDrafts(draft, contactDraft);
+        }
+      } catch {
+        /* contact page optional */
+      }
+    }
+
+    const score100 = computeImportConfidence({
+      name: draft.name,
+      phone: draft.phone,
+      address: draft.address,
+      website: draft.website,
+      description: draft.description,
+      imageUrl: draft.imageUrl,
+      city: draft.city,
+      targetCity: defaults.city,
+    });
+    draft.confidenceScore = confidenceToStored(score100);
+
+    logCatalogParse("extract_domain_done", { domain, name: draft.name.slice(0, 40) });
+    await parsedImportSource(source.id);
+    return { sourceId: source.id, draft };
+  } catch (e) {
+    const msg = mapExtractionError(e);
+    await failImportSource(source.id, msg);
+    return { sourceId: source.id, draft: null, error: msg };
+  }
 }
 
 export async function extractFromUrl(
   rawUrl: string,
   defaults: ExtractionDefaults,
 ): Promise<{ sourceId: number; drafts: ExtractedCompanyDraft[] }> {
-  const url = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
-  const sourceType = classifySourceUrl(url);
-  const source = await createImportSource(url.toString(), sourceType);
-
-  try {
-    logCatalogParse("extract_start", { host: url.hostname, sourceType });
-    const fetched = await fetchPublicHtml(url.toString());
-    let extracted = await extractFromFetched(sourceType, fetched, defaults);
-    if (extracted.length === 0) {
-      extracted = extractWebsiteFromHtml(fetched, defaults);
-    }
-    for (const d of extracted) {
-      if (!d.sourceUrl) d.sourceUrl = url.toString();
-      const score100 = computeImportConfidence({
-        name: d.name,
-        phone: d.phone,
-        address: d.address,
-        website: d.website,
-        description: d.description,
-        imageUrl: d.imageUrl,
-        city: d.city,
-        targetCity: defaults.city,
-      });
-      d.confidenceScore = confidenceToStored(score100);
-    }
-    logCatalogParse("extract_done", { host: url.hostname, drafts: extracted.length });
-    await parsedImportSource(source.id);
-    return { sourceId: source.id, drafts: extracted };
-  } catch (e) {
-    const msg = mapExtractionError(e);
-    await failImportSource(source.id, msg);
-    throw new Error(msg);
-  }
+  const domain = normalizeImportDomain(rawUrl);
+  const { sourceId, draft, error } = await extractCompanyForDomain([rawUrl], defaults);
+  if (error) throw new Error(error);
+  return { sourceId, drafts: draft ? [draft] : [] };
 }
 
 function mapExtractionError(e: unknown): string {
@@ -123,17 +188,18 @@ export async function processUrlBatch(
   const dedupIndex = buildDedupIndex(seed.published, seed.drafts);
   const allDrafts: CatalogImportDraft[] = [];
   const errors: { url: string; error: string }[] = [];
+  const byDomain = groupUrlsByDomain(limited);
 
-  logCatalogImport("url_batch_start", { count: limited.length });
+  logCatalogImport("url_batch_start", { urlCount: limited.length, domainCount: byDomain.size });
 
-  for (const raw of limited) {
-    try {
-      const { sourceId, drafts: extracted } = await extractFromUrl(raw, defaults);
-      const saved = await persistExtractedBatch(extracted, sourceId, dedupIndex, defaults);
-      allDrafts.push(...saved);
-    } catch (e) {
-      errors.push({ url: raw, error: e instanceof Error ? e.message : "PARSE_FAILED" });
+  for (const [domain, domainUrls] of byDomain) {
+    const { sourceId, draft, error } = await extractCompanyForDomain(domainUrls, defaults);
+    if (error || !draft) {
+      errors.push({ url: domainUrls[0] ?? domain, error: error ?? "NO_COMPANY_EXTRACTED" });
+      continue;
     }
+    const saved = await persistExtractedBatch([draft], sourceId, dedupIndex, defaults);
+    allDrafts.push(...saved);
   }
 
   return { drafts: allDrafts, errors };
@@ -188,6 +254,7 @@ export async function processCsvInput(
   const rows = parseCatalogImportCsv(csvText);
   const extracted: ExtractedCompanyDraft[] = rows.map((row) => {
     const input = csvRowToDraftInput(row, defaults);
+    const domain = normalizeImportDomain(input.website || input.sourceUrl || "");
     return {
       name: input.name,
       categorySlug: input.categorySlug,
@@ -195,7 +262,7 @@ export async function processCsvInput(
       address: input.address,
       phone: input.phone,
       email: input.email,
-      website: input.website,
+      website: domain ? domainSiteUrl(domain) : input.website,
       description: input.description,
       latitude: input.latitude,
       longitude: input.longitude,
@@ -203,7 +270,7 @@ export async function processCsvInput(
       sourceUrl: input.sourceUrl ?? "csv://upload",
       socialLinks: [],
       confidenceScore: 0.55,
-      rawPayload: { extractor: "csv" },
+      rawPayload: { extractor: "csv", rootDomain: domain || undefined },
     };
   });
   await parsedImportSource(source.id);
@@ -224,6 +291,7 @@ async function persistExtractedBatch(
     duplicateOfCompanyId: number | null;
     needsReview: boolean;
     sourceId: number;
+    existingDraftId?: number;
   }[] = [];
 
   for (const e of extracted) {
@@ -236,11 +304,16 @@ async function persistExtractedBatch(
       input,
       duplicateHint: dup?.hint ?? null,
       duplicateOfCompanyId: dup?.duplicateOfCompanyId ?? null,
-      needsReview: warnings.length > 0 || Boolean(dup),
+      needsReview: warnings.length > 0 || Boolean(dup?.duplicateOfCompanyId),
       sourceId,
+      existingDraftId: dup?.existingDraftId,
     });
-    registerInDedupIndex(dedupIndex, e, -1);
   }
 
-  return saveExtractedDrafts(items);
+  const saved = await upsertExtractedDrafts(items);
+  for (let i = 0; i < saved.length; i++) {
+    const ex = extracted[i];
+    if (ex) registerInDedupIndex(dedupIndex, ex, saved[i]!.id);
+  }
+  return saved;
 }

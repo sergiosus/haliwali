@@ -41,7 +41,7 @@ export async function GET(req: Request) {
         if ((!qRaw || qRaw.trim().length < 2) && regionSlug) {
           const r = await pool.query(
             `
-            SELECT s.name, subj.name AS region, s.lat, s.lng
+            SELECT s.id, s.name, subj.name AS region, s.lat, s.lng
             FROM location_settlements s
             JOIN location_subjects subj ON subj.slug = s.subject_slug
             WHERE s.subject_slug = $1
@@ -99,7 +99,7 @@ export async function GET(req: Request) {
             ${where}
             GROUP BY s.id, s.name, subj.name, s.lat, s.lng, s.settlement_type
           )
-          SELECT name, region, lat, lng
+          SELECT id, name, region, lat, lng
           FROM candidates
           ORDER BY
             rank ASC,

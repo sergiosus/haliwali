@@ -7,6 +7,7 @@ import {
   processTextInput,
   processUrlBatch,
 } from "../../../../../lib/catalogExtractionService";
+import { recordCatalogImportSession } from "../../../../../lib/serverCatalogImportSessionStore";
 import type { CatalogImportParseKind } from "../../../../../lib/catalogImportTypes";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 import { checkIpRateLimit, extractIp } from "../../../../../lib/serverAbuse";
@@ -89,6 +90,12 @@ export async function POST(req: Request) {
     }
 
     const { drafts, errors } = await processUrlBatch(urls, defaults);
+    await recordCatalogImportSession({
+      query: urls.join("\n").slice(0, 2000),
+      city,
+      categorySlug,
+      resultCount: drafts.length,
+    });
     return NextResponse.json({
       ok: true,
       drafts,
@@ -109,5 +116,11 @@ export async function POST(req: Request) {
   if (drafts.length === 0) {
     return NextResponse.json({ ok: false, error: "EMPTY_CSV" }, { status: 400 });
   }
+  await recordCatalogImportSession({
+    query: "csv upload",
+    city,
+    categorySlug,
+    resultCount: drafts.length,
+  });
   return NextResponse.json({ ok: true, drafts, count: drafts.length });
 }

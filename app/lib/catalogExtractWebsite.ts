@@ -1,18 +1,18 @@
 import type { CatalogSocialLink, ExtractedCompanyDraft, ExtractionDefaults } from "./catalogExtractionTypes";
 import type { FetchedHtml } from "./catalogHtmlFetch";
 import { computeImportConfidence, confidenceToStored } from "./catalogConfidence";
+import { pickCompanyNameFromHtml } from "./catalogCompanyNameExtract";
+import { domainSiteUrl, normalizeImportDomain } from "./catalogImportDomain";
 import {
   addressLikeFromText,
   emailsFromText,
   extractJsonLd,
   metaContent,
   normalizePhone,
-  normalizeWebsite,
   phonesFromText,
   pickOrgNode,
   stripTags,
   str,
-  titleTag,
 } from "./catalogExtractShared";
 
 function socialLinksFromHtml(html: string, baseUrl: string): CatalogSocialLink[] {
@@ -34,46 +34,54 @@ function socialLinksFromHtml(html: string, baseUrl: string): CatalogSocialLink[]
   return links;
 }
 
+/** Company-level contact slice: footer + contact blocks only (not product/catalog body). */
+function companyContactText(html: string): string {
+  const parts: string[] = [];
+  const footer = html.slice(-20000);
+  parts.push(stripTags(footer));
+  const blocks = html.matchAll(
+    /<(?:section|div|footer)[^>]*(?:id|class)=["'][^"']*(?:contact|контакт|footer|requisites|реквизит)[^"']*["'][^>]*>([\s\S]{0,15000})<\/(?:section|div|footer)>/gi,
+  );
+  for (const m of blocks) {
+    parts.push(stripTags(m[1] ?? ""));
+  }
+  return parts.join(" ").replace(/\s+/g, " ").slice(0, 8000);
+}
+
 export function extractWebsiteFromHtml(
   fetched: FetchedHtml,
   defaults: ExtractionDefaults,
 ): ExtractedCompanyDraft[] {
   const html = fetched.html;
   const url = fetched.url;
+  const rootDomain = normalizeImportDomain(url.toString());
   const jsonLd = extractJsonLd(html);
   const org = pickOrgNode(jsonLd);
 
-  const ogTitle = metaContent(html, "og:title");
   const ogDesc = metaContent(html, "og:description");
   const ogImage = metaContent(html, "og:image");
   const metaDesc = metaContent(html, "description", "name");
-  const pageTitle = titleTag(html);
-  const visible = stripTags(html).replace(/\s+/g, " ").slice(0, 12000);
 
-  const name =
-    str(org?.name) ||
-    ogTitle ||
-    pageTitle.split("|")[0]?.split("—")[0]?.trim() ||
-    pageTitle.slice(0, 120);
+  const { name, nameSource } = pickCompanyNameFromHtml(html, { pageUrl: url.toString() });
 
-  const description =
-    str(org?.description) || ogDesc || metaDesc || visible.slice(0, 500);
+  const description = (str(org?.description) || ogDesc || metaDesc).slice(0, 2000);
 
-  const phones = phonesFromText(visible);
+  const contactText = companyContactText(html);
+  const phones = phonesFromText(contactText);
   const phone = normalizePhone(str(org?.telephone)) || phones[0] || "";
-  const emails = emailsFromText(visible);
+  const emails = emailsFromText(contactText);
   const email = str(org?.email).toLowerCase() || emails[0] || "";
 
-  let website = str(org?.url) || url.origin;
-  website = normalizeWebsite(website);
+  const website = domainSiteUrl(rootDomain);
 
   const addr = org?.address;
-  let address = addressLikeFromText(visible);
+  let address = "";
   if (addr && typeof addr === "object") {
     const a = addr as Record<string, unknown>;
-    address =
-      [str(a.streetAddress), str(a.addressLocality), str(a.postalCode)].filter(Boolean).join(", ") ||
-      address;
+    address = [str(a.streetAddress), str(a.addressLocality), str(a.postalCode)].filter(Boolean).join(", ");
+  }
+  if (!address) {
+    address = addressLikeFromText(contactText).slice(0, 300);
   }
 
   const imageUrl = str(org?.image) || str(org?.logo) || ogImage || null;
@@ -103,7 +111,7 @@ export function extractWebsiteFromHtml(
     phone,
     email,
     website,
-    description: description.slice(0, 2000),
+    description,
     latitude,
     longitude,
     imageUrl: imageUrl && /^https?:\/\//i.test(imageUrl) ? imageUrl.slice(0, 500) : null,
@@ -123,8 +131,10 @@ export function extractWebsiteFromHtml(
     ),
     rawPayload: {
       extractor: "website",
-      title: pageTitle.slice(0, 200),
+      extractionLevel: "domain",
+      rootDomain,
       hasJsonLd: Boolean(org),
+      nameSource,
       byteLength: fetched.byteLength,
     },
   };

@@ -5,14 +5,32 @@ import { useCallback, useEffect, useState } from "react";
 import { confidenceFromStored, confidenceLabelRu } from "../../../lib/catalogConfidence";
 import { DISCOVERY_SOURCE_LABEL } from "../../../lib/catalogDiscoverSourceType";
 import type { DiscoverySourceType } from "../../../lib/catalogDiscoverSourceType";
-import type { CatalogImportDraft } from "../../../lib/catalogImportTypes";
+import type { CatalogImportDraft, CatalogImportDraftStatus, CatalogImportSession } from "../../../lib/catalogImportTypes";
 import type { CatalogCompanyAdminItem } from "../../../lib/catalogTypes";
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Черновик",
-  approved: "Одобрен",
+const STATUS_LABEL: Record<CatalogImportDraftStatus, string> = {
+  new: "Новый",
+  saved: "Сохранён",
   rejected: "Отклонён",
   published: "Опубликован",
+};
+
+const TABS: { id: CatalogImportDraftStatus; label: string }[] = [
+  { id: "new", label: "Новые" },
+  { id: "saved", label: "Сохранённые" },
+  { id: "published", label: "Опубликованные" },
+  { id: "rejected", label: "Отклонённые" },
+];
+
+const NAME_SOURCE_LABEL: Record<string, string> = {
+  jsonld_org: "JSON-LD Organization",
+  footer: "Подвал сайта",
+  contact: "Блок контактов",
+  meta_org: "Meta organization",
+  og_site: "og:site_name",
+  branding: "Логотип / бренд",
+  fallback: "Резерв",
+  none: "—",
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -30,7 +48,9 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportLink?: boolean }) {
+  const [tab, setTab] = useState<CatalogImportDraftStatus>("new");
   const [drafts, setDrafts] = useState<CatalogImportDraft[]>([]);
+  const [sessions, setSessions] = useState<CatalogImportSession[]>([]);
   const [companies, setCompanies] = useState<CatalogCompanyAdminItem[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -40,10 +60,17 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
   const [mergeCompanyId, setMergeCompanyId] = useState<Record<number, string>>({});
 
   const loadDrafts = useCallback(() => {
-    void fetch("/api/admin/catalogs/import/drafts", { credentials: "include", cache: "no-store" })
+    void fetch(`/api/admin/catalogs/import/drafts?status=${tab}`, { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
       .then((d: { drafts?: CatalogImportDraft[] }) => setDrafts(d.drafts ?? []))
       .catch(() => setDrafts([]));
+  }, [tab]);
+
+  const loadSessions = useCallback(() => {
+    void fetch("/api/admin/catalogs/import/sessions", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { sessions?: CatalogImportSession[] }) => setSessions(d.sessions ?? []))
+      .catch(() => setSessions([]));
   }, []);
 
   const loadCompanies = useCallback(() => {
@@ -55,10 +82,12 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
 
   useEffect(() => {
     loadDrafts();
+    loadSessions();
     loadCompanies();
-  }, [loadDrafts, loadCompanies]);
+    setSelected(new Set());
+  }, [loadDrafts, loadSessions, loadCompanies]);
 
-  async function runAction(action: "approve" | "reject" | "publish", ids: number[]) {
+  async function runAction(action: "save" | "reject" | "publish", ids: number[]) {
     if (ids.length === 0) return;
     setBusy(true);
     setMessage(null);
@@ -120,7 +149,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "update",
+          action: "save",
           id,
           patch: {
             name: editForm.name,
@@ -139,14 +168,59 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       });
       if (r.ok) {
         setEditingId(null);
+        setMessage("Сохранено");
         loadDrafts();
+        if (tab === "new") setTab("saved");
       }
     } finally {
       setBusy(false);
     }
   }
 
+  async function runDelete(ids: number[]) {
+    if (ids.length === 0) return;
+    if (!window.confirm("Удалить выбранные черновики? Это действие нельзя отменить.")) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await fetch("/api/admin/catalogs/import/confirm", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", ids }),
+      });
+      const d = (await r.json()) as { ok?: boolean; error?: string; deleted?: number };
+      if (!r.ok) {
+        setMessage(d.error ?? "Ошибка");
+        return;
+      }
+      const deleted = d.deleted ?? ids.length;
+      const idSet = new Set(ids);
+      setDrafts((prev) => prev.filter((x) => !idSet.has(x.id)));
+      setSelected(new Set());
+      if (editingId != null && idSet.has(editingId)) setEditingId(null);
+      setMessage(`Удалено: ${deleted}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const visibleIds = drafts.map((d) => d.id);
   const selectedIds = [...selected];
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(visibleIds));
+    }
+  }
+
+  const canPublish = tab === "saved";
+  const canReject = tab === "new" || tab === "saved";
+  const canMarkSaved = tab === "new";
 
   return (
     <div className="space-y-4">
@@ -167,32 +241,81 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         </div>
       : null}
 
+      {sessions.length > 0 ?
+        <details className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
+          <summary className="cursor-pointer font-medium">Последние импорты ({sessions.length})</summary>
+          <ul className="mt-3 space-y-2 text-black/65">
+            {sessions.slice(0, 12).map((s) => (
+              <li key={s.id} className="border-b border-black/5 pb-2 last:border-0">
+                <span className="text-black/40">{new Date(s.createdAt).toLocaleString("ru-RU")}</span>
+                {" · "}
+                {s.categorySlug} · {s.city || "—"} · {s.resultCount} шт.
+                {s.query ?
+                  <p className="mt-0.5 line-clamp-2 text-xs text-black/45">{s.query}</p>
+                : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      : null}
+
+      <div className="flex flex-wrap gap-2 border-b border-black/10 pb-2">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`rounded-full px-4 py-2 text-sm font-medium ${
+              tab === t.id ? "bg-black text-white" : "border border-black/15 hover:bg-black/5"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Черновики ({drafts.length})</h2>
+        <h2 className="text-lg font-semibold">
+          {TABS.find((t) => t.id === tab)?.label} ({drafts.length})
+        </h2>
         <div className="flex flex-wrap gap-2">
+          {canMarkSaved ?
+            <button
+              type="button"
+              disabled={busy || selectedIds.length === 0}
+              onClick={() => void runAction("save", selectedIds)}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium disabled:opacity-40"
+            >
+              В сохранённые
+            </button>
+          : null}
+          {canReject ?
+            <button
+              type="button"
+              disabled={busy || selectedIds.length === 0}
+              onClick={() => void runAction("reject", selectedIds)}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium disabled:opacity-40"
+            >
+              Отклонить
+            </button>
+          : null}
+          {canPublish ?
+            <button
+              type="button"
+              disabled={busy || selectedIds.length === 0}
+              onClick={() => void runAction("publish", selectedIds)}
+              className="rounded-full bg-black px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              Опубликовать выбранные
+            </button>
+          : null}
           <button
             type="button"
             disabled={busy || selectedIds.length === 0}
-            onClick={() => void runAction("approve", selectedIds)}
-            className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium disabled:opacity-40"
+            onClick={() => void runDelete(selectedIds)}
+            className="rounded-full border border-red-200 px-3 py-1.5 text-sm font-medium text-red-800 disabled:opacity-40"
           >
-            Одобрить
-          </button>
-          <button
-            type="button"
-            disabled={busy || selectedIds.length === 0}
-            onClick={() => void runAction("reject", selectedIds)}
-            className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium disabled:opacity-40"
-          >
-            Отклонить
-          </button>
-          <button
-            type="button"
-            disabled={busy || selectedIds.length === 0}
-            onClick={() => void runAction("publish", selectedIds)}
-            className="rounded-full bg-black px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
-          >
-            Опубликовать выбранные
+            Удалить выбранные
           </button>
         </div>
       </div>
@@ -202,7 +325,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       : null}
 
       {drafts.length === 0 ?
-        <p className="text-sm text-black/50">Черновиков нет. Добавьте источники через импорт или поиск.</p>
+        <p className="text-sm text-black/50">В этой очереди записей нет.</p>
       : drafts.map((d) => {
         const score100 = confidenceFromStored(d.confidenceScore ?? 0.5);
         const confLabel = confidenceLabelRu(score100);
@@ -212,7 +335,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
               <input
                 type="checkbox"
                 checked={selected.has(d.id)}
-                disabled={d.status === "published"}
+                disabled={busy}
                 onChange={() => {
                   setSelected((prev) => {
                     const next = new Set(prev);
@@ -245,6 +368,14 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   {d.categorySlug} · {d.city}
                   {d.address ? ` · ${d.address}` : ""}
                 </p>
+                {d.rawPayload?.rootDomain ?
+                  <p className="mt-1 text-xs text-black/45">
+                    домен: {String(d.rawPayload.rootDomain)}
+                    {d.rawPayload?.nameSource ?
+                      ` · источник названия: ${NAME_SOURCE_LABEL[String(d.rawPayload.nameSource)] ?? String(d.rawPayload.nameSource)}`
+                    : ""}
+                  </p>
+                : null}
                 <p className="mt-1 text-black/55">
                   {[d.phone, d.email, d.website].filter(Boolean).join(" · ") || "—"}
                 </p>
@@ -274,24 +405,27 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     ))}
                   </ul>
                 : null}
+                <p className="mt-1 text-xs text-black/35">
+                  обновлено {new Date(d.updatedAt).toLocaleString("ru-RU")}
+                </p>
               </div>
               <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
-                  onClick={() => {
-                    setEditingId(d.id);
-                    setEditForm({ ...d });
-                  }}
-                >
-                  Сохранить
-                </button>
-                {d.status !== "published" ?
+                {d.status === "new" ?
                   <>
                     <button
                       type="button"
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
+                      onClick={() => {
+                        setEditingId(d.id);
+                        setEditForm({ ...d });
+                      }}
+                    >
+                      Сохранить
+                    </button>
+                    <button
+                      type="button"
                       className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
-                      onClick={() => void runAction("approve", [d.id])}
+                      onClick={() => void runAction("save", [d.id])}
                     >
                       Одобрить
                     </button>
@@ -302,21 +436,59 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     >
                       Отклонить
                     </button>
-                    {d.status === "approved" ?
-                      <button
-                        type="button"
-                        className="rounded-full bg-black px-2.5 py-1 text-xs font-semibold text-white"
-                        onClick={() => void runAction("publish", [d.id])}
-                      >
-                        Опубликовать
-                      </button>
-                    : null}
                   </>
                 : null}
+                {(d.status === "published" || d.status === "rejected") ?
+                  <button
+                    type="button"
+                    className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
+                    onClick={() => {
+                      setEditingId(d.id);
+                      setEditForm({ ...d });
+                    }}
+                  >
+                    Сохранить
+                  </button>
+                : null}
+                {d.status === "saved" ?
+                  <>
+                    <button
+                      type="button"
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
+                      onClick={() => {
+                        setEditingId(d.id);
+                        setEditForm({ ...d });
+                      }}
+                    >
+                      Сохранить
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full bg-black px-2.5 py-1 text-xs font-semibold text-white"
+                      onClick={() => void runAction("publish", [d.id])}
+                    >
+                      Опубликовать
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      onClick={() => void runAction("reject", [d.id])}
+                    >
+                      Отклонить
+                    </button>
+                  </>
+                : null}
+                <button
+                  type="button"
+                  className="rounded-full border border-red-200 px-2.5 py-1 text-xs text-red-800"
+                  onClick={() => void runDelete([d.id])}
+                >
+                  Удалить
+                </button>
               </div>
             </div>
 
-            {d.status !== "published" ?
+            {d.status !== "published" && d.status !== "rejected" ?
               <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-black/10 pt-3">
                 <label className="text-xs text-black/55">
                   Объединить дубликат
@@ -383,7 +555,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     onClick={() => void saveEdit(d.id)}
                     className="rounded-full bg-black px-3 py-1.5 text-xs font-semibold text-white"
                   >
-                    Сохранить изменения
+                    Сохранить
                   </button>
                   <button
                     type="button"

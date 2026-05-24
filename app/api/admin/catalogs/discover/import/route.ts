@@ -2,6 +2,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { logCatalogDiscover, logCatalogImport } from "../../../../../lib/catalogCatalogLog";
 import { MAX_URLS_PER_BATCH, processUrlBatch } from "../../../../../lib/catalogExtractionService";
+import { recordCatalogImportSession } from "../../../../../lib/serverCatalogImportSessionStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 import { checkIpRateLimit, extractIp } from "../../../../../lib/serverAbuse";
 
@@ -46,7 +47,15 @@ export async function POST(req: Request) {
 
   logCatalogDiscover("import_batch", { urlCount: urls.length, categorySlug, city: city.slice(0, 40) });
 
+  const searchQuery = String(body.searchQuery ?? body.query ?? "").trim();
   const { drafts, errors } = await processUrlBatch(urls, { categorySlug, city });
+
+  await recordCatalogImportSession({
+    query: searchQuery || urls.slice(0, 5).join("\n"),
+    city,
+    categorySlug,
+    resultCount: drafts.length,
+  });
 
   logCatalogImport("drafts_created", { count: drafts.length, errors: errors.length });
 

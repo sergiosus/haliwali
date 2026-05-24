@@ -1,14 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { SettlementLocationField } from "../../../components/location/SettlementLocationField";
 import { DISCOVERY_SOURCE_LABEL, type DiscoverySourceType } from "../../../lib/catalogDiscoverSourceType";
 import type { RankedSearchCandidate } from "../../../lib/catalogDiscoverRanking";
+import {
+  catalogDiscoverCityLabel,
+  persistCatalogDiscoverLocation,
+  readCatalogDiscoverLocation,
+  type CatalogDiscoverLocation,
+} from "../../../lib/catalogDiscoverLocationStorage";
 import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 
 export default function AdminCatalogDiscoverClient() {
   const [query, setQuery] = useState("");
-  const [city, setCity] = useState("");
+  const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
   const [categorySlug, setCategorySlug] = useState("auto");
   const [visible, setVisible] = useState<RankedSearchCandidate[]>([]);
   const [hidden, setHidden] = useState<RankedSearchCandidate[]>([]);
@@ -19,6 +26,13 @@ export default function AdminCatalogDiscoverClient() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const saved = readCatalogDiscoverLocation();
+    if (saved) setLocation(saved);
+  }, []);
+
+  const cityLabel = catalogDiscoverCityLabel(location);
 
   const list = showHidden ? [...visible, ...hidden] : visible;
   const displayGroups = showHidden
@@ -41,7 +55,15 @@ export default function AdminCatalogDiscoverClient() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, city, categorySlug }),
+        body: JSON.stringify({
+          query,
+          city: cityLabel,
+          categorySlug,
+          settlementId: location?.settlementId ?? null,
+          latitude: location?.latitude ?? null,
+          longitude: location?.longitude ?? null,
+          region: location?.region ?? "",
+        }),
       });
       const d = (await r.json()) as {
         ok?: boolean;
@@ -80,7 +102,15 @@ export default function AdminCatalogDiscoverClient() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls, categorySlug, city }),
+        body: JSON.stringify({
+          urls,
+          categorySlug,
+          city: cityLabel,
+          searchQuery: queriesUsed.join(" | "),
+          settlementId: location?.settlementId ?? null,
+          latitude: location?.latitude ?? null,
+          longitude: location?.longitude ?? null,
+        }),
       });
       const d = (await r.json()) as {
         ok?: boolean;
@@ -130,15 +160,16 @@ export default function AdminCatalogDiscoverClient() {
               className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
             />
           </label>
-          <label className="block text-sm">
-            <span className="text-black/60">Город</span>
-            <input
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
+          <div className="sm:col-span-2">
+            <SettlementLocationField
+              value={location}
+              onChange={setLocation}
+              onPersist={persistCatalogDiscoverLocation}
+              required
+              label="Город / регион"
               placeholder="Ижевск"
-              className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
             />
-          </label>
+          </div>
           <label className="block text-sm">
             <span className="text-black/60">Категория</span>
             <select
@@ -157,7 +188,7 @@ export default function AdminCatalogDiscoverClient() {
 
         <button
           type="button"
-          disabled={busy || !query.trim() || !city.trim()}
+          disabled={busy || !query.trim() || !cityLabel}
           onClick={() => void runSearch()}
           className="mt-4 rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
         >

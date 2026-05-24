@@ -1,4 +1,5 @@
 import type { ExtractedCompanyDraft } from "./catalogExtractionTypes";
+import { normalizeImportDomain } from "./catalogImportDomain";
 import { normPhoneKey, normWebsiteKey } from "./catalogExtractShared";
 
 function normText(s: string): string {
@@ -14,6 +15,7 @@ export type DedupIndexEntry = {
 export type DedupIndex = {
   byPhone: Map<string, DedupIndexEntry>;
   byWebsite: Map<string, DedupIndexEntry>;
+  byDomain: Map<string, DedupIndexEntry>;
   byNameCity: Map<string, DedupIndexEntry>;
   byAddressCity: Map<string, DedupIndexEntry>;
   byAddressPhone: Map<string, DedupIndexEntry>;
@@ -35,24 +37,43 @@ export function buildDedupIndex(
     phone: string;
     website: string;
     address: string;
+    rootDomain?: string;
   }[],
 ): DedupIndex {
   const index: DedupIndex = {
     byPhone: new Map(),
     byWebsite: new Map(),
+    byDomain: new Map(),
     byNameCity: new Map(),
     byAddressCity: new Map(),
     byAddressPhone: new Map(),
   };
 
-  const add = (entry: DedupIndexEntry, keys: { phone?: string; website?: string; name?: string; city?: string; address?: string }) => {
+  const add = (
+    entry: DedupIndexEntry,
+    keys: {
+      phone?: string;
+      website?: string;
+      rootDomain?: string;
+      name?: string;
+      city?: string;
+      address?: string;
+    },
+  ) => {
     if (keys.phone) {
       const pk = normPhoneKey(keys.phone);
       if (pk.length >= 10) index.byPhone.set(pk, entry);
     }
     if (keys.website) {
       const wk = normWebsiteKey(keys.website);
-      if (wk) index.byWebsite.set(wk, entry);
+      if (wk) {
+        index.byWebsite.set(wk, entry);
+        index.byDomain.set(wk, entry);
+      }
+    }
+    if (keys.rootDomain) {
+      const dk = keys.rootDomain.trim().toLowerCase();
+      if (dk) index.byDomain.set(dk, entry);
     }
     if (keys.name && keys.city) {
       index.byNameCity.set(`${normText(keys.name)}|${normText(keys.city)}`, entry);
@@ -76,10 +97,30 @@ export function buildDedupIndex(
   return index;
 }
 
+export function draftDomainKey(
+  item: Pick<ExtractedCompanyDraft, "website" | "sourceUrl" | "rawPayload">,
+): string {
+  const fromPayload = String(item.rawPayload?.rootDomain ?? "").trim().toLowerCase();
+  if (fromPayload) return fromPayload;
+  return normalizeImportDomain(item.website || item.sourceUrl || "");
+}
+
 export function findDuplicate(
   index: DedupIndex,
-  item: Pick<ExtractedCompanyDraft, "name" | "city" | "phone" | "website" | "address">,
-): { hint: string; duplicateOfCompanyId: number | null } | null {
+  item: Pick<ExtractedCompanyDraft, "name" | "city" | "phone" | "website" | "address" | "sourceUrl" | "rawPayload">,
+): { hint: string; duplicateOfCompanyId: number | null; existingDraftId?: number } | null {
+  const dk = draftDomainKey(item);
+  if (dk) {
+    const hit = index.byDomain.get(dk);
+    if (hit) {
+      return {
+        hint: hit.kind === "published" ? "Дубликат: тот же домен (опубликовано)" : "Обновление черновика по домену",
+        duplicateOfCompanyId: hit.companyId,
+        existingDraftId: hit.draftId ?? undefined,
+      };
+    }
+  }
+
   const pk = normPhoneKey(item.phone);
   if (pk.length >= 10) {
     const hit = index.byPhone.get(pk);
@@ -137,14 +178,19 @@ export function findDuplicate(
 
 export function registerInDedupIndex(
   index: DedupIndex,
-  item: Pick<ExtractedCompanyDraft, "name" | "city" | "phone" | "website" | "address">,
+  item: Pick<ExtractedCompanyDraft, "name" | "city" | "phone" | "website" | "address" | "sourceUrl" | "rawPayload">,
   draftId: number,
 ): void {
   const entry: DedupIndexEntry = { companyId: null, draftId, kind: "draft" };
   const pk = normPhoneKey(item.phone);
   if (pk.length >= 10) index.byPhone.set(pk, entry);
   const wk = normWebsiteKey(item.website);
-  if (wk) index.byWebsite.set(wk, entry);
+  if (wk) {
+    index.byWebsite.set(wk, entry);
+    index.byDomain.set(wk, entry);
+  }
+  const dk = draftDomainKey(item);
+  if (dk) index.byDomain.set(dk, entry);
   if (item.name && item.city) {
     index.byNameCity.set(`${normText(item.name)}|${normText(item.city)}`, entry);
   }

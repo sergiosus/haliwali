@@ -57,6 +57,19 @@ export async function saveExtractedDrafts(
   return withPg(() => pg.pgInsertImportDraftsV2(items), () => json.jsonInsertImportDraftsV2(items));
 }
 
+export async function upsertExtractedDrafts(
+  items: {
+    input: CatalogImportDraftInput;
+    duplicateHint: string | null;
+    duplicateOfCompanyId: number | null;
+    needsReview: boolean;
+    sourceId: number;
+    existingDraftId?: number;
+  }[],
+): Promise<CatalogImportDraft[]> {
+  return withPg(() => pg.pgUpsertImportDraftsV2(items), () => json.jsonUpsertImportDraftsV2(items));
+}
+
 export async function mergeDraftIntoCompany(
   draftId: number,
   companyId: number,

@@ -50,3 +50,14 @@ export async function mergeCatalogImportDraft(
     () => json.jsonMergeDraftIntoCompany(draftId, companyId),
   );
 }
+
+export async function saveCatalogImportDraft(
+  id: number,
+  patch: Partial<CatalogImportDraftInput>,
+): Promise<CatalogImportDraft | null> {
+  return withPg(() => pg.pgSaveImportDraft(id, patch), () => json.jsonSaveImportDraft(id, patch));
+}
+
+export async function deleteCatalogImportDrafts(ids: number[]): Promise<number> {
+  return withPg(() => pg.pgDeleteImportDrafts(ids), () => json.jsonDeleteImportDrafts(ids));
+}

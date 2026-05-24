@@ -4,7 +4,12 @@
  */
 
 import type { ExternalMarketplaceCard, MarketplaceProvider } from "./externalMarketplaceProviders";
-import { canHtmlExtractMarketplaceProducts, isNeverParseProvider } from "./externalMarketplaceProviders";
+import {
+  canFetchMarketplacePreviews,
+  canHtmlExtractMarketplaceProducts,
+  isNeverParseProvider,
+} from "./externalMarketplaceProviders";
+import { tryEbayApiPreview } from "./ebayMarketplacePreview";
 import { extractProductCardsFromSearchHtml } from "./externalMarketplaceProductExtract";
 
 const FETCH_TIMEOUT_MS = 4500;
@@ -26,6 +31,16 @@ async function throttleProviderFetch(): Promise<void> {
  * Best-effort single request to a public search/catalog URL.
  * No retries, no anti-bot evasion, standard fetch only.
  */
+/** Live preview fetch — AliExpress HTML; eBay API when configured (no HTML scrape). */
+export async function tryMarketplaceProviderPreview(
+  provider: MarketplaceProvider,
+  normalizedQuery: string,
+): Promise<ExternalMarketplaceCard[]> {
+  if (!canFetchMarketplacePreviews(provider)) return [];
+  if (provider.id === "ebay") return tryEbayApiPreview(provider, normalizedQuery);
+  return trySafeHtmlProviderPreview(provider, normalizedQuery);
+}
+
 export async function trySafeHtmlProviderPreview(
   provider: MarketplaceProvider,
   normalizedQuery: string,

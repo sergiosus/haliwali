@@ -24,11 +24,8 @@ import {
 } from "../lib/marketplaceSelectionStorage";
 import { buildProviderSearchActions } from "../lib/marketplacePageSearch";
 import { MarketplaceLinkOnlyActions } from "./MarketplaceLinkOnlyActions";
+import { MarketplacePreviewSection } from "./MarketplacePreviewSection";
 import { MarketplaceProviderFilters } from "./MarketplaceProviderFilters";
-import {
-  MarketplaceProductCard,
-  marketplaceProductGridClassName,
-} from "./MarketplaceProductCard";
 
 type PageApiResponse = {
   ok?: boolean;
@@ -37,21 +34,6 @@ type PageApiResponse = {
   selectedProviders?: MarketplaceProviderId[];
   normalizedQuery?: string;
 };
-
-const SKELETON_COUNT = 4;
-
-function MarketplaceCardSkeleton() {
-  return (
-    <div className="flex min-h-[280px] animate-pulse flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
-      <div className="aspect-[4/3] bg-gradient-to-br from-black/[0.05] to-black/[0.02]" />
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <div className="h-3 w-20 rounded-full bg-black/[0.06]" />
-        <div className="h-4 w-full rounded-full bg-black/[0.06]" />
-        <div className="mt-auto h-10 w-full rounded-xl bg-black/[0.06]" />
-      </div>
-    </div>
-  );
-}
 
 function SearchIcon({ className }: { className?: string }) {
   return (
@@ -209,8 +191,8 @@ export function MarketplaceSearchPage() {
   );
 
   const canSearch = query.trim().length >= 2 && selectedProviders.length > 0;
-  const showProductSkeleton = searched && loading && realCardsSelected.length > 0;
-  const showProductCards = searched && !loading && items.length > 0;
+  const showPreviewSection =
+    searched && realCardsSelected.length > 0 && (loading || items.length > 0);
   const showProviderGateway = searched && displayQuery.length >= 2 && actions.length > 0;
 
   const filterPanel = (
@@ -314,39 +296,12 @@ export function MarketplaceSearchPage() {
 
             {searched ?
               <div className="mt-8 space-y-10">
-                {showProductSkeleton ?
-                  <section aria-labelledby="marketplace-cards-heading" aria-busy="true">
-                    <h2
-                      id="marketplace-cards-heading"
-                      className="mb-4 text-lg font-semibold text-black"
-                    >
-                      Карточки товаров
-                    </h2>
-                    <div className={marketplaceProductGridClassName}>
-                      {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
-                        <MarketplaceCardSkeleton key={i} />
-                      ))}
-                    </div>
-                  </section>
-                : null}
-
-                {showProductCards ?
-                  <section className="space-y-4" aria-labelledby="marketplace-cards-heading">
-                    <h2
-                      id="marketplace-cards-heading"
-                      className="text-lg font-semibold text-black"
-                    >
-                      Карточки товаров
-                    </h2>
-                    <div className={marketplaceProductGridClassName}>
-                      {items.map((card) => (
-                        <MarketplaceProductCard
-                          key={`${card.providerId}-${card.externalUrl}`}
-                          card={card}
-                        />
-                      ))}
-                    </div>
-                  </section>
+                {showPreviewSection ?
+                  <MarketplacePreviewSection
+                    query={displayQuery}
+                    items={items}
+                    loading={loading}
+                  />
                 : null}
 
                 {showProviderGateway ?

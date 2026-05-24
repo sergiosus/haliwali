@@ -332,3 +332,17 @@ export function canHtmlExtractMarketplaceProducts(provider: MarketplaceProvider)
   if (provider.id === "aliexpress" && provider.mode === "safe_html") return true;
   return false;
 }
+
+function isEbayApiConfigured(): boolean {
+  return Boolean(
+    process.env.EBAY_CLIENT_ID?.trim() ||
+      process.env.EBAY_APP_ID?.trim() ||
+      process.env.EBAY_OAUTH_CLIENT_ID?.trim(),
+  );
+}
+
+/** Providers allowed to return live preview cards on /marketplaces. */
+export function canFetchMarketplacePreviews(provider: MarketplaceProvider): boolean {
+  if (canHtmlExtractMarketplaceProducts(provider)) return true;
+  return provider.id === "ebay" && isEbayApiConfigured();
+}

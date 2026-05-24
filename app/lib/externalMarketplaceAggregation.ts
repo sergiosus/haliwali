@@ -3,8 +3,8 @@
  */
 
 import {
-  MARKETPLACE_PAGE_MAX_PER_PROVIDER,
-  MARKETPLACE_PAGE_MAX_TOTAL,
+  MARKETPLACE_PREVIEW_MAX_PER_PROVIDER,
+  MARKETPLACE_PREVIEW_MAX_TOTAL,
 } from "./marketplacePageConfig";
 import {
   buildRestrictedOutboundLinks,
@@ -21,7 +21,10 @@ import {
   filterRealMarketplaceCards,
 } from "./marketplaceCardQuality";
 import { readMarketplaceCache, writeMarketplaceCache } from "./externalMarketplaceCache";
-import { trySafeHtmlProviderPreview } from "./externalMarketplaceFetch";
+import {
+  tryMarketplaceProviderPreview,
+  trySafeHtmlProviderPreview,
+} from "./externalMarketplaceFetch";
 import { enrichMarketplaceCardsForDisplay } from "./marketplaceDisplay";
 import { buildProviderSearchActions, splitSelectedProvidersForSearch } from "./marketplacePageSearch";
 import { prepareMarketplaceGatewayQuery } from "./marketplaceSearchPrepare";
@@ -29,7 +32,10 @@ import {
   getMarketplaceRealCardsAdapterIds,
   type MarketplaceProviderSearchAction,
 } from "./marketplaceProviderGateway";
-import { canHtmlExtractMarketplaceProducts } from "./externalMarketplaceProviders";
+import {
+  canFetchMarketplacePreviews,
+  canHtmlExtractMarketplaceProducts,
+} from "./externalMarketplaceProviders";
 
 export type MarketplaceAggregationResult = {
   normalizedQuery: string;
@@ -150,7 +156,7 @@ function resolveProvidersForFetch(realCardsIds: MarketplaceProviderId[]): Market
   return realCardsIds
     .filter((id) => allowed.has(id))
     .map((id) => getMarketplaceProviderById(id))
-    .filter((p): p is MarketplaceProvider => Boolean(p && canHtmlExtractMarketplaceProducts(p)));
+    .filter((p): p is MarketplaceProvider => Boolean(p && canFetchMarketplacePreviews(p)));
 }
 
 /**
@@ -179,7 +185,7 @@ export async function aggregateMarketplacePageSearch(
 
   const providerFilter = realCardsIds.slice().sort().join(",");
   const cacheOpts = {
-    maxCards: MARKETPLACE_PAGE_MAX_TOTAL,
+    maxCards: MARKETPLACE_PREVIEW_MAX_TOTAL,
     includeAuto: false,
     includeRestricted: false,
     scope: "page" as const,
@@ -187,7 +193,10 @@ export async function aggregateMarketplacePageSearch(
   };
   const cached = readMarketplaceCache(normalizedQuery, cacheOpts);
   if (cached) {
-    const real = filterRealMarketplaceCards(cached.cards, normalizedQuery);
+    const real = filterRealMarketplaceCards(cached.cards, normalizedQuery).slice(
+      0,
+      MARKETPLACE_PREVIEW_MAX_TOTAL,
+    );
     const enriched = enrichMarketplaceCardsForDisplay(real, normalizedQuery);
     return {
       normalizedQuery,
@@ -199,32 +208,44 @@ export async function aggregateMarketplacePageSearch(
   }
 
   const providers = resolveProvidersForFetch(realCardsIds);
-  const rawCards: ExternalMarketplaceCard[] = [];
   const providerRawCounts: Record<string, number> = {};
-  const providerErrors: Record<string, string> = {};
 
-  await Promise.all(
+  const perProviderBatches = await Promise.all(
     providers.map(async (provider) => {
       try {
-        const batch = await trySafeHtmlProviderPreview(provider, normalizedQuery);
-        providerRawCounts[provider.id] = batch.length;
-        if (process.env.NODE_ENV !== "test" && batch.length === 0) {
+        const batch = await tryMarketplaceProviderPreview(provider, normalizedQuery);
+        const accepted: ExternalMarketplaceCard[] = [];
+        for (const card of batch) {
+          if (accepted.length >= MARKETPLACE_PREVIEW_MAX_PER_PROVIDER) break;
+          if (filterRealMarketplaceCards([card], normalizedQuery).length > 0) {
+            accepted.push(card);
+          }
+        }
+        providerRawCounts[provider.id] = accepted.length;
+        if (process.env.NODE_ENV !== "test" && accepted.length === 0) {
           console.log(`[MP_PROVIDER] ${provider.id} raw=0 accepted=0 (fetch or quality gate)`);
         }
-        for (const card of batch.slice(0, MARKETPLACE_PAGE_MAX_PER_PROVIDER)) {
-          rawCards.push(card);
-        }
-      } catch (e) {
-        providerErrors[provider.id] = e instanceof Error ? e.message : "provider_failed";
+        return accepted;
+      } catch {
         providerRawCounts[provider.id] = 0;
+        return [] as ExternalMarketplaceCard[];
       }
     }),
   );
 
+  const rawCards: ExternalMarketplaceCard[] = [];
+  for (const accepted of perProviderBatches) {
+    for (const card of accepted) {
+      if (rawCards.length >= MARKETPLACE_PREVIEW_MAX_TOTAL) break;
+      rawCards.push(card);
+    }
+    if (rawCards.length >= MARKETPLACE_PREVIEW_MAX_TOTAL) break;
+  }
+
   const filteredFakeCount = countFakeMarketplaceCards(rawCards, normalizedQuery);
   const realCards = filterRealMarketplaceCards(rawCards, normalizedQuery).slice(
     0,
-    MARKETPLACE_PAGE_MAX_TOTAL,
+    MARKETPLACE_PREVIEW_MAX_TOTAL,
   );
   const enriched = enrichMarketplaceCardsForDisplay(realCards, normalizedQuery);
 
@@ -243,7 +264,7 @@ export async function aggregateMarketplacePageSearch(
     normalizedQuery,
     cards: enriched,
     restrictedLinks: [],
-    providerErrors,
+    providerErrors: {},
   });
 
   return {

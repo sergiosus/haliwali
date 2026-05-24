@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { formatSearchCorrectionDisplay } from "../lib/globalSearchNormalize";
 import {
-  bestGlobalSearchQueryText,
-  formatSearchCorrectionDisplay,
-  globalSearchCorrectionHint,
-} from "../lib/globalSearchNormalize";
+  marketplacePrimaryQueryText,
+  marketplaceSearchCorrectionHint,
+} from "../lib/marketplaceSearchPrepare";
 import type { MarketplaceDisplayCard } from "../lib/marketplaceDisplay";
 import { filterRealMarketplaceCards } from "../lib/marketplaceCardQuality";
 import type { MarketplaceProviderId } from "../lib/externalMarketplaceProviders";
@@ -123,7 +123,7 @@ export function MarketplaceSearchPage() {
     [selectedProviders],
   );
 
-  const correctionRaw = useMemo(() => globalSearchCorrectionHint(query), [query]);
+  const correctionRaw = useMemo(() => marketplaceSearchCorrectionHint(query), [query]);
   const correctionDisplay = correctionRaw ? formatSearchCorrectionDisplay(correctionRaw) : null;
 
   const syncUrl = useCallback(
@@ -158,7 +158,6 @@ export function MarketplaceSearchPage() {
         return;
       }
 
-      const normalized = bestGlobalSearchQueryText(trimmed);
       const gen = ++fetchGen.current;
       setLoading(true);
       setSearched(true);
@@ -175,7 +174,7 @@ export function MarketplaceSearchPage() {
         const data = (await r.json()) as PageApiResponse;
         if (gen !== fetchGen.current) return;
         const raw = data.items ?? [];
-        const real = filterRealMarketplaceCards(raw, normalized) as MarketplaceDisplayCard[];
+        const real = filterRealMarketplaceCards(raw, trimmed) as MarketplaceDisplayCard[];
         setItems(real);
         const fromApi = data.actions ?? [];
         setActions(
@@ -206,7 +205,8 @@ export function MarketplaceSearchPage() {
   }, [initialQ, selectedProviders, runSearch]);
 
   const normalizedSubmitted = useMemo(
-    () => (submittedQuery.trim().length >= 2 ? bestGlobalSearchQueryText(submittedQuery.trim()) : ""),
+    () =>
+      submittedQuery.trim().length >= 2 ? marketplacePrimaryQueryText(submittedQuery) : "",
     [submittedQuery],
   );
 
@@ -294,7 +294,10 @@ export function MarketplaceSearchPage() {
                   type="button"
                   className="font-semibold text-black/80 hover:text-orange-700 hover:underline"
                   onClick={() => {
-                    setQuery(correctionRaw!);
+                    const next = correctionRaw!;
+                    setQuery(next);
+                    syncUrl(next, selectedProviders);
+                    void runSearch(next, selectedProviders);
                   }}
                 >
                   {correctionDisplay}
@@ -328,7 +331,7 @@ export function MarketplaceSearchPage() {
               {showGateway && loading && actions.length > 0 ?
                 <MarketplaceLinkOnlyActions
                   actions={actions}
-                  queryLabel={normalizedSubmitted || bestGlobalSearchQueryText(query.trim()) || undefined}
+                  queryLabel={normalizedSubmitted || undefined}
                 />
               : null}
 

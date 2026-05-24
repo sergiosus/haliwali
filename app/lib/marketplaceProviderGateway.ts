@@ -108,7 +108,14 @@ export const MARKETPLACE_REGION_GROUPS: readonly MarketplaceRegionGroup[] = [
     id: "china",
     title: "Китай",
     providers: [
-      gp("aliexpress", "AliExpress", "Китай", "Доставка в РФ зависит от товара", "#ff4747", "AE"),
+      gp(
+        "aliexpress",
+        "AliExpress",
+        "Глобально / Китай",
+        "Международная доставка, зависит от продавца",
+        "#ff4747",
+        "AE",
+      ),
       gp("alibaba", "Alibaba", "Китай", "Опт и B2B, часто через посредника", "#ff6a00", "Ab"),
       gp("1688", "1688", "Китай", "Через посредника", "#ff6a00", "16"),
       gp("taobao", "Taobao", "Китай", "Через посредника", "#ff5000", "Tb"),

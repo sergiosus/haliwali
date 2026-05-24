@@ -3,7 +3,7 @@
  * Restricted providers: outbound search links only — never parsed here.
  */
 
-import { bestGlobalSearchQueryText } from "./globalSearchNormalize";
+import { marketplacePrimaryQueryText } from "./marketplaceSearchPrepare";
 import { providerNameRu } from "./marketplaceProviderLabels";
 
 export type MarketplaceProviderMode = "safe_api" | "safe_html" | "external_link_only";
@@ -220,7 +220,7 @@ export const MARKETPLACE_PROVIDERS: readonly MarketplaceProvider[] = [
 ];
 
 export function normalizeMarketplaceSearchQuery(raw: string): string {
-  return bestGlobalSearchQueryText(raw);
+  return marketplacePrimaryQueryText(raw);
 }
 
 /** Stable outbound search URL for a gateway provider (normalized query). */

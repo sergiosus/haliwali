@@ -154,6 +154,26 @@ export function keyboardLayoutSearchHint(raw: string): string | null {
   return n.keyboardFixed;
 }
 
+/** Corrected query when layout/translit differs from typed text (e.g. ghbdtn → привет). */
+export function globalSearchCorrectionHint(raw: string): string | null {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed.length < 2) return null;
+  const best = bestGlobalSearchQueryText(trimmed);
+  if (!best) return null;
+  const typed = collapseSearchSpaces(trimmed);
+  if (best === typed) return null;
+  return best;
+}
+
+/** User-facing correction label (e.g. «москва» → «Москва»). */
+export function formatSearchCorrectionDisplay(hint: string): string {
+  return hint
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function globalSearchNormalizedPayload(n: GlobalSearchNormalizedQuery) {
   return {
     original: n.original,

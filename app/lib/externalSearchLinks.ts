@@ -29,8 +29,8 @@ function yandexAndGoogleLinks(raw: string): ExternalMarketplaceSearchLink[] {
   const query = externalSearchQueryText(original);
   if (!query) return [];
   return [
-    { label: "Искать в Яндексе", href: yandexSearchText(query) },
     { label: "Искать в Google", href: googleSearchQuery(query) },
+    { label: "Искать в Яндексе", href: yandexSearchText(query) },
   ];
 }
 

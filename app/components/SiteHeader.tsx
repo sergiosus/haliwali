@@ -584,7 +584,7 @@ export function SiteHeader() {
           {hideHeaderSearch ? null : (
             <GlobalHeaderSearch className="min-w-0 max-w-[500px] flex-1 px-2" />
           )}
-          <div className="flex shrink-0 items-center gap-8">
+          <div className="flex shrink-0 items-center gap-6 lg:gap-8">
             {suppressUserChromeForAdmin ? null : <PostListingMenu />}
             {authBlock}
           </div>

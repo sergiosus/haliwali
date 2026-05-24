@@ -4,10 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CompactListingCard } from "../components/CompactListingCard";
-import { ExternalSearchResults } from "../components/ExternalSearchResults";
+import { ExternalMarketplaceProductResults } from "../components/ExternalMarketplaceProductResults";
 import { appendReturnUrlQuery } from "../lib/returnNavigation";
-import type { ExternalSearchResultItem } from "../lib/externalSearch";
-import { getExternalMarketplaceSearchLinks } from "../lib/externalSearchLinks";
+import type { MarketplaceDisplayCard } from "../lib/marketplaceDisplay";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchListingTypeFilter, GlobalSearchResultItem } from "../lib/globalSearchTypes";
 import type { Listing, ListingType } from "../lib/listingModel";
@@ -71,16 +70,19 @@ export function SearchPageClient() {
 
   const searchScope = useSearchScope();
   const scopeLabel = homepageLocationLabelFromScope(searchScope);
-  /** Stable key when `useSearchScope` reuses the same object reference across renders. */
   const searchScopeKey = useMemo(
     () => JSON.stringify(normalizeSearchScope(searchScope)),
     [searchScope],
   );
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<GlobalSearchResultItem[]>([]);
-  const [externalResults, setExternalResults] = useState<ExternalSearchResultItem[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const fetchGenerationRef = useRef(0);
+
+  const [mpLoading, setMpLoading] = useState(false);
+  const [mpCards, setMpCards] = useState<MarketplaceDisplayCard[]>([]);
+  const [mpError, setMpError] = useState<string | null>(null);
+  const mpGenerationRef = useRef(0);
 
   const displayedResults = useMemo(
     () => results.filter((r) => matchesListingTypeFilter(r, type)),
@@ -106,7 +108,6 @@ export function SearchPageClient() {
   useEffect(() => {
     const gen = ++fetchGenerationRef.current;
     setResults([]);
-    setExternalResults([]);
     setFetchError(null);
 
     if (!query) {
@@ -131,20 +132,17 @@ export function SearchPageClient() {
         const d = (await r.json()) as {
           ok?: boolean;
           results?: GlobalSearchResultItem[];
-          externalResults?: ExternalSearchResultItem[];
           error?: string;
         };
         if (ac.signal.aborted || gen !== fetchGenerationRef.current) return;
         if (!r.ok || !d.ok) {
           setResults([]);
-          setExternalResults([]);
           setFetchError(d.error ?? "search_failed");
           return;
         }
         const list = Array.isArray(d.results) ? d.results : [];
         if (ac.signal.aborted || gen !== fetchGenerationRef.current) return;
         setResults(list);
-        setExternalResults(Array.isArray(d.externalResults) ? d.externalResults : []);
         const n = normalizeGlobalSearchQuery(fetchQuery);
         searchDebugLog("search-page", {
           raw: n.original,
@@ -154,7 +152,6 @@ export function SearchPageClient() {
       } catch {
         if (ac.signal.aborted || gen !== fetchGenerationRef.current) return;
         setResults([]);
-        setExternalResults([]);
         setFetchError("search_failed");
       } finally {
         if (!ac.signal.aborted && gen === fetchGenerationRef.current) setLoading(false);
@@ -163,6 +160,55 @@ export function SearchPageClient() {
 
     return () => ac.abort();
   }, [query, searchScopeKey, searchScope]);
+
+  useEffect(() => {
+    if (!query || query.length < 2) {
+      setMpCards([]);
+      setMpError(null);
+      setMpLoading(false);
+      return;
+    }
+
+    const gen = ++mpGenerationRef.current;
+    setMpCards([]);
+    setMpError(null);
+    setMpLoading(true);
+
+    const ac = new AbortController();
+    const mpDelay = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const p = new URLSearchParams({ q: query, auto: "1", limit: "10" });
+          const r = await fetch(`/api/search/marketplaces?${p.toString()}`, {
+            cache: "no-store",
+            signal: ac.signal,
+          });
+          if (ac.signal.aborted || gen !== mpGenerationRef.current) return;
+          const d = (await r.json()) as {
+            ok?: boolean;
+            cards?: MarketplaceDisplayCard[];
+            error?: string;
+          };
+          if (ac.signal.aborted || gen !== mpGenerationRef.current) return;
+          if (!r.ok || !d.ok) {
+            setMpError(d.error ?? "marketplace_failed");
+            return;
+          }
+          setMpCards(Array.isArray(d.cards) ? d.cards : []);
+        } catch {
+          if (ac.signal.aborted || gen !== mpGenerationRef.current) return;
+          setMpError("marketplace_failed");
+        } finally {
+          if (!ac.signal.aborted && gen === mpGenerationRef.current) setMpLoading(false);
+        }
+      })();
+    }, 200);
+
+    return () => {
+      ac.abort();
+      window.clearTimeout(mpDelay);
+    };
+  }, [query]);
 
   function typeTabHref(nextType: GlobalSearchListingTypeFilter) {
     const p = new URLSearchParams();
@@ -173,8 +219,6 @@ export function SearchPageClient() {
     const qs = p.toString();
     return qs ? `/search?${qs}` : "/search";
   }
-
-  const marketplaceLinks = useMemo(() => getExternalMarketplaceSearchLinks(query), [query]);
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-7xl overflow-x-hidden px-3 py-6 sm:px-6">
@@ -245,29 +289,14 @@ export function SearchPageClient() {
             })}
         </ul>
 
-        {marketplaceLinks.length > 0 ?
-          <section className="mt-8 border-t border-gray-200 pt-6" aria-label="Поиск в интернете">
-            <h2 className="text-sm font-semibold text-black">Поиск в интернете</h2>
-            <p className="mt-1 text-xs leading-snug text-black/50">
-              Ссылки открываются на Яндексе и Google с учётом раскладки клавиатуры.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {marketplaceLinks.map((link) => (
-                <a
-                  key={`${link.label}-${link.href}`}
-                  href={link.href}
-                  target="_blank"
-                  rel="noopener noreferrer nofollow"
-                  className="inline-flex max-w-full items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-black/85 hover:border-black/20 hover:bg-black/[0.02]"
-                >
-                  <span className="truncate">{link.label}</span>
-                </a>
-              ))}
-            </div>
-          </section>
+        {query ?
+          <ExternalMarketplaceProductResults
+            loading={mpLoading}
+            error={mpError}
+            cards={mpCards}
+            query={query}
+          />
         : null}
-
-        {!loading ? <ExternalSearchResults items={externalResults} /> : null}
       </div>
     </main>
   );

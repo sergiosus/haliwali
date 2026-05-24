@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { fetchExternalSearchResults } from "../../lib/externalSearch";
 import { parseGlobalSearchScopeFromUrl } from "../../lib/globalSearchScopeParams";
 import type { GlobalSearchListingTypeFilter } from "../../lib/globalSearchTypes";
 import { globalSearchListings, globalSearchNormalizedPayload } from "../../lib/serverGlobalSearch";
@@ -23,14 +22,12 @@ export async function GET(req: Request) {
     const scope = parseGlobalSearchScopeFromUrl(url);
 
     const { normalized, results } = await globalSearchListings({ query: q, type, limit, scope });
-    const externalResults = await fetchExternalSearchResults(q);
 
     const res = NextResponse.json({
       ok: true,
       query: q,
       normalized: globalSearchNormalizedPayload(normalized),
       results,
-      externalResults,
     });
     res.headers.set("Cache-Control", "no-store, max-age=0");
     return res;

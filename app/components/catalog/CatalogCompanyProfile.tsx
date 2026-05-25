@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import type { MouseEvent } from "react";
 import type { CatalogCompanyListItem, CatalogCompanyProfile } from "../../lib/catalogTypes";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
 import { catalogCategoryVisual } from "../../lib/catalogVisual";
@@ -19,6 +21,7 @@ export function CatalogCompanyProfileView({
   company: CatalogCompanyProfile;
   related: CatalogCompanyListItem[];
 }) {
+  const router = useRouter();
   const visual = catalogCategoryVisual(company.categorySlug);
   const phone = company.contacts.find((c) => c.type === "phone")?.value;
   const coverageText = formatCoverageText(company.serviceCities);
@@ -27,12 +30,11 @@ export function CatalogCompanyProfileView({
       { lat: company.latitude, lng: company.longitude }
     : null;
 
-  function goBackToCategory() {
+  function goBackToCategory(e: MouseEvent<HTMLAnchorElement>) {
     if (window.history.length > 1) {
-      window.history.back();
-      return;
+      e.preventDefault();
+      router.back();
     }
-    window.location.href = `/catalogs/${encodeURIComponent(company.categorySlug)}`;
   }
 
   const orgJsonLd = {
@@ -56,13 +58,13 @@ export function CatalogCompanyProfileView({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }}
       />
 
-      <button
-        type="button"
+      <Link
+        href={`/catalogs/${company.categorySlug}`}
         onClick={goBackToCategory}
         className="inline-flex h-9 w-fit items-center rounded-xl border border-black/[0.08] bg-white px-3 text-sm font-medium text-black/65 shadow-sm hover:bg-black/[0.02] hover:text-black"
       >
         ← Назад к категории
-      </button>
+      </Link>
 
       <nav className="text-sm text-black/45">
         <Link href="/catalogs" className="hover:text-black/70">

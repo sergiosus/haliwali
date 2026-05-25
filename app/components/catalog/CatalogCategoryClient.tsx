@@ -55,8 +55,8 @@ export function CatalogCategoryClient({
         <p className="mt-1 text-sm text-black/50">{category.subtitle}</p>
       </header>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_auto] sm:items-center">
-        <div className="relative min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-0 flex-1 basis-full sm:basis-0">
           <input
             type="search"
             value={q}
@@ -72,15 +72,15 @@ export function CatalogCategoryClient({
           type="button"
           onClick={() => void runSearch(q)}
           disabled={loading}
-          className="h-11 w-full shrink-0 rounded-xl bg-[#ff7a00] px-5 text-sm font-semibold text-white hover:bg-[#f07000] disabled:opacity-50 sm:w-28"
+          className="h-11 w-28 shrink-0 rounded-xl bg-[#ff7a00] px-5 text-sm font-semibold text-white hover:bg-[#f07000] disabled:opacity-50"
         >
           Найти
         </button>
-        <div className="flex w-full rounded-xl border border-black/[0.08] bg-white p-0.5 shadow-sm sm:w-auto">
+        <div className="flex rounded-xl border border-black/[0.08] bg-white p-0.5 shadow-sm">
           <button
             type="button"
             onClick={() => setView("cards")}
-            className={`min-w-0 flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               view === "cards" ? "bg-black/[0.06] text-black" : "text-black/50 hover:text-black/70"
             }`}
           >
@@ -89,7 +89,7 @@ export function CatalogCategoryClient({
           <button
             type="button"
             onClick={() => setView("map")}
-            className={`min-w-0 flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               view === "map" ? "bg-black/[0.06] text-black" : "text-black/50 hover:text-black/70"
             }`}
           >

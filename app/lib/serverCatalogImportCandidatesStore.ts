@@ -3,6 +3,7 @@ import { usesPostgres } from "./pgPool";
 import type {
   CatalogImportCandidateHistoryItem,
   CatalogImportCandidateSession,
+  ImportCandidateResultStatus,
   PersistedImportCandidate,
 } from "./catalogImportCandidateTypes";
 import * as pg from "./serverCatalogImportCandidatesPg";
@@ -87,6 +88,43 @@ export function markCandidatesImported(
       ...c,
       state: "imported" as const,
       draftId: draftIdsByUrl.get(c.url.trim()) ?? c.draftId ?? null,
+    };
+  });
+}
+
+export type CandidateImportResultPatch = {
+  url: string;
+  status: ImportCandidateResultStatus;
+  reason?: string | null;
+  draftId?: number | null;
+  duplicateOfCompanyId?: number | null;
+  duplicateName?: string | null;
+  duplicateHref?: string | null;
+};
+
+function resultState(status: ImportCandidateResultStatus): PersistedImportCandidate["state"] {
+  if (status === "imported") return "imported";
+  if (status === "skipped_hidden") return "removed";
+  return "rejected";
+}
+
+export function applyCandidateImportResults(
+  candidates: PersistedImportCandidate[],
+  results: CandidateImportResultPatch[],
+): PersistedImportCandidate[] {
+  const byUrl = new Map(results.map((r) => [r.url.trim(), r]));
+  return candidates.map((c) => {
+    const result = byUrl.get(c.url.trim());
+    if (!result) return c;
+    return {
+      ...c,
+      state: resultState(result.status),
+      importStatus: result.status,
+      importReason: result.reason ?? null,
+      draftId: result.draftId ?? c.draftId ?? null,
+      duplicateOfCompanyId: result.duplicateOfCompanyId ?? c.duplicateOfCompanyId ?? null,
+      duplicateName: result.duplicateName ?? c.duplicateName ?? null,
+      duplicateHref: result.duplicateHref ?? c.duplicateHref ?? null,
     };
   });
 }

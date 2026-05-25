@@ -43,3 +43,7 @@ export function logCatalogDrafts(message: string, meta?: Record<string, unknown>
 export function logAdminCatalog(message: string, meta?: Record<string, unknown>): void {
   console.info(`[ADMIN_CATALOG] ${message}${safeMeta(meta)}`);
 }
+
+export function logAdminCatalogImport(message: string, meta?: Record<string, unknown>): void {
+  console.info(`[ADMIN_CATALOG_IMPORT] ${message}${safeMeta(meta)}`);
+}

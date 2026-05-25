@@ -2,9 +2,21 @@ import type { RankedSearchCandidate } from "./catalogDiscoverRanking";
 
 export type ImportCandidateState = "found" | "selected" | "imported" | "rejected" | "removed";
 
+export type ImportCandidateResultStatus =
+  | "imported"
+  | "skipped_duplicate"
+  | "skipped_invalid"
+  | "skipped_hidden"
+  | "failed";
+
 export type PersistedImportCandidate = RankedSearchCandidate & {
   state: ImportCandidateState;
+  importStatus?: ImportCandidateResultStatus;
+  importReason?: string | null;
   draftId?: number | null;
+  duplicateOfCompanyId?: number | null;
+  duplicateName?: string | null;
+  duplicateHref?: string | null;
 };
 
 export type CatalogImportCandidateSession = {
@@ -33,6 +45,14 @@ export const IMPORT_CANDIDATE_STATE_LABEL: Record<ImportCandidateState, string> 
   imported: "Импортировано",
   rejected: "Отклонено",
   removed: "Удалено",
+};
+
+export const IMPORT_CANDIDATE_RESULT_LABEL: Record<ImportCandidateResultStatus, string> = {
+  imported: "Импортировано",
+  skipped_duplicate: "Дубликат",
+  skipped_invalid: "Не прошло проверку",
+  skipped_hidden: "Не прошло проверку",
+  failed: "Ошибка",
 };
 
 export function candidateKey(c: { url: string }): string {

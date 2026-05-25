@@ -1,14 +1,19 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { logCatalogDiscover, logCatalogImport } from "../../../../../lib/catalogCatalogLog";
+import { logAdminCatalogImport, logCatalogDiscover, logCatalogImport } from "../../../../../lib/catalogCatalogLog";
+import { normalizeImportDomain } from "../../../../../lib/catalogImportDomain";
 import { MAX_URLS_PER_BATCH, processUrlBatch } from "../../../../../lib/catalogExtractionService";
+import type { CatalogImportDraft } from "../../../../../lib/catalogImportTypes";
+import type { ImportCandidateResultStatus, PersistedImportCandidate } from "../../../../../lib/catalogImportCandidateTypes";
 import {
+  applyCandidateImportResults,
+  type CandidateImportResultPatch,
   getImportCandidateSession,
-  markCandidatesImported,
   updateImportCandidateSession,
 } from "../../../../../lib/serverCatalogImportCandidatesStore";
 import { recordCatalogImportSession } from "../../../../../lib/serverCatalogImportSessionStore";
 import { countCatalogImportDraftsInDb } from "../../../../../lib/serverCatalogImportDraftStore";
+import { listCatalogCompaniesAdmin } from "../../../../../lib/serverCatalogStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 import { checkIpRateLimit, extractIp } from "../../../../../lib/serverAbuse";
 
@@ -18,6 +23,43 @@ export const dynamic = "force-dynamic";
 const RL_IP_PATH = path.join(process.cwd(), ".data", "catalog-discover-import-ip.json");
 const RL_IP_LIMIT = 30;
 const RL_WINDOW_MS = 60 * 60 * 1000;
+
+type CandidateImportResult = CandidateImportResultPatch & {
+  domain: string;
+};
+
+function resultDomain(rawUrl: string, candidate?: PersistedImportCandidate): string {
+  if (candidate?.domain) return candidate.domain.trim().toLowerCase();
+  try {
+    return normalizeImportDomain(rawUrl);
+  } catch {
+    return "";
+  }
+}
+
+function draftDomain(draft: CatalogImportDraft): string {
+  const rawRoot = String(draft.rawPayload?.rootDomain ?? "").trim();
+  if (rawRoot) return rawRoot.toLowerCase();
+  return normalizeImportDomain(draft.sourceUrlDisplay ?? draft.sourceUrl ?? draft.website ?? "");
+}
+
+function resultSummary(results: CandidateImportResult[]): {
+  imported: number;
+  duplicates: number;
+  errors: number;
+  skipped: number;
+} {
+  return {
+    imported: results.filter((r) => r.status === "imported").length,
+    duplicates: results.filter((r) => r.status === "skipped_duplicate").length,
+    errors: results.filter((r) => r.status === "failed").length,
+    skipped: results.filter((r) => r.status === "skipped_invalid" || r.status === "skipped_hidden").length,
+  };
+}
+
+function invalidStatus(error: string): ImportCandidateResultStatus {
+  return error === "NO_COMPANY_EXTRACTED" || error === "URL_REQUIRED" ? "skipped_invalid" : "failed";
+}
 
 export async function POST(req: Request) {
   const deny = restDenyPrivilegedAdminResponse(await getAdminPrivilegedFailure());
@@ -37,25 +79,47 @@ export async function POST(req: Request) {
   const body = (await req.json()) as Record<string, unknown>;
   const categorySlug = String(body.categorySlug ?? "").trim().toLowerCase();
   const city = String(body.city ?? "").trim();
-  const urls = Array.isArray(body.urls)
-    ? body.urls.map((u) => String(u).trim()).filter((u) => /^https?:\/\//i.test(u))
+  const rawUrls = Array.isArray(body.urls)
+    ? body.urls.map((u) => String(u).trim()).filter(Boolean)
     : [];
 
   if (!categorySlug) {
     return NextResponse.json({ ok: false, error: "CATEGORY_REQUIRED" }, { status: 400 });
   }
-  if (urls.length === 0) {
+  if (rawUrls.length === 0) {
     return NextResponse.json({ ok: false, error: "URLS_REQUIRED" }, { status: 400 });
   }
-  if (urls.length > MAX_URLS_PER_BATCH) {
+  if (rawUrls.length > MAX_URLS_PER_BATCH) {
     return NextResponse.json({ ok: false, error: "TOO_MANY_URLS", max: MAX_URLS_PER_BATCH }, { status: 400 });
   }
 
-  logCatalogImport("selected_count", { count: urls.length });
-  logCatalogDiscover("import_batch", { urlCount: urls.length, categorySlug, city: city.slice(0, 40) });
+  logCatalogImport("selected_count", { count: rawUrls.length });
+  logCatalogDiscover("import_batch", { urlCount: rawUrls.length, categorySlug, city: city.slice(0, 40) });
 
   const searchQuery = String(body.searchQuery ?? body.query ?? "").trim();
-  const { drafts, errors, upsert } = await processUrlBatch(urls, { categorySlug, city });
+  const sessionId = Number(body.sessionId);
+  const existing =
+    Number.isFinite(sessionId) && sessionId > 0 ? await getImportCandidateSession(sessionId) : null;
+  const candidatesByUrl = new Map((existing?.candidates ?? []).map((c) => [c.url.trim(), c]));
+  const preliminaryResults: CandidateImportResult[] = [];
+  const importableUrls: string[] = [];
+
+  for (const url of rawUrls) {
+    const candidate = candidatesByUrl.get(url);
+    const domain = resultDomain(url, candidate);
+    if (!/^https?:\/\//i.test(url)) {
+      preliminaryResults.push({ url, domain, status: "skipped_invalid", reason: "INVALID_URL" });
+    } else if (candidate?.hidden) {
+      preliminaryResults.push({ url, domain, status: "skipped_hidden", reason: candidate.hideReason ?? "HIDDEN" });
+    } else {
+      importableUrls.push(url);
+    }
+  }
+
+  const { drafts, errors, upsert } =
+    importableUrls.length > 0 ?
+      await processUrlBatch(importableUrls, { categorySlug, city })
+    : { drafts: [], errors: [], upsert: { drafts: [], createdIds: [], updatedIds: [], sourcesCreated: 0 } };
 
   logCatalogImport("inserted_sources_count", { count: upsert.sourcesCreated });
   logCatalogImport("inserted_drafts_count", {
@@ -65,7 +129,7 @@ export async function POST(req: Request) {
   });
 
   await recordCatalogImportSession({
-    query: searchQuery || urls.slice(0, 5).join("\n"),
+    query: searchQuery || rawUrls.slice(0, 5).join("\n"),
     city,
     categorySlug,
     resultCount: drafts.length,
@@ -74,32 +138,91 @@ export async function POST(req: Request) {
   const dbDraftCount = await countCatalogImportDraftsInDb();
   logCatalogImport("db_drafts_verify", { count: dbDraftCount });
 
-  const sessionId = Number(body.sessionId);
-  let session = null;
-  if (Number.isFinite(sessionId) && sessionId > 0) {
-    const existing = await getImportCandidateSession(sessionId);
-    if (existing) {
-      const draftIdsByUrl = new Map<string, number>();
-      for (const d of drafts) {
-        const u = String(d.sourceUrlDisplay ?? d.sourceUrl ?? d.website ?? "").trim();
-        if (u) draftIdsByUrl.set(u, d.id);
+  const companies = await listCatalogCompaniesAdmin().catch(() => []);
+  const companiesById = new Map(companies.map((c) => [c.id, c]));
+  const draftsByDomain = new Map<string, CatalogImportDraft>();
+  for (const draft of drafts) {
+    const domain = draftDomain(draft);
+    if (domain) draftsByDomain.set(domain, draft);
+  }
+  const errorsByDomain = new Map<string, string>();
+  for (const err of errors) {
+    const domain = resultDomain(err.url, candidatesByUrl.get(err.url));
+    if (domain) errorsByDomain.set(domain, err.error);
+  }
+  const urlsByDomain = new Map<string, string[]>();
+  for (const url of importableUrls) {
+    const domain = resultDomain(url, candidatesByUrl.get(url));
+    const list = urlsByDomain.get(domain) ?? [];
+    list.push(url);
+    urlsByDomain.set(domain, list);
+  }
+
+  const results: CandidateImportResult[] = [...preliminaryResults];
+  for (const [domain, domainUrls] of urlsByDomain) {
+    const draft = draftsByDomain.get(domain);
+    const error = errorsByDomain.get(domain);
+    if (error || !draft) {
+      const status = invalidStatus(error ?? "NO_RESULT");
+      for (const url of domainUrls) {
+        results.push({ url, domain, status, reason: error ?? "NO_RESULT" });
       }
-      for (let i = 0; i < urls.length; i++) {
-        const u = urls[i]!.trim();
-        if (!draftIdsByUrl.has(u) && drafts[i]) {
-          const d = drafts[i]!;
-          const key = String(d.sourceUrlDisplay ?? d.sourceUrl ?? d.website ?? u).trim();
-          draftIdsByUrl.set(u, d.id);
-          if (key !== u) draftIdsByUrl.set(key, d.id);
-        }
-      }
-      const updatedCandidates = markCandidatesImported(existing.candidates, urls, draftIdsByUrl);
-      session = await updateImportCandidateSession(sessionId, updatedCandidates);
+      continue;
+    }
+
+    const duplicateCompany = draft.duplicateOfCompanyId ? companiesById.get(draft.duplicateOfCompanyId) : null;
+    const duplicateName = duplicateCompany?.name ?? (draft.duplicateHint ? draft.name : null);
+    const duplicateHref =
+      duplicateCompany ? `/catalogs/${duplicateCompany.categorySlug}/${duplicateCompany.slug}` : null;
+    const firstUrl = domainUrls[0]!;
+    const firstStatus: ImportCandidateResultStatus =
+      draft.duplicateOfCompanyId || upsert.updatedIds.includes(draft.id) ? "skipped_duplicate" : "imported";
+    results.push({
+      url: firstUrl,
+      domain,
+      status: firstStatus,
+      reason:
+        firstStatus === "skipped_duplicate" ?
+          draft.duplicateOfCompanyId ? "PUBLISHED_COMPANY_DUPLICATE" : "EXISTING_DRAFT_UPDATED"
+        : "DRAFT_CREATED",
+      draftId: draft.id,
+      duplicateOfCompanyId: draft.duplicateOfCompanyId,
+      duplicateName,
+      duplicateHref,
+    });
+    for (const url of domainUrls.slice(1)) {
+      results.push({
+        url,
+        domain,
+        status: "skipped_duplicate",
+        reason: "SAME_DOMAIN_ALREADY_IMPORTED",
+        draftId: draft.id,
+        duplicateOfCompanyId: draft.duplicateOfCompanyId,
+        duplicateName: duplicateName ?? draft.name,
+        duplicateHref,
+      });
     }
   }
 
+  for (const result of results) {
+    logAdminCatalogImport("candidate result", {
+      domain: result.domain,
+      status: result.status,
+      reason: result.reason ?? "",
+    });
+  }
+
+  let session = null;
+  if (existing) {
+      const updatedCandidates = applyCandidateImportResults(existing.candidates, results);
+      session = await updateImportCandidateSession(sessionId, updatedCandidates);
+  }
+  const summary = resultSummary(results);
+
   return NextResponse.json({
     ok: true,
+    results,
+    summary,
     drafts,
     draftIds: drafts.map((d) => d.id),
     createdIds: upsert.createdIds,

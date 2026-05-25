@@ -7,12 +7,54 @@ import type {
   CatalogReport,
 } from "./catalogTypes";
 import { CATALOG_CATEGORY_SEED, type CatalogCompanyImportRow } from "./catalogTypes";
+import {
+  matchedServiceCity,
+  normalizeCatalogCompanyCities,
+} from "./catalogCompanyCities";
 import { slugifyCatalogText } from "./catalogSlug";
 
 function rowRating(v: unknown): number | null {
   if (v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function rowServiceCities(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x).trim()).filter(Boolean);
+}
+
+function toCompanyListItem(
+  r: {
+    slug: string;
+    name: string;
+    category_slug: string;
+    category_title: string;
+    city: string;
+    service_cities?: unknown;
+    description: string;
+    logo_url: string | null;
+    rating: string | null;
+    latitude: number | null;
+    longitude: number | null;
+  },
+  query = "",
+): CatalogCompanyListItem {
+  const normalized = normalizeCatalogCompanyCities(r.city ?? "", rowServiceCities(r.service_cities));
+  return {
+    slug: r.slug,
+    name: r.name,
+    categorySlug: r.category_slug,
+    categoryTitle: r.category_title,
+    city: normalized.primaryCity,
+    serviceCities: normalized.serviceCities,
+    locationContext: matchedServiceCity(normalized.primaryCity, normalized.serviceCities, query),
+    description: r.description ?? "",
+    logoUrl: r.logo_url,
+    rating: rowRating(r.rating),
+    latitude: r.latitude,
+    longitude: r.longitude,
+  };
 }
 
 export async function pgListCategories(): Promise<CatalogCategory[]> {
@@ -77,6 +119,7 @@ export async function pgGetCategory(slug: string): Promise<CatalogCategory | nul
 export async function pgSearchCompanies(opts: {
   categorySlug?: string;
   q?: string;
+  city?: string;
   limit?: number;
 }): Promise<CatalogCompanyListItem[]> {
   const pool = getPool();
@@ -88,11 +131,36 @@ export async function pgSearchCompanies(opts: {
     where.push(`co.category_slug = $${params.length}`);
   }
   const q = (opts.q ?? "").trim();
+  const cityQuery = (opts.city ?? "").trim();
   if (q.length >= 2) {
     params.push(`%${q}%`);
     const i = params.length;
     where.push(
-      `(co.name ILIKE $${i} OR co.city ILIKE $${i} OR co.description ILIKE $${i} OR co.address ILIKE $${i})`,
+      `(
+        co.name ILIKE $${i}
+        OR co.city ILIKE $${i}
+        OR co.description ILIKE $${i}
+        OR co.address ILIKE $${i}
+        OR EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(co.service_cities) AS svc(city)
+          WHERE svc.city ILIKE $${i}
+        )
+      )`,
+    );
+  }
+  if (cityQuery.length >= 2) {
+    params.push(`%${cityQuery}%`);
+    const i = params.length;
+    where.push(
+      `(
+        co.city ILIKE $${i}
+        OR EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(co.service_cities) AS svc(city)
+          WHERE svc.city ILIKE $${i}
+        )
+      )`,
     );
   }
   params.push(limit);
@@ -102,6 +170,7 @@ export async function pgSearchCompanies(opts: {
     category_slug: string;
     category_title: string;
     city: string;
+    service_cities: unknown;
     description: string;
     logo_url: string | null;
     rating: string | null;
@@ -110,7 +179,7 @@ export async function pgSearchCompanies(opts: {
   }>(
     `
     SELECT co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.description, co.logo_url, co.rating,
+           co.city, co.service_cities, co.description, co.logo_url, co.rating,
            loc.latitude, loc.longitude
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
@@ -121,18 +190,7 @@ export async function pgSearchCompanies(opts: {
     `,
     params,
   );
-  return rows.map((r) => ({
-    slug: r.slug,
-    name: r.name,
-    categorySlug: r.category_slug,
-    categoryTitle: r.category_title,
-    city: r.city ?? "",
-    description: r.description ?? "",
-    logoUrl: r.logo_url,
-    rating: rowRating(r.rating),
-    latitude: r.latitude,
-    longitude: r.longitude,
-  }));
+  return rows.map((r) => toCompanyListItem(r, cityQuery || q));
 }
 
 export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyProfile | null> {
@@ -144,6 +202,7 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
     category_slug: string;
     category_title: string;
     city: string;
+    service_cities: unknown;
     address: string;
     description: string;
     logo_url: string | null;
@@ -154,7 +213,7 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
   }>(
     `
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.address, co.description, co.logo_url, co.website, co.rating,
+           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.rating,
            loc.latitude, loc.longitude
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
@@ -179,13 +238,16 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
 
   const images = imgRes.rows.map((x) => x.url).filter(Boolean);
   if (r.logo_url && !images.includes(r.logo_url)) images.unshift(r.logo_url);
+  const normalized = normalizeCatalogCompanyCities(r.city ?? "", rowServiceCities(r.service_cities));
 
   return {
     slug: r.slug,
     name: r.name,
     categorySlug: r.category_slug,
     categoryTitle: r.category_title,
-    city: r.city ?? "",
+    city: normalized.primaryCity,
+    serviceCities: normalized.serviceCities,
+    locationContext: null,
     address: r.address ?? "",
     description: r.description ?? "",
     logoUrl: r.logo_url,
@@ -250,13 +312,23 @@ export async function pgImportCompanies(
     }
     used.add(slug);
 
+    const normalizedCities = normalizeCatalogCompanyCities(row.city.trim());
     const ins = await pool.query<{ id: number }>(
       `
-      INSERT INTO catalog_companies (slug, name, category_slug, city, address, description, website, is_published)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+      INSERT INTO catalog_companies (slug, name, category_slug, city, service_cities, address, description, website, is_published)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, TRUE)
       RETURNING id
       `,
-      [slug, row.name.trim(), cat, row.city.trim(), row.address.trim(), row.description.trim(), row.website.trim() || null],
+      [
+        slug,
+        row.name.trim(),
+        cat,
+        normalizedCities.primaryCity,
+        JSON.stringify(normalizedCities.serviceCities),
+        row.address.trim(),
+        row.description.trim(),
+        row.website.trim() || null,
+      ],
     );
     const companyId = ins.rows[0]?.id;
     if (!companyId) {
@@ -332,6 +404,7 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     category_slug: string;
     category_title: string;
     city: string;
+    service_cities: unknown;
     description: string;
     logo_url: string | null;
     website: string | null;
@@ -340,7 +413,7 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     longitude: number | null;
   }>(`
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.description, co.logo_url, co.website, co.rating,
+           co.city, co.service_cities, co.description, co.logo_url, co.website, co.rating,
            loc.latitude, loc.longitude
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
@@ -349,18 +422,9 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     LIMIT 500
   `);
   return rows.map((r) => ({
+    ...toCompanyListItem(r),
     id: r.id,
-    slug: r.slug,
-    name: r.name,
-    categorySlug: r.category_slug,
-    categoryTitle: r.category_title,
-    city: r.city ?? "",
-    description: r.description ?? "",
-    logoUrl: r.logo_url,
     website: r.website,
-    rating: rowRating(r.rating),
-    latitude: r.latitude,
-    longitude: r.longitude,
   }));
 }
 
@@ -373,9 +437,11 @@ export async function pgUpdateCatalogCompanyAdmin(
     website: string;
     categorySlug: string;
     logoUrl: string | null;
+    serviceCities: string[];
   },
 ): Promise<CatalogCompanyAdminItem | null> {
   const pool = getPool();
+  const normalizedCities = normalizeCatalogCompanyCities(patch.city, patch.serviceCities);
   const { rows } = await pool.query<{
     id: number;
     slug: string;
@@ -383,6 +449,7 @@ export async function pgUpdateCatalogCompanyAdmin(
     category_slug: string;
     category_title: string;
     city: string;
+    service_cities: unknown;
     description: string;
     logo_url: string | null;
     website: string | null;
@@ -394,12 +461,12 @@ export async function pgUpdateCatalogCompanyAdmin(
     WITH updated AS (
       UPDATE catalog_companies
       SET name = $2, city = $3, description = $4, website = NULLIF($5, ''),
-          category_slug = $6, logo_url = $7, updated_at = NOW()
+          category_slug = $6, logo_url = $7, service_cities = $8::jsonb, updated_at = NOW()
       WHERE id = $1
-      RETURNING id, slug, name, category_slug, city, description, logo_url, website, rating
+      RETURNING id, slug, name, category_slug, city, service_cities, description, logo_url, website, rating
     )
     SELECT u.id, u.slug, u.name, u.category_slug, cat.title AS category_title,
-           u.city, u.description, u.logo_url, u.website, u.rating,
+           u.city, u.service_cities, u.description, u.logo_url, u.website, u.rating,
            loc.latitude, loc.longitude
     FROM updated u
     JOIN catalog_categories cat ON cat.slug = u.category_slug
@@ -408,27 +475,19 @@ export async function pgUpdateCatalogCompanyAdmin(
     [
       id,
       patch.name,
-      patch.city,
+      normalizedCities.primaryCity,
       patch.description,
       patch.website,
       patch.categorySlug,
       patch.logoUrl,
+      JSON.stringify(normalizedCities.serviceCities),
     ],
   );
   const r = rows[0];
   if (!r) return null;
   return {
+    ...toCompanyListItem(r),
     id: r.id,
-    slug: r.slug,
-    name: r.name,
-    categorySlug: r.category_slug,
-    categoryTitle: r.category_title,
-    city: r.city ?? "",
-    description: r.description ?? "",
-    logoUrl: r.logo_url,
     website: r.website,
-    rating: rowRating(r.rating),
-    latitude: r.latitude,
-    longitude: r.longitude,
   };
 }

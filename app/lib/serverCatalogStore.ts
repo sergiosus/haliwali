@@ -37,6 +37,7 @@ export async function getCatalogCategory(slug: string): Promise<CatalogCategory 
 export async function searchCatalogCompanies(opts: {
   categorySlug?: string;
   q?: string;
+  city?: string;
   limit?: number;
 }): Promise<CatalogCompanyListItem[]> {
   return withPg(() => pg.pgSearchCompanies(opts), () => json.jsonSearchCompanies(opts));
@@ -87,6 +88,7 @@ export async function updateCatalogCompanyAdmin(
     website: string;
     categorySlug: string;
     logoUrl: string | null;
+    serviceCities: string[];
   },
 ): Promise<CatalogCompanyAdminItem | null> {
   const updated = await withPg(

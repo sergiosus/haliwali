@@ -221,6 +221,7 @@ export function AdminCatalogPanel() {
                 </div>
                 <span className="text-black/45">
                   {co.categoryTitle} · {co.city}
+                  {co.serviceCities.length > 0 ? ` · ещё городов: ${co.serviceCities.length}` : ""}
                   {co.website ?
                     <>
                       {" "}

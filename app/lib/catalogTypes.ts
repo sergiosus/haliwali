@@ -18,6 +18,8 @@ export type CatalogCompanyListItem = {
   categorySlug: string;
   categoryTitle: string;
   city: string;
+  serviceCities: string[];
+  locationContext: string | null;
   description: string;
   logoUrl: string | null;
   rating: number | null;

@@ -8,6 +8,7 @@ import { catalogCategoryVisual } from "../lib/catalogVisual";
 type FormState = {
   name: string;
   city: string;
+  serviceCities: string;
   description: string;
   websiteUrl: string;
   categorySlug: string;
@@ -26,6 +27,7 @@ export function AdminCatalogCompanyEditModal({
   const [form, setForm] = useState<FormState>(() => ({
     name: company.name,
     city: company.city,
+    serviceCities: company.serviceCities.join("\n"),
     description: company.description,
     websiteUrl: company.website ?? "",
     categorySlug: company.categorySlug,
@@ -38,6 +40,7 @@ export function AdminCatalogCompanyEditModal({
     setForm({
       name: company.name,
       city: company.city,
+      serviceCities: company.serviceCities.join("\n"),
       description: company.description,
       websiteUrl: company.website ?? "",
       categorySlug: company.categorySlug,
@@ -59,7 +62,8 @@ export function AdminCatalogCompanyEditModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
-          city: form.city,
+          primaryCity: form.city,
+          serviceCities: form.serviceCities,
           description: form.description,
           websiteUrl: form.websiteUrl,
           categoryIds: [form.categorySlug],
@@ -133,12 +137,25 @@ export function AdminCatalogCompanyEditModal({
             />
           </label>
           <label className="block">
-            <span className="text-black/60">Город</span>
+            <span className="text-black/60">Основной город</span>
             <input
               value={form.city}
               onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
               className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
             />
+          </label>
+          <label className="block">
+            <span className="text-black/60">Города работы</span>
+            <textarea
+              value={form.serviceCities}
+              onChange={(e) => setForm((f) => ({ ...f, serviceCities: e.target.value }))}
+              rows={4}
+              placeholder="Елабуга&#10;Зеленодольск&#10;Йошкар-Ола"
+              className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+            />
+            <span className="mt-1 block text-xs text-black/40">
+              По одному городу в строке или через запятую. Основной город сюда не добавляйте.
+            </span>
           </label>
           <label className="block">
             <span className="text-black/60">Категория</span>

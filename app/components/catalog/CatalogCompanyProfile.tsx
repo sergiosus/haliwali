@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import type { CatalogCompanyListItem, CatalogCompanyProfile } from "../../lib/catalogTypes";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
 import { catalogCategoryVisual } from "../../lib/catalogVisual";
+import { formatCoverageText } from "../../lib/catalogCompanyCities";
 
 const YandexMapPicker = dynamic(
   () => import("../maps/YandexMapPicker").then((m) => m.YandexMapPicker),
@@ -20,10 +21,19 @@ export function CatalogCompanyProfileView({
 }) {
   const visual = catalogCategoryVisual(company.categorySlug);
   const phone = company.contacts.find((c) => c.type === "phone")?.value;
+  const coverageText = formatCoverageText(company.serviceCities);
   const mapCenter =
     company.latitude != null && company.longitude != null ?
       { lat: company.latitude, lng: company.longitude }
     : null;
+
+  function goBackToCategory() {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    window.location.href = `/catalogs/${encodeURIComponent(company.categorySlug)}`;
+  }
 
   const orgJsonLd = {
     "@context": "https://schema.org",
@@ -45,6 +55,14 @@ export function CatalogCompanyProfileView({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }}
       />
+
+      <button
+        type="button"
+        onClick={goBackToCategory}
+        className="inline-flex h-9 w-fit items-center rounded-xl border border-black/[0.08] bg-white px-3 text-sm font-medium text-black/65 shadow-sm hover:bg-black/[0.02] hover:text-black"
+      >
+        ← Назад к категории
+      </button>
 
       <nav className="text-sm text-black/45">
         <Link href="/catalogs" className="hover:text-black/70">
@@ -77,7 +95,6 @@ export function CatalogCompanyProfileView({
           <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{company.name}</h1>
           <p className="mt-1 text-sm text-black/50">
             {company.city}
-            {company.address ? ` · ${company.address}` : null}
           </p>
           <p className="mt-2 inline-flex rounded-md bg-black/[0.04] px-2 py-0.5 text-xs font-medium text-black/55">
             {company.categoryTitle}
@@ -123,16 +140,31 @@ export function CatalogCompanyProfileView({
       {company.description ?
         <section className="rounded-2xl border border-black/[0.06] bg-white p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-black/70">О компании</h2>
+          {coverageText ?
+            <p className="mt-2 rounded-xl bg-black/[0.03] px-3 py-2 text-sm text-black/60">
+              {coverageText}
+            </p>
+          : null}
           <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-black/65">
             {company.description}
           </p>
         </section>
+      : coverageText ?
+        <section className="rounded-2xl border border-black/[0.06] bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-black/70">О компании</h2>
+          <p className="mt-2 rounded-xl bg-black/[0.03] px-3 py-2 text-sm text-black/60">
+            {coverageText}
+          </p>
+        </section>
       : null}
 
-      {company.contacts.length > 0 ?
+      {company.contacts.length > 0 || company.address ?
         <section className="rounded-2xl border border-black/[0.06] bg-white p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-black/70">Контакты</h2>
           <ul className="mt-2 space-y-1.5 text-sm text-black/65">
+            {company.address ?
+              <li>{company.address}</li>
+            : null}
             {company.contacts.map((c, i) => (
               <li key={`${c.type}-${i}`}>
                 {c.type === "phone" ?

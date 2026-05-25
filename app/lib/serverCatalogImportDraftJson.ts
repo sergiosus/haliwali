@@ -9,6 +9,7 @@ import { draftDomainKey } from "./catalogImportDedup";
 import { normalizeImportDomain } from "./catalogImportDomain";
 import { mergeDraftInputs } from "./catalogImportMerge";
 import { buildDraftWarnings } from "./catalogImportEnrich";
+import { normalizeCatalogCompanyCities } from "./catalogCompanyCities";
 import { uniqueCompanySlug } from "./catalogSlug";
 import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
 
@@ -352,6 +353,7 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
       name: string;
       categorySlug: string;
       city: string;
+      serviceCities?: string[];
       address: string;
       description: string;
       logoUrl: string | null;
@@ -403,12 +405,14 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
       if (link.url) contacts.push({ type: "other", value: link.url });
     }
     const images = d.imageUrl?.trim() ? [d.imageUrl.trim()] : [];
+    const normalizedCities = normalizeCatalogCompanyCities(d.city.trim());
     catalogStore.companies.push({
       id: companyId,
       slug,
       name: d.name.trim(),
       categorySlug: cat,
-      city: d.city.trim(),
+      city: normalizedCities.primaryCity,
+      serviceCities: normalizedCities.serviceCities,
       address: d.address.trim(),
       description: d.description.trim(),
       logoUrl: d.imageUrl,
@@ -464,6 +468,7 @@ export async function jsonMergeDraftIntoCompany(
       name: string;
       categorySlug: string;
       city: string;
+      serviceCities?: string[];
       address: string;
       description: string;
       logoUrl: string | null;
@@ -485,8 +490,10 @@ export async function jsonMergeDraftIntoCompany(
   }
   const co = catalogStore.companies.find((c) => c.id === companyId);
   if (!co) return null;
+  const normalizedCities = normalizeCatalogCompanyCities(d.city.trim(), co.serviceCities ?? []);
   co.name = d.name.trim() || co.name;
-  co.city = d.city.trim() || co.city;
+  co.city = normalizedCities.primaryCity || co.city;
+  co.serviceCities = normalizedCities.serviceCities;
   co.address = d.address.trim() || co.address;
   co.description = d.description.trim() || co.description;
   if (d.imageUrl) co.logoUrl = d.imageUrl;

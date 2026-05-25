@@ -13,6 +13,7 @@ import { mergeDraftInputs } from "./catalogImportMerge";
 import { normalizeImportDomain } from "./catalogImportDomain";
 import { buildDraftWarnings } from "./catalogImportEnrich";
 import { slugifyCatalogText } from "./catalogSlug";
+import { normalizeCatalogCompanyCities } from "./catalogCompanyCities";
 import { pgEnsureCategoriesSeeded } from "./serverCatalogPg";
 
 type DraftRow = {
@@ -467,6 +468,7 @@ async function pgWriteCompanyFromDraft(
   const pool = getPool();
   const cat = d.category_slug.trim().toLowerCase();
   if (!d.name.trim()) return null;
+  const normalizedCities = normalizeCatalogCompanyCities(d.city.trim());
 
   let slug: string;
   let cid = companyId;
@@ -477,11 +479,21 @@ async function pgWriteCompanyFromDraft(
     await pool.query(
       `
       UPDATE catalog_companies SET
-        name = $2, category_slug = $3, city = $4, address = $5, description = $6,
-        logo_url = COALESCE($7, logo_url), website = COALESCE($8, website), updated_at = NOW()
+        name = $2, category_slug = $3, city = $4, service_cities = $5::jsonb, address = $6, description = $7,
+        logo_url = COALESCE($8, logo_url), website = COALESCE($9, website), updated_at = NOW()
       WHERE id = $1
       `,
-      [cid, d.name.trim(), cat, d.city.trim(), d.address.trim(), d.description.trim(), d.image_url, d.website.trim() || null],
+      [
+        cid,
+        d.name.trim(),
+        cat,
+        normalizedCities.primaryCity,
+        JSON.stringify(normalizedCities.serviceCities),
+        d.address.trim(),
+        d.description.trim(),
+        d.image_url,
+        d.website.trim() || null,
+      ],
     );
   } else {
     const { rows: slugRows } = await pool.query<{ slug: string }>(`SELECT slug FROM catalog_companies`);
@@ -495,11 +507,21 @@ async function pgWriteCompanyFromDraft(
     const ins = await pool.query<{ id: number }>(
       `
       INSERT INTO catalog_companies (
-        slug, name, category_slug, city, address, description, logo_url, website, is_published
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
+        slug, name, category_slug, city, service_cities, address, description, logo_url, website, is_published
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, TRUE)
       RETURNING id
       `,
-      [slug, d.name.trim(), cat, d.city.trim(), d.address.trim(), d.description.trim(), d.image_url, d.website.trim() || null],
+      [
+        slug,
+        d.name.trim(),
+        cat,
+        normalizedCities.primaryCity,
+        JSON.stringify(normalizedCities.serviceCities),
+        d.address.trim(),
+        d.description.trim(),
+        d.image_url,
+        d.website.trim() || null,
+      ],
     );
     cid = ins.rows[0]?.id;
     if (!cid) return null;

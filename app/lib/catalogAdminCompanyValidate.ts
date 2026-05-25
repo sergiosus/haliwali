@@ -1,4 +1,9 @@
 import { normalizeWebsite } from "./catalogExtractShared";
+import {
+  dedupeCatalogCities,
+  normalizeCatalogCompanyCities,
+  splitCatalogCityList,
+} from "./catalogCompanyCities";
 import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
 
 export type CatalogCompanyAdminPatch = {
@@ -8,6 +13,7 @@ export type CatalogCompanyAdminPatch = {
   websiteUrl: string;
   categorySlug: string;
   logoUrl: string | null;
+  serviceCities: string[];
 };
 
 const VALID_CATEGORY_SLUGS = new Set(CATALOG_CATEGORY_SEED.map((c) => c.slug));
@@ -22,7 +28,12 @@ export function parseCatalogCompanyAdminPatch(
     return { ok: false, error: "Название компании обязательно (минимум 2 символа)", code: "NAME_REQUIRED" };
   }
 
-  const city = String(body.city ?? "").trim();
+  const cityRaw = String(body.primaryCity ?? body.city ?? "").trim();
+  const serviceCitiesRaw = Array.isArray(body.serviceCities)
+    ? body.serviceCities.map((city) => String(city))
+    : splitCatalogCityList(String(body.serviceCities ?? ""));
+  const normalizedCities = normalizeCatalogCompanyCities(cityRaw, dedupeCatalogCities(serviceCitiesRaw));
+  const city = normalizedCities.primaryCity;
   const description = String(body.description ?? "").trim();
   const websiteRaw = String(body.websiteUrl ?? body.website ?? "").trim();
   const websiteUrl = websiteRaw ? normalizeWebsite(websiteRaw) : "";
@@ -45,6 +56,14 @@ export function parseCatalogCompanyAdminPatch(
 
   return {
     ok: true,
-    data: { name, city, description, websiteUrl, categorySlug, logoUrl },
+    data: {
+      name,
+      city,
+      description,
+      websiteUrl,
+      categorySlug,
+      logoUrl,
+      serviceCities: normalizedCities.serviceCities,
+    },
   };
 }

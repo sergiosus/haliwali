@@ -20,7 +20,8 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
   const mapHref =
     company.latitude != null && company.longitude != null ?
       `https://yandex.ru/maps/?pt=${company.longitude},${company.latitude}&z=16&l=map`
-    : `https://yandex.ru/maps/?text=${encodeURIComponent(`${company.city} ${company.name}`)}`;
+    : `https://yandex.ru/maps/?text=${encodeURIComponent(`${company.locationContext ?? company.city} ${company.name}`)}`;
+  const locationLabel = company.locationContext ?? company.city;
 
   return (
     <article className="group flex flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
@@ -44,7 +45,7 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
           <h3 className="line-clamp-2 text-base font-semibold leading-snug text-black group-hover:text-[#c25a00]">
             {company.name}
           </h3>
-          <p className="mt-0.5 text-sm text-black/50">{company.city || "Россия"}</p>
+          <p className="mt-0.5 text-sm text-black/50">{locationLabel || "Россия"}</p>
           <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-black/45">
             {company.description || company.categoryTitle}
           </p>

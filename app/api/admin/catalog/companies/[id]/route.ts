@@ -31,6 +31,7 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     website: parsed.data.websiteUrl,
     categorySlug: parsed.data.categorySlug,
     logoUrl: parsed.data.logoUrl,
+    serviceCities: parsed.data.serviceCities,
   });
 
   if (!company) {

@@ -128,7 +128,7 @@ export function AdminCatalogImportCandidatesSection({
   );
 
   async function persistCandidates(next: PersistedImportCandidate[]) {
-    if (!session) return;
+    if (!session || session.id < 1) return;
     const r = await fetch("/api/admin/catalogs/import/candidates", {
       method: "PATCH",
       credentials: "include",
@@ -162,6 +162,8 @@ export function AdminCatalogImportCandidatesSection({
         message?: string;
         error?: string;
         session?: CatalogImportCandidateSession;
+        candidates?: Omit<PersistedImportCandidate, "state">[];
+        hidden?: Omit<PersistedImportCandidate, "state">[];
         count?: number;
         hiddenCount?: number;
         queriesUsed?: string[];
@@ -170,7 +172,24 @@ export function AdminCatalogImportCandidatesSection({
         setMessage(d.message ?? d.error ?? "Ошибка поиска");
         return;
       }
-      if (d.session) setSession(d.session);
+      if (d.session) {
+        setSession(d.session);
+      } else {
+        const fallbackCandidates: PersistedImportCandidate[] = [
+          ...(d.candidates ?? []).map((c) => ({ ...c, state: "found" as const })),
+          ...(d.hidden ?? []).map((c) => ({ ...c, state: "found" as const })),
+        ];
+        setSession({
+          id: 0,
+          query,
+          city: cityLabel,
+          categorySlug,
+          queriesUsed: d.queriesUsed ?? [],
+          candidates: fallbackCandidates,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
       setQueriesUsed(d.queriesUsed ?? []);
       setMessage(`Показано: ${d.count ?? 0} · скрыто: ${d.hiddenCount ?? 0}`);
       loadHistory();
@@ -252,6 +271,15 @@ export function AdminCatalogImportCandidatesSection({
     void persistCandidates(synced);
   }
 
+  function removeSelected() {
+    if (!session || selectedCount === 0) return;
+    const next = candidates.map((c) =>
+      c.state === "selected" ? { ...c, state: "removed" as const } : c,
+    );
+    setSession({ ...session, candidates: next });
+    void persistCandidates(next);
+  }
+
   async function restoreHistoryItem(id: number) {
     setBusy(true);
     try {
@@ -264,8 +292,8 @@ export function AdminCatalogImportCandidatesSection({
   }
 
   return (
-    <div className={compact ? "space-y-4" : "space-y-8"}>
-      <section className="rounded-3xl border border-black/10 bg-white p-5">
+    <div className={compact ? "w-full min-w-0 space-y-4 overflow-visible" : "w-full min-w-0 space-y-8 overflow-visible"}>
+      <section className="w-full min-w-0 overflow-visible rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
         <h2 className="text-lg font-semibold">Поиск источников</h2>
         {!compact ?
           <p className="mt-1 text-sm text-black/55">
@@ -362,15 +390,15 @@ export function AdminCatalogImportCandidatesSection({
       </section>
 
       {Object.keys(displayGroups).length > 0 ?
-        <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <section className="w-full min-w-0 space-y-3 overflow-visible sm:space-y-4">
+          <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold">Кандидаты</h2>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
               <button
                 type="button"
                 disabled={busy || selectableUrls.length === 0}
                 onClick={selectAll}
-                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+                className="inline-flex w-full items-center justify-center rounded-full border border-black/15 px-3 py-2 text-xs font-medium sm:w-auto sm:py-1.5"
               >
                 Выбрать все
               </button>
@@ -378,7 +406,7 @@ export function AdminCatalogImportCandidatesSection({
                 type="button"
                 disabled={busy}
                 onClick={clearSelection}
-                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+                className="inline-flex w-full items-center justify-center rounded-full border border-black/15 px-3 py-2 text-xs font-medium sm:w-auto sm:py-1.5"
               >
                 Снять выбор
               </button>
@@ -386,13 +414,21 @@ export function AdminCatalogImportCandidatesSection({
                 type="button"
                 disabled={busy || selectedCount === 0}
                 onClick={() => void sendToImport()}
-                className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                className="inline-flex w-full items-center justify-center rounded-full bg-black px-4 py-2 text-xs font-semibold text-white disabled:opacity-40 sm:w-auto sm:text-sm"
               >
-                В импорт ({selectedCount})
+                Импортировать выбранные ({selectedCount})
+              </button>
+              <button
+                type="button"
+                disabled={busy || selectedCount === 0}
+                onClick={removeSelected}
+                className="inline-flex w-full items-center justify-center rounded-full border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-900 disabled:opacity-40 sm:w-auto"
+              >
+                Удалить выбранные
               </button>
               <Link
                 href="/admin/catalogs/import/drafts"
-                className="rounded-full border border-black/15 px-4 py-2 text-sm font-medium"
+                className="col-span-2 inline-flex w-full items-center justify-center rounded-full border border-black/15 px-4 py-2 text-sm font-medium sm:col-span-1 sm:w-auto"
               >
                 Черновики
               </Link>
@@ -402,23 +438,23 @@ export function AdminCatalogImportCandidatesSection({
           {Object.entries(displayGroups)
             .sort(([, a], [, b]) => (b[0]?.relevanceScore ?? 0) - (a[0]?.relevanceScore ?? 0))
             .map(([domain, items]) => (
-              <div key={domain} className="rounded-2xl border border-black/10 bg-white p-4">
+              <div key={domain} className="w-full min-w-0 overflow-visible rounded-2xl border border-black/10 bg-white p-3 sm:p-4">
                 <h3 className="font-semibold">{domain}</h3>
                 <ul className="mt-2 space-y-3">
                   {items
                     .sort((a, b) => b.relevanceScore - a.relevanceScore)
                     .map((c) => (
-                      <li key={c.url} className="flex gap-3 text-sm">
+                      <li key={c.url} className="flex w-full min-w-0 items-start gap-3 text-sm">
                         <input
                           type="checkbox"
                           checked={c.state === "selected" || c.state === "imported"}
-                          disabled={c.state === "imported" || (c.hidden && !showHidden)}
+                          disabled={c.state === "imported" || c.state === "removed" || (c.hidden && !showHidden)}
                           onChange={() => toggleUrl(c.url)}
-                          className="mt-1"
+                          className="mt-1 shrink-0"
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium text-black">{c.title || c.url}</span>
+                            <span className="min-w-0 break-words font-medium text-black">{c.title || c.url}</span>
                             <span
                               className={`rounded-full px-2 py-0.5 text-xs font-semibold ${stateBadgeClass(c.state)}`}
                             >
@@ -447,7 +483,7 @@ export function AdminCatalogImportCandidatesSection({
                             href={c.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="mt-1 block truncate text-xs underline text-black/45"
+                            className="mt-1 block min-w-0 break-all text-xs underline text-black/45 sm:truncate"
                           >
                             {c.url}
                           </a>

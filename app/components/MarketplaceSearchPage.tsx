@@ -246,10 +246,10 @@ export function MarketplaceSearchPage() {
           </p>
 
           <div className="sticky top-[3.25rem] z-20 mt-5 sm:top-[4.5rem] sm:mt-7">
-            <div className="rounded-2xl border border-black/[0.08] bg-white p-2 shadow-[0_12px_48px_rgba(255,122,0,0.12)] ring-1 ring-black/[0.04]">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <div className="rounded-2xl border border-black/[0.08] bg-white p-1 shadow-[0_4px_20px_rgba(255,122,0,0.08)] ring-1 ring-black/[0.04]">
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-stretch">
                 <div ref={searchWrapRef} className="relative min-w-0 flex-1">
-                  <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-black/30 sm:h-6 sm:w-6" />
+                  <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-black/30" />
                   <input
                     id="marketplace-page-search"
                     type="search"
@@ -264,7 +264,7 @@ export function MarketplaceSearchPage() {
                     }}
                     placeholder="iPhone, кроссовки, инструмент…"
                     autoComplete="off"
-                    className="h-14 w-full rounded-xl bg-transparent pl-12 pr-3 text-base text-black outline-none placeholder:text-black/35 sm:h-[3.75rem] sm:pl-14 sm:text-lg"
+                    className="h-11 w-full rounded-xl bg-transparent pl-10 pr-3 text-sm text-black outline-none placeholder:text-black/35 sm:h-12 sm:text-[15px]"
                   />
                   {showRecentDropdown ?
                     <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[200]">
@@ -276,7 +276,7 @@ export function MarketplaceSearchPage() {
                   type="button"
                   disabled={!canSearch || loading}
                   onClick={submitSearch}
-                  className="inline-flex h-14 shrink-0 items-center justify-center rounded-xl bg-[#ff7a00] px-8 text-base font-semibold text-white shadow-sm transition-colors hover:bg-[#f07000] disabled:cursor-not-allowed disabled:opacity-45 sm:h-[3.75rem] sm:min-w-[8.5rem]"
+                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-[#ff7a00] px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#f07000] disabled:cursor-not-allowed disabled:opacity-45 sm:h-12 sm:min-w-[6.5rem]"
                 >
                   {loading ? "…" : "Найти"}
                 </button>

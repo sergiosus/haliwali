@@ -32,7 +32,7 @@ export function HeroMarketplaceEntry({ className = "" }: { className?: string })
         href="/marketplaces"
         title="Поиск товаров с внешних площадок"
         className={[
-          "inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium transition-all duration-200 sm:w-auto",
+          "inline-flex h-[3.25rem] w-full shrink-0 items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium transition-all duration-200 sm:h-[3.5rem] sm:w-auto",
           active
             ? "border-[rgba(255,122,0,0.45)] bg-[rgba(255,122,0,0.22)] text-[#a84a00] shadow-[0_4px_16px_rgba(255,122,0,0.18)]"
             : "border-[rgba(255,122,0,0.28)] bg-[rgba(255,122,0,0.12)] text-[#c25a00] shadow-sm hover:border-[rgba(255,122,0,0.4)] hover:bg-[rgba(255,122,0,0.18)] hover:text-[#a84f00] hover:shadow-[0_6px_20px_rgba(255,122,0,0.16)] active:scale-[0.99]",

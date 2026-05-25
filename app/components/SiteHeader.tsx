@@ -73,7 +73,7 @@ export function SiteHeader() {
   const suppressUserChromeForAdmin = pathname === "/admin";
   /** In-page search only on these routes — no header duplicate. */
   const hideHeaderSearch =
-    pathname === "/" || pathname === "/marketplaces" || pathname.startsWith("/catalogs");
+    pathname === "/" || pathname === "/marketplaces" || pathname.startsWith("/catalogs") || pathname.startsWith("/admin");
   const showSiteModeNav = !suppressUserChromeForAdmin;
 
   const auth = useAuth();

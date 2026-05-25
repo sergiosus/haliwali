@@ -24,7 +24,7 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
   const locationLabel = company.locationContext ?? company.city;
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+    <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
       <Link
         href={`/catalogs/company/${company.slug}`}
         className="flex min-w-0 flex-1 gap-3 p-4"
@@ -45,8 +45,8 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
           <h3 className="line-clamp-2 text-base font-semibold leading-snug text-black group-hover:text-[#c25a00]">
             {company.name}
           </h3>
-          <p className="mt-0.5 text-sm text-black/50">{locationLabel || "Россия"}</p>
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-black/45">
+          <p className="mt-0.5 line-clamp-1 text-sm text-black/50">{locationLabel || "Россия"}</p>
+          <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-black/45 sm:line-clamp-2">
             {company.description || company.categoryTitle}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -57,12 +57,12 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
           </div>
         </div>
       </Link>
-      <div className="flex gap-2 border-t border-black/[0.04] px-3 py-2.5">
+      <div className="mt-auto flex gap-2 border-t border-black/[0.04] px-3 py-2.5">
         <Link
           href="/contact"
           className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
         >
-          Написать
+          Связаться
         </Link>
         <a
           href={mapHref}

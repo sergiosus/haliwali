@@ -736,11 +736,11 @@ export function GlobalHeaderSearch({
   if (isHero) {
     return (
       <div ref={wrapRef} className={`relative w-full ${className}`}>
-        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch sm:gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
           <div className="order-1 flex w-full shrink-0 justify-center sm:order-none sm:w-auto sm:justify-start sm:self-center">
             <HeroMarketplaceEntry />
           </div>
-          <div className="relative order-2 min-w-0 flex-1 sm:order-none">
+          <div className="relative order-2 flex-1 min-w-0 max-w-[760px] sm:order-none">
             <div className="overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] transition-shadow focus-within:border-[rgba(255,122,0,0.35)] focus-within:shadow-[0_12px_40px_rgba(255,122,0,0.12)] focus-within:ring-2 focus-within:ring-[rgba(255,122,0,0.22)]">
               <div className="flex flex-col sm:flex-row sm:items-stretch">
                 <div className="relative min-w-0 flex-1">

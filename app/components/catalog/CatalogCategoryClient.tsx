@@ -5,15 +5,22 @@ import { useRouter } from "next/navigation";
 import type { CatalogCategory, CatalogCompanyListItem } from "../../lib/catalogTypes";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
 import { CatalogCompanyMap } from "./CatalogCompanyMap";
+import { CatalogCompanySubmissionForm } from "./CatalogCompanySubmissionForm";
 
 type ViewMode = "cards" | "map";
 
 export function CatalogCategoryClient({
   category,
+  categories,
   initialCompanies,
+  initialLoggedIn,
+  isAdmin,
 }: {
   category: CatalogCategory;
+  categories: readonly CatalogCategory[];
   initialCompanies: CatalogCompanyListItem[];
+  initialLoggedIn: boolean;
+  isAdmin: boolean;
 }) {
   const [q, setQ] = useState("");
   const [submittedQ, setSubmittedQ] = useState("");
@@ -68,8 +75,17 @@ export function CatalogCategoryClient({
         >
           ← Назад
         </button>
-        <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{category.title}</h1>
-        <p className="mt-1 text-sm text-black/50">{category.subtitle}</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{category.title}</h1>
+            <p className="mt-1 text-sm text-black/50">{category.subtitle}</p>
+          </div>
+          <CatalogCompanySubmissionForm
+            categories={categories}
+            initialCategorySlug={category.slug}
+            initialLoggedIn={initialLoggedIn}
+          />
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -81,7 +97,7 @@ export function CatalogCategoryClient({
             onKeyDown={(e) => {
               if (e.key === "Enter") void runSearch(q);
             }}
-            placeholder="Поиск компаний…"
+            placeholder="Поиск компаний..."
             className="h-11 w-full rounded-xl border border-black/[0.08] bg-white px-4 text-sm text-black shadow-sm outline-none placeholder:text-black/35 focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
           />
         </div>
@@ -141,24 +157,22 @@ export function CatalogCategoryClient({
         <div className="rounded-2xl border border-black/[0.06] bg-white px-4 py-10 text-center">
           <p className="text-sm text-black/50">Пока нет компаний в этой категории</p>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-            <a
-              href="/admin/catalogs/discover"
-              className="inline-flex rounded-full bg-[#ff7a00] px-4 py-2 text-sm font-semibold text-white hover:bg-[#f07000]"
-            >
-              Найти источники
-            </a>
-            <a
-              href="/admin/catalogs/import"
-              className="inline-flex rounded-full border border-black/15 px-4 py-2 text-sm font-medium text-black/70 hover:bg-black/5"
-            >
-              Добавить вручную
-            </a>
-            <a
-              href="/admin/catalogs/import"
-              className="inline-flex rounded-full border border-black/15 px-4 py-2 text-sm font-medium text-black/70 hover:bg-black/5"
-            >
-              Импорт CSV
-            </a>
+            {isAdmin ?
+              <>
+                <a
+                  href="/admin/catalogs/discover"
+                  className="inline-flex rounded-full bg-[#ff7a00] px-4 py-2 text-sm font-semibold text-white hover:bg-[#f07000]"
+                >
+                  Найти источники
+                </a>
+                <a
+                  href="/admin/catalogs/import"
+                  className="inline-flex rounded-full border border-black/15 px-4 py-2 text-sm font-medium text-black/70 hover:bg-black/5"
+                >
+                  Импорт CSV
+                </a>
+              </>
+            : null}
           </div>
         </div>
       )}

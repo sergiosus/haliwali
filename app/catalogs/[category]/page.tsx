@@ -2,11 +2,15 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { CatalogCategoryClient } from "../../components/catalog/CatalogCategoryClient";
 import {
+  categoriesFromSeed,
   ensureCatalogReady,
   getCatalogCategory,
+  listCatalogCategories,
   searchCatalogCompanies,
 } from "../../lib/serverCatalogStore";
 import { siteUrl } from "../../lib/siteUrl";
+import { getUserIdFromSessionCookie } from "../../lib/serverSession";
+import { adminPrivilegesActive } from "../../lib/serverAdminSession";
 
 export const dynamic = "force-dynamic";
 
@@ -36,12 +40,24 @@ export default async function CatalogCategoryPage(props: {
   const category = await getCatalogCategory(slug);
   if (!category) notFound();
 
-  const companies = await searchCatalogCompanies({ categorySlug: slug });
+  const [companies, listedCategories, userId, isAdmin] = await Promise.all([
+    searchCatalogCompanies({ categorySlug: slug }),
+    listCatalogCategories(),
+    getUserIdFromSessionCookie(),
+    adminPrivilegesActive(),
+  ]);
+  const categories = listedCategories.length > 0 ? listedCategories : categoriesFromSeed();
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-b from-[#fff8f3] via-white to-white">
       <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
-        <CatalogCategoryClient category={category} initialCompanies={companies} />
+        <CatalogCategoryClient
+          category={category}
+          categories={categories}
+          initialCompanies={companies}
+          initialLoggedIn={Boolean(userId)}
+          isAdmin={isAdmin}
+        />
       </div>
     </div>
   );

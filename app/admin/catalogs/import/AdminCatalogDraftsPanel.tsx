@@ -579,6 +579,9 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       : filteredDrafts.map((d) => {
         const score100 = confidenceFromStored(d.confidenceScore ?? 0.5);
         const confLabel = confidenceLabelRu(score100);
+        const addedByUser =
+          String(d.rawPayload?.submissionStatus ?? "") === "user_submitted" ||
+          String(d.rawPayload?.submissionType ?? "") === "public_company_form";
         return (
           <article key={d.id} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
             <div className="flex flex-wrap items-start gap-3">
@@ -607,6 +610,11 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   {d.sourceType ?
                     <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-900">
                       {SOURCE_LABEL[d.sourceType as DiscoverySourceType] ?? d.sourceType}
+                    </span>
+                  : null}
+                  {addedByUser ?
+                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900">
+                      Добавлено пользователем
                     </span>
                   : null}
                   {d.needsReview || isLikelyBadCompanyName(d.name) ?

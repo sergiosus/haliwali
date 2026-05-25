@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { confidenceFromStored, confidenceLabelRu } from "../../../lib/catalogConfidence";
 import { DISCOVERY_SOURCE_LABEL } from "../../../lib/catalogDiscoverSourceType";
 import type { DiscoverySourceType } from "../../../lib/catalogDiscoverSourceType";
@@ -50,6 +50,49 @@ const SOURCE_LABEL: Record<string, string> = {
   unknown: DISCOVERY_SOURCE_LABEL.unknown,
 };
 
+type DraftSort =
+  | "new_first"
+  | "old_first"
+  | "confidence_high"
+  | "confidence_low"
+  | "name_asc"
+  | "name_desc";
+
+const SORT_OPTIONS: { id: DraftSort; label: string }[] = [
+  { id: "new_first", label: "Сначала новые" },
+  { id: "old_first", label: "Сначала старые" },
+  { id: "confidence_high", label: "Высокое доверие" },
+  { id: "confidence_low", label: "Низкое доверие" },
+  { id: "name_asc", label: "По названию А–Я" },
+  { id: "name_desc", label: "По названию Я–А" },
+];
+
+const KNOWN_CATEGORY_SLUGS = new Set(CATALOG_CATEGORY_SEED.map((c) => c.slug));
+
+function draftCategoryFilterKey(slug: string): string {
+  const normalized = slug.trim().toLowerCase();
+  if (!normalized || !KNOWN_CATEGORY_SLUGS.has(normalized)) return "drugie";
+  return normalized;
+}
+
+function compareDrafts(a: CatalogImportDraft, b: CatalogImportDraft, sort: DraftSort): number {
+  switch (sort) {
+    case "old_first":
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    case "confidence_high":
+      return (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0);
+    case "confidence_low":
+      return (a.confidenceScore ?? 0) - (b.confidenceScore ?? 0);
+    case "name_asc":
+      return (a.name || "").localeCompare(b.name || "", "ru", { sensitivity: "base" });
+    case "name_desc":
+      return (b.name || "").localeCompare(a.name || "", "ru", { sensitivity: "base" });
+    case "new_first":
+    default:
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  }
+}
+
 type DraftEditForm = Partial<CatalogImportDraft> & {
   primaryCity?: string;
   serviceCities?: string;
@@ -77,8 +120,63 @@ function draftEditCity(form: DraftEditForm): string {
   return [primary, ...serviceCities].filter(Boolean).join(", ");
 }
 
+type ConfirmJson = {
+  ok?: boolean;
+  error?: string;
+  draft?: CatalogImportDraft;
+  updated?: number;
+  deleted?: number;
+  published?: number;
+  skipped?: number;
+};
+
+function apiErrorMessage(code?: string): string {
+  const messages: Record<string, string> = {
+    INVALID_ACTION: "Недопустимое действие",
+    ID_REQUIRED: "Не указан черновик",
+    IDS_REQUIRED: "Не выбраны записи",
+    NOT_FOUND: "Черновик не найден",
+    MERGE_FAILED: "Не удалось объединить",
+  };
+  return (code && messages[code]) || code || "Ошибка";
+}
+
+function patchFromEditForm(form: DraftEditForm): Record<string, unknown> {
+  return {
+    name: form.name,
+    categorySlug: form.categorySlug,
+    city: draftEditCity(form),
+    address: form.address,
+    phone: form.phone,
+    email: form.email,
+    website: form.website,
+    description: form.description,
+    sourceUrl: form.sourceUrl,
+    imageUrl: form.imageUrl,
+    confidenceScore: form.confidenceScore,
+  };
+}
+
+function patchFromDraft(draft: CatalogImportDraft): Record<string, unknown> {
+  return {
+    name: draft.name,
+    categorySlug: draft.categorySlug,
+    city: draft.city,
+    address: draft.address,
+    phone: draft.phone,
+    email: draft.email,
+    website: draft.website,
+    description: draft.description,
+    sourceUrl: draft.sourceUrl,
+    imageUrl: draft.imageUrl,
+    confidenceScore: draft.confidenceScore,
+  };
+}
+
 export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportLink?: boolean }) {
   const [tab, setTab] = useState<CatalogImportDraftStatus>("draft");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<DraftSort>("new_first");
   const [drafts, setDrafts] = useState<CatalogImportDraft[]>([]);
   const [sessions, setSessions] = useState<CatalogImportSession[]>([]);
   const [companies, setCompanies] = useState<CatalogCompanyAdminItem[]>([]);
@@ -115,7 +213,19 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
     loadSessions();
     loadCompanies();
     setSelected(new Set());
+    setCategoryFilter("all");
   }, [loadDrafts, loadSessions, loadCompanies]);
+
+  function removeDraftsFromList(ids: number[]) {
+    const idSet = new Set(ids);
+    setDrafts((prev) => prev.filter((x) => !idSet.has(x.id)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+    if (editingId != null && idSet.has(editingId)) setEditingId(null);
+  }
 
   async function runAction(action: "save" | "approve" | "reject" | "publish", ids: number[]) {
     if (ids.length === 0) return;
@@ -128,25 +238,25 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ids }),
       });
-      const d = (await r.json()) as {
-        ok?: boolean;
-        error?: string;
-        published?: number;
-        skipped?: number;
-        updated?: number;
-      };
-      if (!r.ok) {
-        setMessage(d.error ?? "Ошибка");
+      const d = (await r.json()) as ConfirmJson;
+      if (!r.ok || d.ok === false) {
+        setMessage(apiErrorMessage(d.error));
         return;
       }
+      removeDraftsFromList(ids);
       if (action === "publish") {
         setMessage(`Опубликовано: ${d.published ?? 0}, пропущено: ${d.skipped ?? 0}`);
+      } else if (action === "approve") {
+        setMessage(`Одобрено: ${d.updated ?? ids.length}`);
+      } else if (action === "reject") {
+        setMessage(`Отклонено: ${d.updated ?? ids.length}`);
       } else {
-        setMessage(`Обновлено: ${d.updated ?? 0}`);
+        setMessage(`Сохранено в очередь: ${d.updated ?? ids.length}`);
       }
-      setSelected(new Set());
-      loadDrafts();
-      loadCompanies();
+      void loadDrafts();
+      void loadCompanies();
+    } catch {
+      setMessage("Ошибка сети. Повторите попытку.");
     } finally {
       setBusy(false);
     }
@@ -154,6 +264,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
 
   async function runMerge(draftId: number, companyId: number) {
     setBusy(true);
+    setMessage(null);
     try {
       const r = await fetch("/api/admin/catalogs/import/confirm", {
         method: "POST",
@@ -161,11 +272,17 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "merge", draftId, companyId }),
       });
-      if (r.ok) {
-        setMessage("Объединено с существующей компанией");
-        loadDrafts();
-        loadCompanies();
+      const d = (await r.json()) as ConfirmJson;
+      if (!r.ok || d.ok === false) {
+        setMessage(apiErrorMessage(d.error));
+        return;
       }
+      removeDraftsFromList([draftId]);
+      setMessage("Объединено с существующей компанией");
+      void loadDrafts();
+      void loadCompanies();
+    } catch {
+      setMessage("Ошибка сети. Повторите попытку.");
     } finally {
       setBusy(false);
     }
@@ -176,44 +293,60 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
     setEditForm(draftEditForm(draft));
   }
 
-  async function saveEdit(id: number) {
+  async function persistDraftUpdate(
+    id: number,
+    patch: Record<string, unknown>,
+    opts?: { closeEditor?: boolean },
+  ): Promise<boolean> {
     setBusy(true);
+    setMessage(null);
     try {
       const r = await fetch("/api/admin/catalogs/import/confirm", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "update",
-          id,
-          patch: {
-            name: editForm.name,
-            categorySlug: editForm.categorySlug,
-            city: draftEditCity(editForm),
-            address: editForm.address,
-            phone: editForm.phone,
-            email: editForm.email,
-            website: editForm.website,
-            description: editForm.description,
-            sourceUrl: editForm.sourceUrl,
-            imageUrl: editForm.imageUrl,
-            confidenceScore: editForm.confidenceScore,
-          },
-        }),
+        body: JSON.stringify({ action: "update", id, patch }),
       });
-      if (r.ok) {
-        setEditingId(null);
-        setMessage("Сохранено");
-        loadDrafts();
+      const d = (await r.json()) as ConfirmJson;
+      if (!r.ok || d.ok === false || !d.draft) {
+        setMessage(apiErrorMessage(d.error));
+        return false;
       }
+      setDrafts((prev) => prev.map((x) => (x.id === id ? d.draft! : x)));
+      if (opts?.closeEditor) setEditingId(null);
+      setMessage("Сохранено");
+      return true;
+    } catch {
+      setMessage("Ошибка сети. Повторите попытку.");
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
+  async function saveEdit(id: number) {
+    await persistDraftUpdate(id, patchFromEditForm(editForm), { closeEditor: true });
+  }
+
+  async function saveDraftRow(draft: CatalogImportDraft) {
+    if (editingId === draft.id) {
+      await saveEdit(draft.id);
+      return;
+    }
+    await persistDraftUpdate(draft.id, patchFromDraft(draft));
+  }
+
   async function runDelete(ids: number[]) {
     if (ids.length === 0) return;
-    if (!window.confirm("Удалить выбранные черновики? Это действие нельзя отменить.")) return;
+    const confirmText =
+      ids.length === 1 ?
+        (() => {
+          const one = drafts.find((x) => x.id === ids[0]);
+          const label = one?.name?.trim() || "этот черновик";
+          return `Удалить «${label}»? Это действие нельзя отменить.`;
+        })()
+      : `Удалить выбранные черновики (${ids.length})? Это действие нельзя отменить.`;
+    if (!window.confirm(confirmText)) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -223,23 +356,42 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "delete", ids }),
       });
-      const d = (await r.json()) as { ok?: boolean; error?: string; deleted?: number };
-      if (!r.ok) {
-        setMessage(d.error ?? "Ошибка");
+      const d = (await r.json()) as ConfirmJson;
+      if (!r.ok || d.ok === false) {
+        setMessage(apiErrorMessage(d.error));
         return;
       }
       const deleted = d.deleted ?? ids.length;
-      const idSet = new Set(ids);
-      setDrafts((prev) => prev.filter((x) => !idSet.has(x.id)));
-      setSelected(new Set());
-      if (editingId != null && idSet.has(editingId)) setEditingId(null);
+      removeDraftsFromList(ids);
       setMessage(`Удалено: ${deleted}`);
+    } catch {
+      setMessage("Ошибка сети. Повторите попытку.");
     } finally {
       setBusy(false);
     }
   }
 
-  const visibleIds = drafts.map((d) => d.id);
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: drafts.length };
+    for (const category of CATALOG_CATEGORY_SEED) {
+      counts[category.slug] = 0;
+    }
+    for (const draft of drafts) {
+      const key = draftCategoryFilterKey(draft.categorySlug);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [drafts]);
+
+  const filteredDrafts = useMemo(() => {
+    const list =
+      categoryFilter === "all" ?
+        drafts
+      : drafts.filter((d) => draftCategoryFilterKey(d.categorySlug) === categoryFilter);
+    return [...list].sort((a, b) => compareDrafts(a, b, sortBy));
+  }, [drafts, categoryFilter, sortBy]);
+
+  const visibleIds = filteredDrafts.map((d) => d.id);
   const selectedIds = [...selected];
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
@@ -311,10 +463,59 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
 
       <section className="rounded-2xl border border-black/10 bg-white p-4">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h2 className="text-lg font-semibold">Черновики</h2>
+          <h2 className="text-lg font-semibold">Кандидаты каталога</h2>
           <span className="text-sm text-black/55">
-            {tabLabel} · {drafts.length}
+            {tabLabel} · показано {filteredDrafts.length}
+            {drafts.length !== filteredDrafts.length ? ` из ${drafts.length}` : ""}
           </span>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-black/10 pt-3">
+          <button
+            type="button"
+            onClick={() => setCategoryFilter("all")}
+            className={[
+              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              categoryFilter === "all" ?
+                "border-black/20 bg-black/[0.06] text-black"
+              : "border-black/10 bg-white text-black/55 hover:text-black/75",
+            ].join(" ")}
+          >
+            Все ({categoryCounts.all ?? 0})
+          </button>
+          {CATALOG_CATEGORY_SEED.map((category) => (
+            <button
+              key={category.slug}
+              type="button"
+              onClick={() => setCategoryFilter(category.slug)}
+              className={[
+                "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                categoryFilter === category.slug ?
+                  "border-black/20 bg-black/[0.06] text-black"
+                : "border-black/10 bg-white text-black/55 hover:text-black/75",
+              ].join(" ")}
+            >
+              {category.title} ({categoryCounts[category.slug] ?? 0})
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-black/10 pt-3">
+          <label className="flex items-center gap-2 text-sm text-black/60">
+            <span>Сортировка</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as DraftSort)}
+              disabled={busy}
+              className="rounded-lg border border-black/15 px-3 py-1.5 text-sm"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-black/10 pt-3">
@@ -322,7 +523,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
             <input
               type="checkbox"
               checked={allVisibleSelected}
-              disabled={busy || drafts.length === 0}
+              disabled={busy || filteredDrafts.length === 0}
               onChange={toggleSelectAll}
               className="h-4 w-4 shrink-0 rounded border-black/30"
             />
@@ -373,7 +574,9 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
 
       {drafts.length === 0 ?
         <p className="text-sm text-black/50">В этой очереди записей нет.</p>
-      : drafts.map((d) => {
+      : filteredDrafts.length === 0 ?
+        <p className="text-sm text-black/50">Нет кандидатов в выбранной категории.</p>
+      : filteredDrafts.map((d) => {
         const score100 = confidenceFromStored(d.confidenceScore ?? 0.5);
         const confLabel = confidenceLabelRu(score100);
         return (
@@ -462,38 +665,43 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   <>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium disabled:opacity-40"
                       onClick={() => openEdit(d)}
                     >
                       Редактировать
                     </button>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
-                      onClick={() => void runAction("save", [d.id])}
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs disabled:opacity-40"
+                      onClick={() => void saveDraftRow(d)}
                     >
-                      Сохранить
+                      {busy ? "…" : "Сохранить"}
                     </button>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs disabled:opacity-40"
                       onClick={() => void runAction("approve", [d.id])}
                     >
-                      Одобрить
+                      {busy ? "…" : "Одобрить"}
                     </button>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs disabled:opacity-40"
                       onClick={() => void runAction("reject", [d.id])}
                     >
-                      Отклонить
+                      {busy ? "…" : "Отклонить"}
                     </button>
                   </>
                 : null}
                 {(d.status === "published" || d.status === "rejected") ?
                   <button
                     type="button"
-                    className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
+                    disabled={busy}
+                    className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium disabled:opacity-40"
                     onClick={() => openEdit(d)}
                   >
                     Редактировать
@@ -503,24 +711,27 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   <>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium disabled:opacity-40"
                       onClick={() => openEdit(d)}
                     >
                       Редактировать
                     </button>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs disabled:opacity-40"
                       onClick={() => void runAction("approve", [d.id])}
                     >
-                      Одобрить
+                      {busy ? "…" : "Одобрить"}
                     </button>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs disabled:opacity-40"
                       onClick={() => void runAction("reject", [d.id])}
                     >
-                      Отклонить
+                      {busy ? "…" : "Отклонить"}
                     </button>
                   </>
                 : null}
@@ -528,26 +739,29 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   <>
                     <button
                       type="button"
-                      className="rounded-full bg-black px-2.5 py-1 text-xs font-semibold text-white"
+                      disabled={busy}
+                      className="rounded-full bg-black px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
                       onClick={() => void runAction("publish", [d.id])}
                     >
-                      Опубликовать
+                      {busy ? "…" : "Опубликовать"}
                     </button>
                     <button
                       type="button"
-                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs disabled:opacity-40"
                       onClick={() => void runAction("reject", [d.id])}
                     >
-                      Отклонить
+                      {busy ? "…" : "Отклонить"}
                     </button>
                   </>
                 : null}
                 <button
                   type="button"
-                  className="rounded-full border border-red-200 px-2.5 py-1 text-xs text-red-800"
+                  disabled={busy}
+                  className="rounded-full border border-red-200 px-2.5 py-1 text-xs text-red-800 disabled:opacity-40"
                   onClick={() => void runDelete([d.id])}
                 >
-                  Удалить
+                  {busy ? "…" : "Удалить"}
                 </button>
               </div>
             </div>
@@ -653,15 +867,17 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                 <div className="flex gap-2 sm:col-span-2">
                   <button
                     type="button"
+                    disabled={busy}
                     onClick={() => void saveEdit(d.id)}
-                    className="rounded-full bg-black px-3 py-1.5 text-xs font-semibold text-white"
+                    className="rounded-full bg-black px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
                   >
-                    Сохранить
+                    {busy ? "Сохранение…" : "Сохранить"}
                   </button>
                   <button
                     type="button"
+                    disabled={busy}
                     onClick={() => setEditingId(null)}
-                    className="rounded-full border border-black/15 px-3 py-1.5 text-xs"
+                    className="rounded-full border border-black/15 px-3 py-1.5 text-xs disabled:opacity-40"
                   >
                     Отмена
                   </button>

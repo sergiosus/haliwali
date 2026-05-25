@@ -13,7 +13,7 @@ export async function POST() {
     {
       ok: false,
       error: "DEPRECATED",
-      message: "Используйте /admin/catalogs/import — импорт только через черновики и модерацию.",
+      message: "Используйте /admin/catalogs/import — импорт только через кандидатов и модерацию.",
       redirect: "/admin/catalogs/import",
     },
     { status: 410 },

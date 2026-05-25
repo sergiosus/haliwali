@@ -21,6 +21,7 @@ import { getCurrentUserId, refreshAuthFromServer } from "../../lib/auth";
 import { AuthContinueModal } from "../../components/AuthContinueModal";
 import { TransferListingBlock } from "../../components/TransferListingBlock";
 import type { ListingTransferDraftPrefill } from "../../lib/listingTransferDraft";
+import { useListingTransferPrefillEffect } from "../../lib/useListingTransferPrefillEffect";
 import { isValidPhone, PHONE_VALIDATION_MESSAGE } from "../../lib/identity";
 import { resolveRussiaCityRegionDisplay } from "../../lib/locationDisplay";
 import {
@@ -168,7 +169,6 @@ export default function PostProductPage() {
                 <TransferListingBlock
                   onDraftReady={(draft) => {
                     setTransferPrefill(draft);
-                    setFormKey((k) => k + 1);
                   }}
                   onNeedAuth={(resume) => {
                     pendingSubmitRef.current = resume;
@@ -290,6 +290,18 @@ function ProductPostForm({
 
   const wholeRussia = !selectedLocation;
 
+  useListingTransferPrefillEffect({
+    prefill,
+    setTitle,
+    setDescription,
+    setPrice,
+    setLocationDraft,
+    categories: productCategories,
+    defaultCategory: productCategories[0],
+    currentCategory: categoryName,
+    onCategoryMatch: (matched) => setCategoryName(matched as (typeof productCategories)[number]),
+  });
+
   function scrollToFirstError(next: typeof errors) {
     const order: Array<keyof typeof next> = ["title", "description", "location", "phone", "categoryName", "consent"];
     const key = order.find((k) => Boolean(next[k]));
@@ -388,8 +400,15 @@ function ProductPostForm({
     >
       {prefill?.manualFallback && sourceUrl ?
         <p className="rounded-xl border border-amber-200/80 bg-amber-50/50 px-3 py-2 text-sm text-amber-900">
-          Ссылка на исходное объявление сохранена. Заполните поля ниже вручную.
+          Не удалось автоматически получить данные. Ссылка сохранена, заполните поля вручную.
           <span className="mt-1 block truncate text-xs text-amber-800/80">{sourceUrl}</span>
+        </p>
+      : prefill?.showPhotoHint ?
+        <p className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 px-3 py-2 text-sm text-emerald-900">
+          Данные заполнены по ссылке. Проверьте поля и загрузите фото вручную.
+          {sourceUrl ?
+            <span className="mt-1 block truncate text-xs text-emerald-800/80">{sourceUrl}</span>
+          : null}
         </p>
       : null}
       <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">

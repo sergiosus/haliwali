@@ -6,7 +6,7 @@ import {
   buildManualTransferDraft,
   TRANSFER_FETCH_FAILED_HINT,
   type ListingTransferDraftPrefill,
-} from "../lib/listingTransferDraft";
+} from "../lib/listingTransferPrefill";
 import { validatePublicHttpUrl } from "../lib/listingUrlImport";
 
 type SourceKey = "avito" | "drom" | "other" | null;
@@ -116,17 +116,25 @@ export function TransferListingBlock({
         });
         const d = (await r.json().catch(() => null)) as {
           ok?: boolean;
-          draft?: ListingTransferDraftPrefill;
+          draft?: ListingTransferDraftPrefill & { price?: number | null };
+          importStatus?: "success" | "partial";
           message?: string;
           error?: string;
         };
 
         if (r.ok && d.ok && d.draft) {
+          const importPartial = d.importStatus === "partial";
+          if (importPartial) {
+            setInfo("Часть полей заполнена автоматически. Проверьте данные и добавьте фото вручную.");
+          }
           applyDraftAndFinish(
             {
               title: d.draft.title,
               description: d.draft.description,
               price: typeof d.draft.price === "number" ? d.draft.price : undefined,
+              location: d.draft.location,
+              categoryHint: d.draft.categoryHint,
+              imageUrls: d.draft.imageUrls,
               showPhotoHint: true,
               sourceUrl: canonicalUrl,
               manualFallback: false,
@@ -156,7 +164,9 @@ export function TransferListingBlock({
           return;
         }
 
-        setInfo(TRANSFER_FETCH_FAILED_HINT);
+        const failMsg =
+          typeof d.message === "string" && d.message.trim() ? d.message.trim() : TRANSFER_FETCH_FAILED_HINT;
+        setInfo(failMsg);
         applyDraftAndFinish(buildManualTransferDraft(canonicalUrl), onDraftReady, setSuccess, setActiveSource, setUrl);
       } catch {
         setInfo(TRANSFER_FETCH_FAILED_HINT);
@@ -207,7 +217,7 @@ export function TransferListingBlock({
             Перенести объявление с другой площадки
           </h2>
           <p className="mt-1 text-xs leading-snug text-black/55 sm:text-sm">
-            Ссылка с Авито, Дрома или другого сайта — черновик заполнится автоматически
+            Ссылка с Авито, Дрома или другого сайта — поля заполнятся автоматически
           </p>
         </span>
         <span
@@ -305,7 +315,7 @@ export function TransferListingBlock({
           : null}
           {success ?
             <p className="mt-2 text-sm text-emerald-700" role="status">
-              Черновик готов — проверьте поля ниже и добавьте фото вручную.
+              Данные готовы — проверьте поля ниже и добавьте фото вручную.
             </p>
           : null}
 
@@ -315,7 +325,7 @@ export function TransferListingBlock({
             onClick={() => void runImport()}
             className="mt-4 flex h-12 w-full items-center justify-center rounded-xl bg-[#ff7a00] px-5 text-base font-semibold text-white transition-colors hover:bg-[#f07000] disabled:opacity-60 sm:w-auto sm:min-w-[12rem]"
           >
-            {loading ? "Загружаем…" : "Создать черновик"}
+            {loading ? "Загружаем…" : "Подставить данные"}
           </button>
         </div>
       : null}

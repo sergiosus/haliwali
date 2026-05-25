@@ -275,7 +275,7 @@ export function AdminCatalogPanel() {
               href="/admin/catalogs/import/drafts"
               className="inline-flex rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
             >
-              Черновики
+              Кандидаты
             </Link>
           </div>
           <AdminCatalogImportCandidatesSection compact />

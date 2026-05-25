@@ -242,7 +242,7 @@ export function AdminCatalogImportCandidatesSection({
   useEffect(() => {
     if (initialSessionId === undefined) return;
     void loadSession(initialSessionId ?? undefined).then((s) => {
-      if (s) setMessage(`Загружен черновик: ${s.candidates.length} кандидатов`);
+      if (s) setMessage(`Загружено кандидатов: ${s.candidates.length}`);
     });
     loadHistory();
   }, [initialSessionId, loadSession, loadHistory]);
@@ -514,7 +514,7 @@ export function AdminCatalogImportCandidatesSection({
         <h2 className="text-lg font-semibold">Поиск источников</h2>
         {!compact ?
           <p className="mt-1 text-sm text-black/55">
-            Результаты сохраняются в черновик импорта (переживают перезагрузку и «В импорт»).
+            Результаты сохраняются в очередь кандидатов (переживают перезагрузку и «В импорт»).
           </p>
         : null}
 
@@ -719,7 +719,7 @@ export function AdminCatalogImportCandidatesSection({
                 onClick={openDraftsInNewTab}
                 className="col-span-2 inline-flex w-full items-center justify-center rounded-full border border-black/15 px-4 py-2 text-sm font-medium sm:col-span-1 sm:w-auto"
               >
-                Открыть черновики
+                Открыть кандидатов
               </button>
             </div>
           </div>

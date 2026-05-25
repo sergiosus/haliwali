@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import path from "node:path";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
 import { checkIdentifierRateLimit, checkIpRateLimit, extractIp } from "../../../lib/serverAbuse";
-import { importListingFromPublicUrl, type ListingUrlImportErrorCode } from "../../../lib/listingUrlImport";
+import {
+  importListingFromPublicUrl,
+  logListingImport,
+  type ListingUrlImportErrorCode,
+} from "../../../lib/listingUrlImport";
 import { getUserIdFromSessionCookie } from "../../../lib/serverSession";
 
 export const runtime = "nodejs";
@@ -25,7 +29,7 @@ function userMessage(code: ListingUrlImportErrorCode): string {
     case "RESPONSE_TOO_LARGE":
     case "FETCH_FAILED":
     default:
-      return "Не удалось автоматически получить данные. Можно создать черновик и заполнить вручную.";
+      return "Не удалось автоматически получить данные. Ссылка сохранена, заполните поля вручную.";
   }
 }
 
@@ -80,24 +84,31 @@ export async function POST(req: Request) {
   const url = typeof (body as { url?: unknown })?.url === "string" ? (body as { url: string }).url : "";
   const result = await importListingFromPublicUrl(url);
   if (!result.ok) {
+    logListingImport(result.source, "failed", result.code);
     const status =
       result.code === "INVALID_URL" || result.code === "BLOCKED_URL" ? 400
       : result.code === "TIMEOUT" ? 504
       : 422;
     return NextResponse.json(
-      { ok: false, error: result.code, message: userMessage(result.code) },
+      { ok: false, error: result.code, message: userMessage(result.code), source: result.source },
       { status },
     );
   }
 
-  const { title, description, priceRub } = result.data;
+  const { title, description, priceRub, location, categoryHint, imageUrls } = result.data;
   return NextResponse.json({
     ok: true,
+    importStatus: result.status,
+    source: result.source,
     draft: {
       title,
       description,
       price: priceRub,
+      location,
+      categoryHint,
+      imageUrls,
       showPhotoHint: true,
+      manualFallback: false,
     },
   });
 }

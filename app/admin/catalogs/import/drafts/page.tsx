@@ -13,7 +13,7 @@ export default async function AdminCatalogImportDraftsPage() {
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         <header className="flex items-center justify-between py-6">
           <div>
-            <div className="font-semibold tracking-tight">Черновики каталога</div>
+            <div className="font-semibold tracking-tight">Кандидаты каталога</div>
             <div className="text-sm text-black/60">Проверка, правка, публикация</div>
           </div>
           {view === "dashboard" ?

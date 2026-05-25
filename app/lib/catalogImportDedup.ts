@@ -114,7 +114,7 @@ export function findDuplicate(
     const hit = index.byDomain.get(dk);
     if (hit) {
       return {
-        hint: hit.kind === "published" ? "Дубликат: тот же домен (опубликовано)" : "Обновление черновика по домену",
+        hint: hit.kind === "published" ? "Дубликат: тот же домен (опубликовано)" : "Обновление кандидата по домену",
         duplicateOfCompanyId: hit.companyId,
         existingDraftId: hit.draftId ?? undefined,
       };
@@ -126,7 +126,7 @@ export function findDuplicate(
     const hit = index.byPhone.get(pk);
     if (hit) {
       return {
-        hint: hit.kind === "published" ? "Дубликат: совпадение телефона" : "Дубликат в черновиках (телефон)",
+        hint: hit.kind === "published" ? "Дубликат: совпадение телефона" : "Дубликат среди кандидатов (телефон)",
         duplicateOfCompanyId: hit.companyId,
       };
     }
@@ -137,7 +137,7 @@ export function findDuplicate(
     const hit = index.byWebsite.get(wk);
     if (hit) {
       return {
-        hint: hit.kind === "published" ? "Дубликат: совпадение сайта" : "Дубликат в черновиках (сайт)",
+        hint: hit.kind === "published" ? "Дубликат: совпадение сайта" : "Дубликат среди кандидатов (сайт)",
         duplicateOfCompanyId: hit.companyId,
       };
     }
@@ -147,7 +147,7 @@ export function findDuplicate(
     const hit = index.byNameCity.get(`${normText(item.name)}|${normText(item.city)}`);
     if (hit) {
       return {
-        hint: hit.kind === "published" ? "Дубликат: название + город" : "Дубликат в черновиках (название)",
+        hint: hit.kind === "published" ? "Дубликат: название + город" : "Дубликат среди кандидатов (название)",
         duplicateOfCompanyId: hit.companyId,
       };
     }
@@ -157,7 +157,7 @@ export function findDuplicate(
     const hit = index.byAddressCity.get(`${normText(item.address)}|${normText(item.city)}`);
     if (hit) {
       return {
-        hint: hit.kind === "published" ? "Дубликат: адрес + город" : "Дубликат в черновиках (адрес)",
+        hint: hit.kind === "published" ? "Дубликат: адрес + город" : "Дубликат среди кандидатов (адрес)",
         duplicateOfCompanyId: hit.companyId,
       };
     }
@@ -167,7 +167,7 @@ export function findDuplicate(
     const hit = index.byAddressPhone.get(`${normText(item.address)}|${pk}`);
     if (hit) {
       return {
-        hint: hit.kind === "published" ? "Дубликат: адрес + телефон" : "Дубликат в черновиках (адрес)",
+        hint: hit.kind === "published" ? "Дубликат: адрес + телефон" : "Дубликат среди кандидатов (адрес)",
         duplicateOfCompanyId: hit.companyId,
       };
     }

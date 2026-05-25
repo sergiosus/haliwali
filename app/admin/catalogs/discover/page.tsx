@@ -14,7 +14,7 @@ export default async function AdminCatalogDiscoverPage() {
         <header className="flex items-center justify-between py-6">
           <div className="leading-tight">
             <div className="font-semibold tracking-tight">Поиск источников</div>
-            <div className="text-sm text-black/60">Публичный веб → выбор URL → черновики импорта</div>
+            <div className="text-sm text-black/60">Публичный веб → выбор URL → кандидаты импорта</div>
           </div>
           {view === "dashboard" ?
             <div className="flex items-center gap-3">

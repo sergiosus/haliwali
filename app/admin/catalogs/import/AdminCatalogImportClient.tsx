@@ -80,7 +80,7 @@ export default function AdminCatalogImportClient() {
       }
       setParseErrors(d.errors ?? []);
       const errN = d.errors?.length ?? 0;
-      setMessage(`Создано черновиков: ${d.count ?? 0}${errN > 0 ? `, ошибок: ${errN}` : ""}`);
+      setMessage(`Создано кандидатов: ${d.count ?? 0}${errN > 0 ? `, ошибок: ${errN}` : ""}`);
       loadDraftCount();
     } catch {
       setMessage("Ошибка сети");
@@ -102,14 +102,14 @@ export default function AdminCatalogImportClient() {
           href="/admin/catalogs/import/drafts"
           className="rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
         >
-          Черновики ({draftCount})
+          Кандидаты ({draftCount})
         </Link>
       </div>
 
       <section className="rounded-3xl border border-black/10 bg-white p-5">
         <h2 className="text-lg font-semibold">Извлечение из публичных источников</h2>
         <p className="mt-1 text-sm text-black/55">
-          Сайты, справочники, VK, объявления, текст, CSV. Без автопубликации — только черновики.
+          Сайты, справочники, VK, объявления, текст, CSV. Без автопубликации — только кандидаты.
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -217,7 +217,7 @@ export default function AdminCatalogImportClient() {
             onClick={() => void runParse()}
             className="mt-4 rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {busy ? "Извлечение…" : "Создать черновики"}
+            {busy ? "Извлечение…" : "Создать кандидатов"}
           </button>
         : null}
 
@@ -239,7 +239,7 @@ export default function AdminCatalogImportClient() {
             href="/admin/catalogs/import/drafts"
             className="mt-4 inline-flex rounded-full border border-black/15 px-4 py-2 text-sm font-medium"
           >
-            Перейти к черновикам →
+            Перейти к кандидатам →
           </Link>
         : null}
       </section>

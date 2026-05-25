@@ -14,7 +14,7 @@ export default async function AdminCatalogImportPage() {
         <header className="flex items-center justify-between py-6">
           <div className="leading-tight">
             <div className="font-semibold tracking-tight">Импорт каталога</div>
-            <div className="text-sm text-black/60">Черновики → проверка → публикация</div>
+            <div className="text-sm text-black/60">Кандидаты → проверка → публикация</div>
           </div>
           {view === "dashboard" ?
             <div className="flex items-center gap-3">
@@ -28,7 +28,7 @@ export default async function AdminCatalogImportPage() {
                 href="/admin/catalogs/import/drafts"
                 className="rounded-full border border-black/15 px-4 py-2 text-sm font-medium hover:bg-black/5"
               >
-                Черновики
+                Кандидаты
               </Link>
               <Link
                 href="/admin"

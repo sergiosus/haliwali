@@ -10,7 +10,7 @@ import { isLikelyBadCompanyName } from "../../../lib/catalogCompanyNameExtract";
 import { CATALOG_CATEGORY_SEED, type CatalogCompanyAdminItem } from "../../../lib/catalogTypes";
 
 const STATUS_LABEL: Record<CatalogImportDraftStatus, string> = {
-  draft: "Черновик",
+  draft: "Кандидат",
   saved: "Сохранён",
   approved: "Одобрен",
   rejected: "Отклонён",
@@ -133,9 +133,9 @@ type ConfirmJson = {
 function apiErrorMessage(code?: string): string {
   const messages: Record<string, string> = {
     INVALID_ACTION: "Недопустимое действие",
-    ID_REQUIRED: "Не указан черновик",
+    ID_REQUIRED: "Не указан кандидат",
     IDS_REQUIRED: "Не выбраны записи",
-    NOT_FOUND: "Черновик не найден",
+    NOT_FOUND: "Кандидат не найден",
     MERGE_FAILED: "Не удалось объединить",
   };
   return (code && messages[code]) || code || "Ошибка";
@@ -342,10 +342,10 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       ids.length === 1 ?
         (() => {
           const one = drafts.find((x) => x.id === ids[0]);
-          const label = one?.name?.trim() || "этот черновик";
+          const label = one?.name?.trim() || "этого кандидата";
           return `Удалить «${label}»? Это действие нельзя отменить.`;
         })()
-      : `Удалить выбранные черновики (${ids.length})? Это действие нельзя отменить.`;
+      : `Удалить выбранных кандидатов (${ids.length})? Это действие нельзя отменить.`;
     if (!window.confirm(confirmText)) return;
     setBusy(true);
     setMessage(null);
@@ -589,7 +589,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                 type="checkbox"
                 checked={selected.has(d.id)}
                 disabled={busy}
-                aria-label={`Выбрать ${d.name || "черновик"}`}
+                aria-label={`Выбрать ${d.name || "кандидата"}`}
                 onChange={() => {
                   setSelected((prev) => {
                     const next = new Set(prev);

@@ -7,7 +7,7 @@ import { DISCOVERY_SOURCE_LABEL } from "../../../lib/catalogDiscoverSourceType";
 import type { DiscoverySourceType } from "../../../lib/catalogDiscoverSourceType";
 import type { CatalogImportDraft, CatalogImportDraftStatus, CatalogImportSession } from "../../../lib/catalogImportTypes";
 import { isLikelyBadCompanyName } from "../../../lib/catalogCompanyNameExtract";
-import type { CatalogCompanyAdminItem } from "../../../lib/catalogTypes";
+import { CATALOG_CATEGORY_SEED, type CatalogCompanyAdminItem } from "../../../lib/catalogTypes";
 
 const STATUS_LABEL: Record<CatalogImportDraftStatus, string> = {
   draft: "Черновик",
@@ -50,6 +50,33 @@ const SOURCE_LABEL: Record<string, string> = {
   unknown: DISCOVERY_SOURCE_LABEL.unknown,
 };
 
+type DraftEditForm = Partial<CatalogImportDraft> & {
+  primaryCity?: string;
+  serviceCities?: string;
+};
+
+function splitDraftCity(city: string): { primaryCity: string; serviceCities: string } {
+  const parts = city.split(/[,;]+/).map((part) => part.trim()).filter(Boolean);
+  return {
+    primaryCity: parts[0] ?? city.trim(),
+    serviceCities: parts.slice(1).join(", "),
+  };
+}
+
+function draftEditForm(draft: CatalogImportDraft): DraftEditForm {
+  const city = splitDraftCity(draft.city);
+  return { ...draft, ...city };
+}
+
+function draftEditCity(form: DraftEditForm): string {
+  const primary = String(form.primaryCity ?? form.city ?? "").trim();
+  const serviceCities = String(form.serviceCities ?? "")
+    .split(/[,;]+/)
+    .map((city) => city.trim())
+    .filter(Boolean);
+  return [primary, ...serviceCities].filter(Boolean).join(", ");
+}
+
 export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportLink?: boolean }) {
   const [tab, setTab] = useState<CatalogImportDraftStatus>("draft");
   const [drafts, setDrafts] = useState<CatalogImportDraft[]>([]);
@@ -59,7 +86,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<Partial<CatalogImportDraft>>({});
+  const [editForm, setEditForm] = useState<DraftEditForm>({});
   const [mergeCompanyId, setMergeCompanyId] = useState<Record<number, string>>({});
 
   const loadDrafts = useCallback(() => {
@@ -144,6 +171,11 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
     }
   }
 
+  function openEdit(draft: CatalogImportDraft) {
+    setEditingId(draft.id);
+    setEditForm(draftEditForm(draft));
+  }
+
   async function saveEdit(id: number) {
     setBusy(true);
     try {
@@ -152,12 +184,12 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "save",
+          action: "update",
           id,
           patch: {
             name: editForm.name,
             categorySlug: editForm.categorySlug,
-            city: editForm.city,
+            city: draftEditCity(editForm),
             address: editForm.address,
             phone: editForm.phone,
             email: editForm.email,
@@ -173,7 +205,6 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         setEditingId(null);
         setMessage("Сохранено");
         loadDrafts();
-        if (tab === "draft") setTab("saved");
       }
     } finally {
       setBusy(false);
@@ -432,17 +463,21 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     <button
                       type="button"
                       className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
-                      onClick={() => {
-                        setEditingId(d.id);
-                        setEditForm({ ...d });
-                      }}
+                      onClick={() => openEdit(d)}
+                    >
+                      Редактировать
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
+                      onClick={() => void runAction("save", [d.id])}
                     >
                       Сохранить
                     </button>
                     <button
                       type="button"
                       className="rounded-full border border-black/15 px-2.5 py-1 text-xs"
-                      onClick={() => void runAction("save", [d.id])}
+                      onClick={() => void runAction("approve", [d.id])}
                     >
                       Одобрить
                     </button>
@@ -459,12 +494,9 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   <button
                     type="button"
                     className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
-                    onClick={() => {
-                      setEditingId(d.id);
-                      setEditForm({ ...d });
-                    }}
+                    onClick={() => openEdit(d)}
                   >
-                    Сохранить
+                    Редактировать
                   </button>
                 : null}
                 {d.status === "saved" ?
@@ -472,12 +504,9 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     <button
                       type="button"
                       className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium"
-                      onClick={() => {
-                        setEditingId(d.id);
-                        setEditForm({ ...d });
-                      }}
+                      onClick={() => openEdit(d)}
                     >
-                      Сохранить
+                      Редактировать
                     </button>
                     <button
                       type="button"
@@ -553,17 +582,54 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
 
             {editingId === d.id ?
               <div className="mt-4 grid gap-2 border-t border-black/10 pt-4 sm:grid-cols-2">
+                <label className="block text-xs">
+                  Название
+                  <input
+                    value={editForm.name ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                    className="mt-0.5 w-full rounded-lg border border-black/15 px-2 py-1.5"
+                  />
+                </label>
+                <label className="block text-xs">
+                  Категория
+                  <select
+                    value={editForm.categorySlug ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, categorySlug: e.target.value }))}
+                    className="mt-0.5 w-full rounded-lg border border-black/15 px-2 py-1.5"
+                  >
+                    <option value="">— категория —</option>
+                    {CATALOG_CATEGORY_SEED.map((category) => (
+                      <option key={category.slug} value={category.slug}>
+                        {category.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs">
+                  Город / primaryCity
+                  <input
+                    value={editForm.primaryCity ?? editForm.city ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, primaryCity: e.target.value }))}
+                    className="mt-0.5 w-full rounded-lg border border-black/15 px-2 py-1.5"
+                  />
+                </label>
+                <label className="block text-xs">
+                  serviceCities
+                  <input
+                    value={editForm.serviceCities ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, serviceCities: e.target.value }))}
+                    placeholder="Через запятую"
+                    className="mt-0.5 w-full rounded-lg border border-black/15 px-2 py-1.5"
+                  />
+                </label>
                 {(
                   [
-                    ["name", "Название"],
-                    ["categorySlug", "Категория"],
-                    ["city", "Город"],
                     ["address", "Адрес"],
                     ["phone", "Телефон"],
                     ["email", "Email"],
                     ["website", "Сайт"],
-                    ["sourceUrl", "source_url"],
-                    ["imageUrl", "image_url"],
+                    ["sourceUrl", "Source URL"],
+                    ["imageUrl", "Logo URL"],
                   ] as const
                 ).map(([key, label]) => (
                   <label key={key} className="block text-xs">

@@ -40,6 +40,14 @@ function visibleCandidates(candidates: PersistedImportCandidate[], showHidden: b
   return candidates.filter((c) => showHidden || !c.hidden || c.importStatus);
 }
 
+function filteredCandidates(
+  candidates: PersistedImportCandidate[],
+  showHidden: boolean,
+  filter: ImportResultFilter,
+): PersistedImportCandidate[] {
+  return visibleCandidates(candidates, showHidden).filter((c) => resultFilterMatch(c, filter));
+}
+
 function groupByDomain(list: PersistedImportCandidate[]): Record<string, PersistedImportCandidate[]> {
   return list.reduce<Record<string, PersistedImportCandidate[]>>((acc, c) => {
     if (!acc[c.domain]) acc[c.domain] = [];
@@ -266,9 +274,8 @@ export function AdminCatalogImportCandidatesSection({
   }, [candidates]);
   const hasImportResults =
     resultCounts.imported + resultCounts.duplicates + resultCounts.errors + resultCounts.skipped > 0;
-  const visibleList = visibleCandidates(candidates, showHidden);
-  const list = visibleList.filter((c) => resultFilterMatch(c, resultFilter));
-  const displayGroups = groupByDomain(list);
+  const filteredCandidatesList = filteredCandidates(candidates, showHidden, resultFilter);
+  const displayGroups = groupByDomain(filteredCandidatesList);
   const hiddenCount = candidates.filter((c) => c.hidden).length;
 
   const selectedCount = useMemo(
@@ -278,10 +285,10 @@ export function AdminCatalogImportCandidatesSection({
 
   const selectableUrls = useMemo(
     () =>
-      list
+      filteredCandidatesList
         .filter((c) => !c.importStatus && c.state !== "imported" && c.state !== "removed")
         .map((c) => c.url),
-    [list],
+    [filteredCandidatesList],
   );
   const recentKeywordSuggestions = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -346,29 +353,30 @@ export function AdminCatalogImportCandidatesSection({
         setMessage(d.message ?? d.error ?? "Ошибка поиска");
         return;
       }
-      if (d.session) {
-        setSession(d.session);
-      } else {
-        const fallbackCandidates: PersistedImportCandidate[] = [
-          ...(d.candidates ?? []).map((c) => ({ ...c, state: "found" as const })),
-          ...(d.hidden ?? []).map((c) => ({ ...c, state: "found" as const })),
-        ];
-        setSession({
+      const nextSession =
+        d.session ??
+        {
           id: 0,
           query,
           city: cityLabel,
           categorySlug,
           queriesUsed: d.queriesUsed ?? [],
-          candidates: fallbackCandidates,
+          candidates: [
+            ...(d.candidates ?? []).map((c) => ({ ...c, state: "found" as const })),
+            ...(d.hidden ?? []).map((c) => ({ ...c, state: "found" as const })),
+          ],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        });
-      }
+        };
+      setSession(nextSession);
+      setResultFilter("all");
       setQueriesUsed(d.queriesUsed ?? []);
       const nextKeywords = addRecentKeyword(recentKeywords, query);
       setRecentKeywords(nextKeywords);
       writeRecentKeywords(nextKeywords);
-      setMessage(`Показано: ${d.count ?? 0} · скрыто: ${d.hiddenCount ?? 0}`);
+      const nextHiddenCount = nextSession.candidates.filter((c) => c.hidden).length;
+      const nextShownCount = filteredCandidates(nextSession.candidates, showHidden, "all").length;
+      setMessage(`Показано: ${nextShownCount} · скрыто: ${nextHiddenCount}`);
       loadHistory();
     } catch {
       setMessage("Ошибка сети");
@@ -637,7 +645,7 @@ export function AdminCatalogImportCandidatesSection({
         : null}
       </section>
 
-      {visibleList.length > 0 ?
+      {filteredCandidatesList.length > 0 ?
         <section className="w-full min-w-0 space-y-3 overflow-visible sm:space-y-4">
           {hasImportResults ?
             <div className="rounded-2xl border border-black/10 bg-white p-3 text-sm">

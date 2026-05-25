@@ -14,13 +14,11 @@ export function CatalogCategoryClient({
   categories,
   initialCompanies,
   initialLoggedIn,
-  isAdmin,
 }: {
   category: CatalogCategory;
   categories: readonly CatalogCategory[];
   initialCompanies: CatalogCompanyListItem[];
   initialLoggedIn: boolean;
-  isAdmin: boolean;
 }) {
   const [q, setQ] = useState("");
   const [submittedQ, setSubmittedQ] = useState("");
@@ -64,6 +62,15 @@ export function CatalogCategoryClient({
     if (!submittedQ) return null;
     return submittedQ;
   }, [submittedQ]);
+  const addCompanyForm = (
+    <CatalogCompanySubmissionForm
+      categories={categories}
+      initialCategorySlug={category.slug}
+      initialLoggedIn={initialLoggedIn}
+      showForGuests
+      buttonClassName="mx-auto flex h-10 items-center justify-center rounded-full bg-[#ff7a00] px-4 text-sm font-semibold text-white hover:bg-[#f07000]"
+    />
+  );
 
   return (
     <div className="space-y-5">
@@ -75,17 +82,8 @@ export function CatalogCategoryClient({
         >
           ← Назад
         </button>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{category.title}</h1>
-            <p className="mt-1 text-sm text-black/50">{category.subtitle}</p>
-          </div>
-          <CatalogCompanySubmissionForm
-            categories={categories}
-            initialCategorySlug={category.slug}
-            initialLoggedIn={initialLoggedIn}
-          />
-        </div>
+        <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{category.title}</h1>
+        <p className="mt-1 text-sm text-black/50">{category.subtitle}</p>
       </header>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -143,38 +141,27 @@ export function CatalogCategoryClient({
         <p className="text-sm text-black/40">Загрузка…</p>
       : null}
 
-      {view === "map" ?
-        <CatalogCompanyMap companies={companies} />
-      : companies.length > 0 ?
-        <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {companies.map((co) => (
-            <li key={co.slug}>
-              <CatalogCompanyCard company={co} />
-            </li>
-          ))}
-        </ul>
-      : (
+      {companies.length === 0 ?
         <div className="rounded-2xl border border-black/[0.06] bg-white px-4 py-10 text-center">
           <p className="text-sm text-black/50">Пока нет компаний в этой категории</p>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-            {isAdmin ?
-              <>
-                <a
-                  href="/admin/catalogs/discover"
-                  className="inline-flex rounded-full bg-[#ff7a00] px-4 py-2 text-sm font-semibold text-white hover:bg-[#f07000]"
-                >
-                  Найти источники
-                </a>
-                <a
-                  href="/admin/catalogs/import"
-                  className="inline-flex rounded-full border border-black/15 px-4 py-2 text-sm font-medium text-black/70 hover:bg-black/5"
-                >
-                  Импорт CSV
-                </a>
-              </>
-            : null}
-          </div>
+          <div className="mt-5">{addCompanyForm}</div>
         </div>
+      : view === "map" ?
+        <>
+          <CatalogCompanyMap companies={companies} />
+          <div className="pt-1 text-center">{addCompanyForm}</div>
+        </>
+      : (
+        <>
+          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {companies.map((co) => (
+              <li key={co.slug}>
+                <CatalogCompanyCard company={co} />
+              </li>
+            ))}
+          </ul>
+          <div className="pt-1 text-center">{addCompanyForm}</div>
+        </>
       )}
     </div>
   );

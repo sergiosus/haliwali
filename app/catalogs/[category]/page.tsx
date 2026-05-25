@@ -10,7 +10,6 @@ import {
 } from "../../lib/serverCatalogStore";
 import { siteUrl } from "../../lib/siteUrl";
 import { getUserIdFromSessionCookie } from "../../lib/serverSession";
-import { adminPrivilegesActive } from "../../lib/serverAdminSession";
 
 export const dynamic = "force-dynamic";
 
@@ -40,11 +39,10 @@ export default async function CatalogCategoryPage(props: {
   const category = await getCatalogCategory(slug);
   if (!category) notFound();
 
-  const [companies, listedCategories, userId, isAdmin] = await Promise.all([
+  const [companies, listedCategories, userId] = await Promise.all([
     searchCatalogCompanies({ categorySlug: slug }),
     listCatalogCategories(),
     getUserIdFromSessionCookie(),
-    adminPrivilegesActive(),
   ]);
   const categories = listedCategories.length > 0 ? listedCategories : categoriesFromSeed();
 
@@ -56,7 +54,6 @@ export default async function CatalogCategoryPage(props: {
           categories={categories}
           initialCompanies={companies}
           initialLoggedIn={Boolean(userId)}
-          isAdmin={isAdmin}
         />
       </div>
     </div>

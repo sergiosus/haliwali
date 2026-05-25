@@ -44,11 +44,13 @@ export function CatalogCompanySubmissionForm({
   initialCategorySlug,
   initialLoggedIn,
   buttonClassName,
+  showForGuests = false,
 }: {
   categories: readonly CatalogCategory[];
   initialCategorySlug?: string;
   initialLoggedIn: boolean;
   buttonClassName?: string;
+  showForGuests?: boolean;
 }) {
   const router = useRouter();
   const auth = useAuth();
@@ -112,7 +114,7 @@ export function CatalogCompanySubmissionForm({
     }
   }
 
-  if (!loggedIn) return null;
+  if (!loggedIn && !showForGuests) return null;
 
   return (
     <div className="w-full sm:w-auto">

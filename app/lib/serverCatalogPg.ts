@@ -312,6 +312,17 @@ export async function pgListCatalogReports(): Promise<CatalogReport[]> {
   }));
 }
 
+/** Remove catalog rows by id only (one category per row; CASCADE child rows). */
+export async function pgDeleteCatalogCompaniesByIds(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const pool = getPool();
+  const { rowCount } = await pool.query(
+    `DELETE FROM catalog_companies WHERE id = ANY($1::int[])`,
+    [ids],
+  );
+  return rowCount ?? 0;
+}
+
 export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem[]> {
   const pool = getPool();
   const { rows } = await pool.query<{
@@ -323,12 +334,13 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     city: string;
     description: string;
     logo_url: string | null;
+    website: string | null;
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
   }>(`
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.description, co.logo_url, co.rating,
+           co.city, co.description, co.logo_url, co.website, co.rating,
            loc.latitude, loc.longitude
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
@@ -345,8 +357,78 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     city: r.city ?? "",
     description: r.description ?? "",
     logoUrl: r.logo_url,
+    website: r.website,
     rating: rowRating(r.rating),
     latitude: r.latitude,
     longitude: r.longitude,
   }));
+}
+
+export async function pgUpdateCatalogCompanyAdmin(
+  id: number,
+  patch: {
+    name: string;
+    city: string;
+    description: string;
+    website: string;
+    categorySlug: string;
+    logoUrl: string | null;
+  },
+): Promise<CatalogCompanyAdminItem | null> {
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    id: number;
+    slug: string;
+    name: string;
+    category_slug: string;
+    category_title: string;
+    city: string;
+    description: string;
+    logo_url: string | null;
+    website: string | null;
+    rating: string | null;
+    latitude: number | null;
+    longitude: number | null;
+  }>(
+    `
+    WITH updated AS (
+      UPDATE catalog_companies
+      SET name = $2, city = $3, description = $4, website = NULLIF($5, ''),
+          category_slug = $6, logo_url = $7, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, slug, name, category_slug, city, description, logo_url, website, rating
+    )
+    SELECT u.id, u.slug, u.name, u.category_slug, cat.title AS category_title,
+           u.city, u.description, u.logo_url, u.website, u.rating,
+           loc.latitude, loc.longitude
+    FROM updated u
+    JOIN catalog_categories cat ON cat.slug = u.category_slug
+    LEFT JOIN catalog_company_locations loc ON loc.company_id = u.id
+    `,
+    [
+      id,
+      patch.name,
+      patch.city,
+      patch.description,
+      patch.website,
+      patch.categorySlug,
+      patch.logoUrl,
+    ],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    categorySlug: r.category_slug,
+    categoryTitle: r.category_title,
+    city: r.city ?? "",
+    description: r.description ?? "",
+    logoUrl: r.logo_url,
+    website: r.website,
+    rating: rowRating(r.rating),
+    latitude: r.latitude,
+    longitude: r.longitude,
+  };
 }

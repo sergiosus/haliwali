@@ -1,21 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import type { CatalogCategory, CatalogCompanyListItem, CatalogReport } from "../lib/catalogTypes";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AdminCatalogCompanyEditModal } from "./AdminCatalogCompanyEditModal";
+import { AdminCatalogImportCandidatesSection } from "./catalogs/AdminCatalogImportCandidatesSection";
+import { isLikelyBadCompanyName } from "../lib/catalogCompanyNameExtract";
+import type { CatalogCategory, CatalogCompanyAdminItem, CatalogReport } from "../lib/catalogTypes";
 import { CATALOG_CATEGORY_SEED } from "../lib/catalogTypes";
 
 type CatalogAdminTab = "overview" | "companies" | "categories" | "import" | "reports";
 
 export function AdminCatalogPanel() {
   const [tab, setTab] = useState<CatalogAdminTab>("overview");
-  const [companies, setCompanies] = useState<CatalogCompanyListItem[]>([]);
+  const [companies, setCompanies] = useState<CatalogCompanyAdminItem[]>([]);
   const [reports, setReports] = useState<CatalogReport[]>([]);
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<number>>(new Set());
+  const [companyBusy, setCompanyBusy] = useState(false);
+  const [companyMessage, setCompanyMessage] = useState<string | null>(null);
+  const [editingCompany, setEditingCompany] = useState<CatalogCompanyAdminItem | null>(null);
 
   const loadCompanies = useCallback(() => {
     void fetch("/api/admin/catalog/companies", { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
-      .then((d: { companies?: CatalogCompanyListItem[] }) => setCompanies(d.companies ?? []))
+      .then((d: { companies?: CatalogCompanyAdminItem[] }) => setCompanies(d.companies ?? []))
       .catch(() => setCompanies([]));
   }, []);
 
@@ -31,6 +39,11 @@ export function AdminCatalogPanel() {
     if (tab === "reports") loadReports();
   }, [tab, loadCompanies, loadReports]);
 
+  const filteredCompanies = useMemo(() => {
+    if (!companyFilter) return companies;
+    return companies.filter((co) => co.categorySlug === companyFilter);
+  }, [companies, companyFilter]);
+
   const subTabs: { key: CatalogAdminTab; label: string }[] = [
     { key: "overview", label: "Каталоги" },
     { key: "companies", label: "Компании" },
@@ -43,6 +56,51 @@ export function AdminCatalogPanel() {
     ...c,
     companyCount: companies.filter((co) => co.categorySlug === c.slug).length,
   }));
+
+  function toggleCompanyId(id: number) {
+    setSelectedCompanyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllCompanies() {
+    setSelectedCompanyIds(new Set(filteredCompanies.map((c) => c.id)));
+  }
+
+  function clearCompanySelection() {
+    setSelectedCompanyIds(new Set());
+  }
+
+  async function deleteSelectedCompanies() {
+    if (selectedCompanyIds.size === 0) return;
+    const ok = window.confirm("Удалить выбранные компании из каталога?");
+    if (!ok) return;
+    setCompanyBusy(true);
+    setCompanyMessage(null);
+    try {
+      const r = await fetch("/api/admin/catalog/companies", {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selectedCompanyIds] }),
+      });
+      const d = (await r.json()) as { ok?: boolean; deleted?: number; error?: string };
+      if (!r.ok) {
+        setCompanyMessage(d.error ?? "Ошибка удаления");
+        return;
+      }
+      setCompanyMessage(`Удалено записей: ${d.deleted ?? 0}`);
+      setSelectedCompanyIds(new Set());
+      loadCompanies();
+    } catch {
+      setCompanyMessage("Ошибка сети");
+    } finally {
+      setCompanyBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -81,50 +139,145 @@ export function AdminCatalogPanel() {
               <span className="font-semibold text-black">{c.title}</span>
               <span className="text-black/45"> /catalogs/{c.slug}</span>
               <p className="mt-1 text-black/50">{c.companyCount} компаний</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCompanyFilter(c.slug);
+                  setTab("companies");
+                }}
+                className="mt-2 text-xs font-medium text-black/55 underline hover:text-black"
+              >
+                Показать компании
+              </button>
             </li>
           ))}
         </ul>
       : null}
 
       {tab === "companies" ?
-        <div className="space-y-2">
-          {companies.length === 0 ?
-            <p className="text-sm text-black/50">Нет компаний</p>
-          : companies.map((co) => (
-            <div
-              key={co.slug}
-              className="rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm"
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+              className="rounded-xl border border-black/15 px-3 py-2 text-sm"
             >
-              <span className="font-semibold">{co.name}</span>
-              <span className="text-black/45">
-                {" "}
-                · {co.categoryTitle} · {co.city}
-              </span>
+              <option value="">Все категории</option>
+              {CATALOG_CATEGORY_SEED.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={companyBusy || filteredCompanies.length === 0}
+              onClick={selectAllCompanies}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+            >
+              Выбрать все
+            </button>
+            <button
+              type="button"
+              disabled={companyBusy}
+              onClick={clearCompanySelection}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+            >
+              Снять выбор
+            </button>
+            <button
+              type="button"
+              disabled={companyBusy || selectedCompanyIds.size === 0}
+              onClick={() => void deleteSelectedCompanies()}
+              className="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-900 disabled:opacity-40"
+            >
+              Удалить выбранные ({selectedCompanyIds.size})
+            </button>
+          </div>
+          {companyMessage ?
+            <p className="text-sm font-medium text-black/70">{companyMessage}</p>
+          : null}
+          {filteredCompanies.length === 0 ?
+            <p className="text-sm text-black/50">Нет компаний</p>
+          : filteredCompanies.map((co) => (
+            <div
+              key={co.id}
+              className="flex flex-wrap items-start gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm"
+            >
+              <input
+                type="checkbox"
+                checked={selectedCompanyIds.has(co.id)}
+                onChange={() => toggleCompanyId(co.id)}
+                className="mt-1"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">{co.name}</span>
+                  {isLikelyBadCompanyName(co.name) ?
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
+                      Можно редактировать
+                    </span>
+                  : null}
+                </div>
+                <span className="text-black/45">
+                  {co.categoryTitle} · {co.city}
+                  {co.website ?
+                    <>
+                      {" "}
+                      ·{" "}
+                      <a
+                        href={co.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        сайт
+                      </a>
+                    </>
+                  : null}
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={companyBusy}
+                onClick={() => setEditingCompany(co)}
+                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium hover:bg-black/5"
+              >
+                Редактировать
+              </button>
             </div>
           ))}
         </div>
       : null}
 
+      {editingCompany ?
+        <AdminCatalogCompanyEditModal
+          company={editingCompany}
+          onClose={() => setEditingCompany(null)}
+          onSaved={(updated) => {
+            setCompanies((list) => list.map((c) => (c.id === updated.id ? updated : c)));
+            setCompanyMessage(`Сохранено: ${updated.name}`);
+          }}
+        />
+      : null}
+
       {tab === "import" ?
-        <div className="rounded-3xl border border-black/10 bg-white p-5 text-sm text-black/65">
-          <p>
-            Импорт из публичных источников: сайты, справочники, VK, объявления, CSV. Поиск кандидатов
-            через API. Черновики → проверка → публикация.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2 text-sm">
             <Link
               href="/admin/catalogs/import"
-              className="inline-flex rounded-full bg-black px-5 py-2.5 font-semibold text-white hover:bg-black/90"
+              className="inline-flex rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
             >
-              Импорт / извлечение
+              Извлечение по URL / CSV
             </Link>
             <Link
-              href="/admin/catalogs/discover"
-              className="inline-flex rounded-full border border-black/15 px-5 py-2.5 font-semibold hover:bg-black/5"
+              href="/admin/catalogs/import/drafts"
+              className="inline-flex rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
             >
-              Поиск источников
+              Черновики
             </Link>
           </div>
+          <AdminCatalogImportCandidatesSection compact />
         </div>
       : null}
 

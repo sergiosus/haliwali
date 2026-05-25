@@ -6,6 +6,7 @@ import { confidenceFromStored, confidenceLabelRu } from "../../../lib/catalogCon
 import { DISCOVERY_SOURCE_LABEL } from "../../../lib/catalogDiscoverSourceType";
 import type { DiscoverySourceType } from "../../../lib/catalogDiscoverSourceType";
 import type { CatalogImportDraft, CatalogImportDraftStatus, CatalogImportSession } from "../../../lib/catalogImportTypes";
+import { isLikelyBadCompanyName } from "../../../lib/catalogCompanyNameExtract";
 import type { CatalogCompanyAdminItem } from "../../../lib/catalogTypes";
 
 const STATUS_LABEL: Record<CatalogImportDraftStatus, string> = {
@@ -374,9 +375,9 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                       {SOURCE_LABEL[d.sourceType as DiscoverySourceType] ?? d.sourceType}
                     </span>
                   : null}
-                  {d.needsReview ?
+                  {d.needsReview || isLikelyBadCompanyName(d.name) ?
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900">
-                      Требует проверки
+                      Можно редактировать
                     </span>
                   : null}
                 </div>

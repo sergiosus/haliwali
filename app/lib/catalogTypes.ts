@@ -25,9 +25,10 @@ export type CatalogCompanyListItem = {
   longitude: number | null;
 };
 
-/** Admin-only: includes DB id for merge/import */
+/** Admin-only: includes DB id for merge/import/edit */
 export type CatalogCompanyAdminItem = CatalogCompanyListItem & {
   id: number;
+  website: string | null;
 };
 
 export type CatalogCompanyProfile = CatalogCompanyListItem & {

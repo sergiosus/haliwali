@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { logCatalogDiscover } from "../../../../../lib/catalogCatalogLog";
+import { toPersistedCandidates } from "../../../../../lib/catalogImportCandidateTypes";
 import { rankAndFilterCandidates } from "../../../../../lib/catalogDiscoverRanking";
 import { searchLocaleParams } from "../../../../../lib/catalogSearchQueryBuilder";
 import { groupCandidatesByDomain, searchPublicWeb } from "../../../../../lib/catalogSearchProvider";
+import { saveImportCandidateSession } from "../../../../../lib/serverCatalogImportCandidatesStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 
 export const runtime = "nodejs";
@@ -58,8 +60,23 @@ export async function POST(req: Request) {
     topScore: visible[0]?.relevanceScore,
   });
 
+  let session = null;
+  try {
+    session = await saveImportCandidateSession({
+      query,
+      city,
+      categorySlug,
+      queriesUsed: result.queriesUsed,
+      candidates: toPersistedCandidates(visible, hidden),
+    });
+  } catch {
+    /* persistence optional when DB unavailable in dev */
+  }
+
   return NextResponse.json({
     ok: true,
+    sessionId: session?.id ?? null,
+    session,
     candidates: visible,
     hidden,
     groups,

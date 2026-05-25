@@ -1,7 +1,7 @@
 import type { CatalogSocialLink, ExtractedCompanyDraft, ExtractionDefaults } from "./catalogExtractionTypes";
 import type { FetchedHtml } from "./catalogHtmlFetch";
 import { computeImportConfidence, confidenceToStored } from "./catalogConfidence";
-import { pickCompanyNameFromHtml } from "./catalogCompanyNameExtract";
+import { pickCompanyNameFromHtml, sanitizeExtractedCompanyName } from "./catalogCompanyNameExtract";
 import { domainSiteUrl, normalizeImportDomain } from "./catalogImportDomain";
 import {
   addressLikeFromText,
@@ -62,7 +62,9 @@ export function extractWebsiteFromHtml(
   const ogImage = metaContent(html, "og:image");
   const metaDesc = metaContent(html, "description", "name");
 
-  const { name, nameSource } = pickCompanyNameFromHtml(html, { pageUrl: url.toString() });
+  const { name: extractedName, nameSource } = pickCompanyNameFromHtml(html, { pageUrl: url.toString() });
+  const website = domainSiteUrl(rootDomain);
+  const name = sanitizeExtractedCompanyName(extractedName, website, rootDomain);
 
   const description = (str(org?.description) || ogDesc || metaDesc).slice(0, 2000);
 
@@ -71,8 +73,6 @@ export function extractWebsiteFromHtml(
   const phone = normalizePhone(str(org?.telephone)) || phones[0] || "";
   const emails = emailsFromText(contactText);
   const email = str(org?.email).toLowerCase() || emails[0] || "";
-
-  const website = domainSiteUrl(rootDomain);
 
   const addr = org?.address;
   let address = "";
@@ -135,6 +135,8 @@ export function extractWebsiteFromHtml(
       rootDomain,
       hasJsonLd: Boolean(org),
       nameSource,
+      originalExtractedName: extractedName.slice(0, 200),
+      nameSanitized: name !== extractedName.trim(),
       byteLength: fetched.byteLength,
     },
   };

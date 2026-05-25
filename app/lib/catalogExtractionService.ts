@@ -18,6 +18,7 @@ import {
 } from "./catalogImportDomain";
 import { mergeDraftInputs, mergeExtractedCompanyDrafts } from "./catalogImportMerge";
 import { classifySourceUrl } from "./catalogSourceClassifier";
+import { isLikelyBadCompanyName } from "./catalogCompanyNameExtract";
 import { buildDraftWarnings } from "./catalogImportEnrich";
 import type { CatalogImportUpsertResult } from "./catalogImportTypes";
 import {
@@ -319,7 +320,11 @@ async function persistExtractedBatchWithMeta(
       input,
       duplicateHint: dup?.hint ?? null,
       duplicateOfCompanyId: dup?.duplicateOfCompanyId ?? null,
-      needsReview: warnings.length > 0 || Boolean(dup?.duplicateOfCompanyId),
+      needsReview:
+        warnings.length > 0 ||
+        Boolean(dup?.duplicateOfCompanyId) ||
+        isLikelyBadCompanyName(input.name) ||
+        Boolean((e.rawPayload as { nameSanitized?: boolean })?.nameSanitized),
       sourceId,
       existingDraftId: dup?.existingDraftId,
     });

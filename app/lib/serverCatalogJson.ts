@@ -186,5 +186,48 @@ export async function jsonListCatalogReports(): Promise<CatalogReport[]> {
 
 export async function jsonListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem[]> {
   const store = await readStore();
-  return store.companies.map((c) => ({ ...toListItem(c), id: c.id }));
+  return store.companies.map((c) => ({
+    ...toListItem(c),
+    id: c.id,
+    website: c.website,
+  }));
+}
+
+export async function jsonUpdateCatalogCompanyAdmin(
+  id: number,
+  patch: {
+    name: string;
+    city: string;
+    description: string;
+    website: string;
+    categorySlug: string;
+    logoUrl: string | null;
+  },
+): Promise<CatalogCompanyAdminItem | null> {
+  const store = await readStore();
+  const idx = store.companies.findIndex((c) => c.id === id);
+  if (idx < 0) return null;
+  const cur = store.companies[idx]!;
+  const next: JsonCompany = {
+    ...cur,
+    name: patch.name,
+    city: patch.city,
+    description: patch.description,
+    website: patch.website || null,
+    categorySlug: patch.categorySlug,
+    logoUrl: patch.logoUrl,
+  };
+  store.companies[idx] = next;
+  await writeStore(store);
+  return { ...toListItem(next), id: next.id, website: next.website };
+}
+
+export async function jsonDeleteCatalogCompaniesByIds(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const store = await readStore();
+  const idSet = new Set(ids);
+  const before = store.companies.length;
+  store.companies = store.companies.filter((c) => !idSet.has(c.id));
+  await writeStore(store);
+  return before - store.companies.length;
 }

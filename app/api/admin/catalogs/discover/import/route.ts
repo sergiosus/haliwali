@@ -2,6 +2,11 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { logCatalogDiscover, logCatalogImport } from "../../../../../lib/catalogCatalogLog";
 import { MAX_URLS_PER_BATCH, processUrlBatch } from "../../../../../lib/catalogExtractionService";
+import {
+  getImportCandidateSession,
+  markCandidatesImported,
+  updateImportCandidateSession,
+} from "../../../../../lib/serverCatalogImportCandidatesStore";
 import { recordCatalogImportSession } from "../../../../../lib/serverCatalogImportSessionStore";
 import { countCatalogImportDraftsInDb } from "../../../../../lib/serverCatalogImportDraftStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
@@ -69,6 +74,30 @@ export async function POST(req: Request) {
   const dbDraftCount = await countCatalogImportDraftsInDb();
   logCatalogImport("db_drafts_verify", { count: dbDraftCount });
 
+  const sessionId = Number(body.sessionId);
+  let session = null;
+  if (Number.isFinite(sessionId) && sessionId > 0) {
+    const existing = await getImportCandidateSession(sessionId);
+    if (existing) {
+      const draftIdsByUrl = new Map<string, number>();
+      for (const d of drafts) {
+        const u = String(d.sourceUrlDisplay ?? d.sourceUrl ?? d.website ?? "").trim();
+        if (u) draftIdsByUrl.set(u, d.id);
+      }
+      for (let i = 0; i < urls.length; i++) {
+        const u = urls[i]!.trim();
+        if (!draftIdsByUrl.has(u) && drafts[i]) {
+          const d = drafts[i]!;
+          const key = String(d.sourceUrlDisplay ?? d.sourceUrl ?? d.website ?? u).trim();
+          draftIdsByUrl.set(u, d.id);
+          if (key !== u) draftIdsByUrl.set(key, d.id);
+        }
+      }
+      const updatedCandidates = markCandidatesImported(existing.candidates, urls, draftIdsByUrl);
+      session = await updateImportCandidateSession(sessionId, updatedCandidates);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     drafts,
@@ -80,6 +109,7 @@ export async function POST(req: Request) {
     updated: upsert.updatedIds.length,
     errors,
     dbDraftCount,
+    session,
     importUrl: "/admin/catalogs/import/drafts",
   });
 }

@@ -1,3 +1,4 @@
+import { logAdminCatalog } from "./catalogCatalogLog";
 import { usesPostgres } from "./pgPool";
 import type {
   CatalogCategory,
@@ -75,6 +76,39 @@ export async function listCatalogReportsAdmin(): Promise<CatalogReport[]> {
 
 export async function listCatalogCompaniesAdmin(): Promise<CatalogCompanyAdminItem[]> {
   return withPg(() => pg.pgListAllCompaniesAdmin(), () => json.jsonListAllCompaniesAdmin());
+}
+
+export async function updateCatalogCompanyAdmin(
+  id: number,
+  patch: {
+    name: string;
+    city: string;
+    description: string;
+    website: string;
+    categorySlug: string;
+    logoUrl: string | null;
+  },
+): Promise<CatalogCompanyAdminItem | null> {
+  const updated = await withPg(
+    () => pg.pgUpdateCatalogCompanyAdmin(id, patch),
+    () => json.jsonUpdateCatalogCompanyAdmin(id, patch),
+  );
+  if (updated) {
+    logAdminCatalog("company updated", { id, categorySlug: patch.categorySlug });
+  }
+  return updated;
+}
+
+/** Delete catalog company rows by DB id (category-scoped row; does not touch listings/users). */
+export async function deleteCatalogCompaniesAdmin(ids: number[]): Promise<number> {
+  const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (unique.length === 0) return 0;
+  const deleted = await withPg(
+    () => pg.pgDeleteCatalogCompaniesByIds(unique),
+    () => json.jsonDeleteCatalogCompaniesByIds(unique),
+  );
+  logAdminCatalog("company removed from category", { count: deleted, ids: unique.length });
+  return deleted;
 }
 
 export async function ensureCatalogReady(): Promise<void> {

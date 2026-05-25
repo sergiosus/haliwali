@@ -1,3 +1,4 @@
+import { isLikelyBadCompanyName } from "./catalogCompanyNameExtract";
 import { confidenceFromStored, confidenceLabelRu } from "./catalogConfidence";
 import type { CatalogImportDraftInput } from "./catalogImportTypes";
 import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
@@ -5,6 +6,7 @@ import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
 export function buildDraftWarnings(input: CatalogImportDraftInput): string[] {
   const w: string[] = [];
   if (!input.name.trim()) w.push("Нет названия компании");
+  if (input.name.trim() && isLikelyBadCompanyName(input.name)) w.push("Проверьте название компании");
   if (!input.categorySlug.trim()) w.push("Не указана категория");
   if (!input.city.trim()) w.push("Не указан город");
   if (!input.phone.trim() && !input.email.trim()) w.push("Нет телефона и email");

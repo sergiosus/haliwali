@@ -50,10 +50,22 @@ function normalizeNameKey(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** Short single-token lowercase titles (e.g. «ипешк») from bad H1/meta extraction. */
+function isGarbageSingleTokenName(t: string, key: string): boolean {
+  if (/\s/.test(t)) return false;
+  if (t.length < 3 || t.length > 18) return false;
+  if (t !== t.toLowerCase() || /\d/.test(t)) return false;
+  if (/\b(ооо|ип|зао|оао|пао|ао|нпо|сервис|центр|групп|авто|магазин|строй|ремонт|детейл)\b/i.test(t)) {
+    return false;
+  }
+  return /^[а-яёa-z\-]+$/.test(key);
+}
+
 export function isLikelyBadCompanyName(name: string): boolean {
   const t = name.trim();
   if (t.length < 2 || t.length > 120) return true;
   const key = normalizeNameKey(t);
+  if (isGarbageSingleTokenName(t, key)) return true;
   if (BAD_NAME_EXACT.has(key)) return true;
   if (BAD_NAME_RE.some((re) => re.test(t))) return true;
   if (/\b(для\s+клиент|для\s+покупател)/i.test(t)) return true;
@@ -160,4 +172,36 @@ export function pickCompanyNameFromHtml(
     name: isLikelyBadCompanyName(fallback) ? "" : fallback.slice(0, 200),
     nameSource: fallback ? "fallback" : "none",
   };
+}
+
+/** Prefer domain label over garbage extracted titles; admin can edit later. */
+export function sanitizeExtractedCompanyName(
+  name: string,
+  website: string,
+  domain?: string,
+): string {
+  const t = name.trim();
+  if (t.length >= 2 && !isLikelyBadCompanyName(t)) return t.slice(0, 200);
+  const host = (domain ?? "")
+    .replace(/^www\./i, "")
+    .split("/")[0]!
+    .trim();
+  const fromSite =
+    host ||
+    (() => {
+      try {
+        const u = new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`);
+        return u.hostname.replace(/^www\./i, "");
+      } catch {
+        return "";
+      }
+    })();
+  if (fromSite) {
+    const base = fromSite.split(".")[0] ?? fromSite;
+    if (base.length >= 2) {
+      return (base.charAt(0).toUpperCase() + base.slice(1)).slice(0, 200);
+    }
+    return fromSite.slice(0, 200);
+  }
+  return "Компания (уточнить название)";
 }

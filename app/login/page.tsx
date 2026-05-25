@@ -51,7 +51,8 @@ function LoginPageInner() {
   const [regValue, setRegValue] = useState("");
   const [regPassword, setRegPassword] = useState("");
   const [regPassword2, setRegPassword2] = useState("");
-  const [regAccept, setRegAccept] = useState(false);
+  const [regAcceptTerms, setRegAcceptTerms] = useState(false);
+  const [regAcceptPrivacy, setRegAcceptPrivacy] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
   const [regStep, setRegStep] = useState<"form" | "code">("form");
   const [regCode, setRegCode] = useState("");
@@ -98,7 +99,8 @@ function LoginPageInner() {
     setRegValue("");
     setRegPassword("");
     setRegPassword2("");
-    setRegAccept(false);
+    setRegAcceptTerms(false);
+    setRegAcceptPrivacy(false);
     setRegStep("form");
     setRegCode("");
     setRegSuccess(null);
@@ -122,9 +124,9 @@ function LoginPageInner() {
     if (!email) return true;
     if (p.trim().length < 6) return true;
     if (p !== p2) return true;
-    if (!regAccept) return true;
+    if (!regAcceptTerms || !regAcceptPrivacy) return true;
     return false;
-  }, [loading, regValue, regPassword, regPassword2, regAccept]);
+  }, [loading, regValue, regPassword, regPassword2, regAcceptTerms, regAcceptPrivacy]);
 
   const verifyDisabled = useMemo(() => loading || !/^\d{6}$/.test(regCode), [loading, regCode]);
   const loginCodeVerifyDisabled = useMemo(() => loading || !/^\d{6}$/.test(loginCodeOtp), [loading, loginCodeOtp]);
@@ -633,8 +635,8 @@ function LoginPageInner() {
                         setRegError("Пароли не совпадают");
                         return;
                       }
-                      if (!regAccept) {
-                        setRegError("Необходимо принять условия и политику конфиденциальности");
+                      if (!regAcceptTerms || !regAcceptPrivacy) {
+                        setRegError("Необходимо принять пользовательское соглашение и политику конфиденциальности");
                         return;
                       }
 
@@ -804,32 +806,60 @@ function LoginPageInner() {
                         {showRegPwdMismatch ? <div className="text-sm text-red-700">Пароли не совпадают</div> : null}
                       </label>
 
-                      <label
-                        htmlFor="reg-accept-consent"
-                        className="mt-1 flex cursor-pointer items-start gap-3 text-sm text-black/70"
-                      >
-                        <input
-                          id="reg-accept-consent"
-                          type="checkbox"
-                          checked={regAccept}
-                          onChange={(e) => {
-                            setRegAccept(e.target.checked);
-                            if (regError) setRegError(null);
-                          }}
-                          className="mt-1 h-4 w-4 cursor-pointer rounded border-black/20"
-                          disabled={loading}
-                        />
-                        <span className="min-w-0 pt-px leading-snug">
-                          Я принимаю условия и{" "}
-                          <Link
-                            href="/privacy"
-                            className="cursor-pointer font-medium text-[#2563eb] underline underline-offset-[2px] hover:underline hover:opacity-80 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/35"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            политику конфиденциальности
-                          </Link>
-                        </span>
-                      </label>
+                      <div className="mt-1 grid gap-2 text-sm text-black/70">
+                        <label
+                          htmlFor="reg-accept-terms"
+                          className="flex cursor-pointer items-start gap-3"
+                        >
+                          <input
+                            id="reg-accept-terms"
+                            type="checkbox"
+                            checked={regAcceptTerms}
+                            onChange={(e) => {
+                              setRegAcceptTerms(e.target.checked);
+                              if (regError) setRegError(null);
+                            }}
+                            className="mt-1 h-4 w-4 cursor-pointer rounded border-black/20 accent-black"
+                            disabled={loading}
+                          />
+                          <span className="min-w-0 pt-px leading-snug">
+                            Я принимаю{" "}
+                            <Link
+                              href="/terms"
+                              className="cursor-pointer font-medium text-[#2563eb] underline underline-offset-[2px] hover:underline hover:opacity-80 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/35"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              пользовательское соглашение
+                            </Link>
+                          </span>
+                        </label>
+                        <label
+                          htmlFor="reg-accept-privacy"
+                          className="flex cursor-pointer items-start gap-3"
+                        >
+                          <input
+                            id="reg-accept-privacy"
+                            type="checkbox"
+                            checked={regAcceptPrivacy}
+                            onChange={(e) => {
+                              setRegAcceptPrivacy(e.target.checked);
+                              if (regError) setRegError(null);
+                            }}
+                            className="mt-1 h-4 w-4 cursor-pointer rounded border-black/20 accent-black"
+                            disabled={loading}
+                          />
+                          <span className="min-w-0 pt-px leading-snug">
+                            Я ознакомлен(а) с{" "}
+                            <Link
+                              href="/privacy"
+                              className="cursor-pointer font-medium text-[#2563eb] underline underline-offset-[2px] hover:underline hover:opacity-80 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/35"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              политикой конфиденциальности
+                            </Link>
+                          </span>
+                        </label>
+                      </div>
                     </>
                   ) : (
                     <>

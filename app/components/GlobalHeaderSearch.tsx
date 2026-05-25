@@ -555,7 +555,7 @@ export function GlobalHeaderSearch({
 
   const heroInputCls =
     inputClassName ??
-    "min-h-[3.25rem] w-full flex-1 border-0 bg-transparent py-3 pl-12 pr-3 text-base text-black outline-none placeholder:text-black/45 sm:min-h-[3.5rem] sm:text-lg";
+    "min-h-[3.75rem] w-full flex-1 border-0 bg-transparent py-3.5 pl-12 pr-3 text-lg text-black outline-none placeholder:text-black/45 sm:min-h-[4rem] sm:text-xl";
 
   const headerExternalLinks = useMemo(() => getHeaderSuggestExternalSearchLinks(q), [q]);
 
@@ -740,7 +740,7 @@ export function GlobalHeaderSearch({
           <div className="order-1 flex w-full shrink-0 justify-center sm:order-none sm:w-auto sm:justify-start sm:self-center">
             <HeroMarketplaceEntry />
           </div>
-          <div className="relative order-2 flex-1 min-w-0 max-w-[760px] sm:order-none">
+          <div className="relative order-2 flex-1 min-w-0 max-w-[860px] sm:order-none">
             <div className="overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] transition-shadow focus-within:border-[rgba(255,122,0,0.35)] focus-within:shadow-[0_12px_40px_rgba(255,122,0,0.12)] focus-within:ring-2 focus-within:ring-[rgba(255,122,0,0.22)]">
               <div className="flex flex-col sm:flex-row sm:items-stretch">
                 <div className="relative min-w-0 flex-1">
@@ -767,7 +767,7 @@ export function GlobalHeaderSearch({
                 <button
                   type="button"
                   onClick={trySubmitSearch}
-                  className="flex h-12 min-h-[3.25rem] w-full shrink-0 items-center justify-center border-t border-black/[0.08] bg-[#ff7a00] px-6 text-base font-semibold text-white transition-colors hover:bg-[#f07000] active:bg-[#e56800] sm:h-auto sm:w-auto sm:min-w-[7.5rem] sm:border-l sm:border-t-0"
+                  className="flex h-14 min-h-[3.75rem] w-full shrink-0 items-center justify-center border-t border-black/[0.08] bg-[#ff7a00] px-6 text-base font-semibold text-white transition-colors hover:bg-[#f07000] active:bg-[#e56800] sm:h-auto sm:w-auto sm:min-w-[8rem] sm:border-l sm:border-t-0"
                 >
                   Найти
                 </button>

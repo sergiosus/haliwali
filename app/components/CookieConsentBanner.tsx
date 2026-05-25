@@ -46,20 +46,20 @@ export function CookieConsentBanner() {
     >
       <div
         className={[
-          "mx-auto flex max-w-[960px] flex-col gap-3 rounded-t-[12px] border border-b-0 border-black/[0.07] bg-[#fafafa] px-4 py-2.5 shadow-[0_-2px_10px_rgba(0,0,0,0.1)] sm:px-5 sm:py-3 md:flex-row md:items-center md:gap-4",
+          "mx-auto flex max-w-[960px] flex-col gap-3 rounded-t-[12px] border border-b-0 border-black/[0.07] bg-[#fafafa] px-4 py-2.5 shadow-[0_-8px_26px_rgba(0,0,0,0.13)] sm:px-5 sm:py-3 md:flex-row md:items-center md:gap-4",
         ].join(" ")}
       >
-        <p className="min-w-0 flex-1 text-sm leading-snug text-black/70">
+        <p className="min-w-0 flex-1 text-sm leading-snug text-black/80">
           Мы используем cookie-файлы для работы сайта и улучшения сервиса. Продолжая пользоваться сайтом, вы
           соглашаетесь с их использованием.{" "}
           <Link
             href="/privacy"
-            className="font-medium text-black/80 underline decoration-black/20 underline-offset-2 transition-colors hover:text-black hover:decoration-black/40 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9900]/35"
+            className="font-medium text-black/90 underline decoration-black/20 underline-offset-2 transition-colors hover:text-black hover:decoration-black/40 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9900]/35"
           >
             Политика конфиденциальности
           </Link>
         </p>
-        <div className="flex shrink-0 items-center gap-2 md:self-auto">
+        <div className="flex shrink-0 items-center gap-1.5 md:self-auto">
           <button
             type="button"
             onClick={accept}
@@ -71,7 +71,7 @@ export function CookieConsentBanner() {
             type="button"
             onClick={accept}
             aria-label="Закрыть уведомление"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-black/10 bg-white text-lg leading-none text-black/55 transition-colors hover:border-black/15 hover:bg-black/[0.03] hover:text-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9900]/30"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-transparent bg-white/60 text-lg leading-none text-black/35 opacity-70 transition-colors hover:bg-black/[0.03] hover:text-black/60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9900]/30"
           >
             ×
           </button>

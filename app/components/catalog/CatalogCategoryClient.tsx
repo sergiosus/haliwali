@@ -64,7 +64,7 @@ export function CatalogCategoryClient({
         <button
           type="button"
           onClick={goBack}
-          className="mb-3 inline-flex h-11 w-full items-center justify-center rounded-full border border-black/15 bg-white px-4 text-sm font-medium text-black/70 shadow-sm transition-colors hover:bg-black/[0.03] sm:w-auto sm:justify-start"
+          className="mb-3 inline-flex h-9 w-fit items-center justify-center rounded-full border border-black/15 bg-white px-3 text-sm font-medium text-black/70 shadow-sm transition-colors hover:bg-black/[0.03]"
         >
           ← Назад
         </button>

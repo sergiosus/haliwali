@@ -59,10 +59,10 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
       </Link>
       <div className="mt-auto flex gap-2 border-t border-black/[0.04] px-3 py-2.5">
         <Link
-          href="/contact"
+          href="/chat"
           className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
         >
-          Связаться
+          Написать
         </Link>
         <a
           href={mapHref}

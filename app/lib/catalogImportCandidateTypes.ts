@@ -49,7 +49,7 @@ export const IMPORT_CANDIDATE_STATE_LABEL: Record<ImportCandidateState, string> 
 
 export const IMPORT_CANDIDATE_RESULT_LABEL: Record<ImportCandidateResultStatus, string> = {
   imported: "Импортировано",
-  skipped_duplicate: "Дубликат",
+  skipped_duplicate: "Уже существует",
   skipped_invalid: "Не прошло проверку",
   skipped_hidden: "Не прошло проверку",
   failed: "Ошибка",

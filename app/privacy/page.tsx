@@ -34,6 +34,59 @@ export default function PrivacyPage() {
 
             <div className="mt-8 space-y-8 text-[15px] leading-[1.7] text-black/80 md:text-base md:leading-[1.75]">
               <section className="space-y-3">
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">Оператор</h2>
+                <p>
+                  Оператор персональных данных:{" "}
+                  <span className="font-medium text-black/90">ООО «ГРИНЕКС ТРЕЙД»</span>.
+                </p>
+                <p>
+                  Email:{" "}
+                  <a href="mailto:info@grinextrade.ru" className={linkClass}>
+                    info@grinextrade.ru
+                  </a>
+                </p>
+                <p>
+                  Сайт:{" "}
+                  <a href="https://haliwali.ru" className={linkClass}>
+                    https://haliwali.ru
+                  </a>
+                </p>
+              </section>
+
+              <section className="space-y-3">
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">
+                  Правовые основания обработки
+                </h2>
+                <p>Обработка персональных данных осуществляется:</p>
+                <ul className="list-disc space-y-2 pl-5 marker:text-black/40">
+                  <li>с согласия пользователя;</li>
+                  <li>для исполнения пользовательского соглашения;</li>
+                  <li>для соблюдения требований законодательства Российской Федерации.</li>
+                </ul>
+              </section>
+
+              <section className="space-y-3">
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">
+                  Действия с персональными данными
+                </h2>
+                <p>
+                  Сервис может осуществлять: сбор, запись, систематизацию, хранение, уточнение, использование,
+                  передачу, блокирование, удаление и уничтожение персональных данных.
+                </p>
+              </section>
+
+              <section className="space-y-3">
+                <h2 className="text-[17px] font-semibold text-black md:text-lg">
+                  Трансграничная передача
+                </h2>
+                <p>
+                  Некоторые технические сервисы, используемые платформой, могут обрабатывать технические данные за
+                  пределами Российской Федерации исключительно в объёме, необходимом для работы отдельных функций
+                  сервиса.
+                </p>
+              </section>
+
+              <section className="space-y-3">
                 <h2 className="text-[17px] font-semibold text-black md:text-lg">1. Какие данные мы обрабатываем</h2>
                 <p className="text-black/75">
                   Мы обрабатываем данные в объёме, необходимом для работы платформы. К таким данным относятся:
@@ -132,10 +185,7 @@ export default function PrivacyPage() {
                     <span className="font-medium text-black/90">Jitsi</span>. Во время звонка аудиоданные могут
                     обрабатываться третьей стороной для обеспечения соединения.
                   </li>
-                  <li>
-                    <span className="font-medium text-black/90">Звонки не записываются</span> и{" "}
-                    <span className="font-medium text-black/90">аудио не хранится</span> со стороны Haliwali.
-                  </li>
+                  <li>Сервис не осуществляет запись интернет-аудиозвонков.</li>
                 </ul>
               </section>
 

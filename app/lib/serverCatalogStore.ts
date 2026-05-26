@@ -3,6 +3,7 @@ import { usesPostgres } from "./pgPool";
 import type {
   CatalogCategory,
   CatalogCompanyAdminItem,
+  CatalogCompanyClaimRequest,
   CatalogCompanyImportRow,
   CatalogCompanyListItem,
   CatalogCompanyProfile,
@@ -55,6 +56,37 @@ export async function getRelatedCatalogCompanies(
   return withPg(
     () => pg.pgGetRelatedCompanies(categorySlug, excludeSlug, limit),
     () => json.jsonGetRelatedCompanies(categorySlug, excludeSlug, limit),
+  );
+}
+
+export async function requestCatalogCompanyClaim(input: {
+  slug: string;
+  userId: string;
+  proofType: string;
+  proofValue: string;
+  message: string;
+}): Promise<CatalogCompanyClaimRequest | null> {
+  return withPg(
+    () => pg.pgRequestCatalogCompanyClaim(input),
+    () => json.jsonRequestCatalogCompanyClaim(input),
+  );
+}
+
+export async function listCatalogCompanyClaimsAdmin(): Promise<CatalogCompanyClaimRequest[]> {
+  return withPg(
+    () => pg.pgListCatalogCompanyClaimsAdmin(),
+    () => json.jsonListCatalogCompanyClaimsAdmin(),
+  );
+}
+
+export async function reviewCatalogCompanyClaim(input: {
+  claimId: number;
+  action: "approve" | "reject";
+  reviewedBy: string;
+}): Promise<CatalogCompanyClaimRequest | null> {
+  return withPg(
+    () => pg.pgReviewCatalogCompanyClaim(input),
+    () => json.jsonReviewCatalogCompanyClaim(input),
   );
 }
 

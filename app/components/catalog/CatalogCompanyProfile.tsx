@@ -4,10 +4,13 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { MouseEvent } from "react";
+import { useState } from "react";
 import type { CatalogCompanyListItem, CatalogCompanyProfile } from "../../lib/catalogTypes";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
 import { catalogCategoryVisual } from "../../lib/catalogVisual";
 import { formatCoverageText } from "../../lib/catalogCompanyCities";
+import { catalogExternalHref, catalogPublicSourceHref } from "../../lib/catalogExternalLinks";
+import { CatalogLegalDisclaimer } from "./CatalogLegalDisclaimer";
 
 const YandexMapPicker = dynamic(
   () => import("../maps/YandexMapPicker").then((m) => m.YandexMapPicker),
@@ -25,6 +28,9 @@ export function CatalogCompanyProfileView({
   const visual = catalogCategoryVisual(company.categorySlug);
   const phone = company.contacts.find((c) => c.type === "phone")?.value;
   const coverageText = formatCoverageText(company.serviceCities);
+  const isVerified = company.profileStatus === "verified";
+  const sourceHref = catalogPublicSourceHref(company.sourceUrl, company.website);
+  const [claimState, setClaimState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const mapCenter =
     company.latitude != null && company.longitude != null ?
       { lat: company.latitude, lng: company.longitude }
@@ -34,6 +40,28 @@ export function CatalogCompanyProfileView({
     if (window.history.length > 1) {
       e.preventDefault();
       router.back();
+    }
+  }
+
+  async function requestClaim() {
+    setClaimState("sending");
+    try {
+      const r = await fetch(`/api/catalogs/companies/${encodeURIComponent(company.slug)}/claim`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proofType: "manual",
+          message: "Пользователь запросил подтверждение прав на карточку компании.",
+        }),
+      });
+      if (r.status === 401) {
+        router.push(`/login?next=${encodeURIComponent(`/catalogs/company/${company.slug}`)}`);
+        return;
+      }
+      setClaimState(r.ok ? "sent" : "error");
+    } catch {
+      setClaimState("error");
     }
   }
 
@@ -101,16 +129,21 @@ export function CatalogCompanyProfileView({
           <p className="mt-2 inline-flex rounded-md bg-black/[0.04] px-2 py-0.5 text-xs font-medium text-black/55">
             {company.categoryTitle}
           </p>
+          <p className="mt-2 inline-flex rounded-md bg-black/[0.035] px-2 py-0.5 text-xs font-medium text-black/45">
+            {isVerified ? "Подтверждённая компания" : "Публичный каталог"}
+          </p>
           {company.rating != null ?
             <p className="mt-2 text-sm font-medium text-black/60">★ {company.rating.toFixed(1)}</p>
           : null}
           <div className="mt-4 flex flex-wrap gap-2">
-            <Link
-              href="/contact"
-              className="inline-flex h-10 items-center justify-center rounded-xl bg-[#ff7a00] px-5 text-sm font-semibold text-white hover:bg-[#f07000]"
-            >
-              Написать
-            </Link>
+            {isVerified ?
+              <Link
+                href="/chat"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-[#ff7a00] px-5 text-sm font-semibold text-white hover:bg-[#f07000]"
+              >
+                Написать
+              </Link>
+            : null}
             {company.website ?
               <a
                 href={company.website}
@@ -118,12 +151,27 @@ export function CatalogCompanyProfileView({
                 rel="noopener noreferrer"
                 className="inline-flex h-10 items-center justify-center rounded-xl border border-black/[0.08] px-5 text-sm font-medium text-black/70 hover:bg-black/[0.02]"
               >
-                Сайт
+                {isVerified ? "Сайт" : "Перейти на сайт"}
               </a>
             : null}
+            {!isVerified ?
+              <button
+                type="button"
+                onClick={() => void requestClaim()}
+                disabled={claimState === "sending" || claimState === "sent"}
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-black/[0.08] px-5 text-sm font-medium text-black/55 hover:bg-black/[0.02] disabled:opacity-50"
+              >
+                {claimState === "sending" ? "Отправка..." : claimState === "sent" ? "Заявка отправлена" : "Я представитель компании"}
+              </button>
+            : null}
           </div>
+          {!isVerified && claimState === "error" ?
+            <p className="mt-2 text-xs text-red-700">Не удалось отправить заявку. Попробуйте позже.</p>
+          : null}
         </div>
       </header>
+
+      {!isVerified ? <CatalogLegalDisclaimer /> : null}
 
       {company.images.length > 1 ?
         <div className="flex gap-2 overflow-x-auto pb-1">

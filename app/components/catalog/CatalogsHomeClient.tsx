@@ -6,6 +6,7 @@ import type { CatalogCategory, CatalogCompanyListItem } from "../../lib/catalogT
 import { CatalogCategoryGrid } from "./CatalogCategoryGrid";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
 import { CatalogCompanySubmissionForm } from "./CatalogCompanySubmissionForm";
+import { CatalogLegalDisclaimer } from "./CatalogLegalDisclaimer";
 
 export function CatalogsHomeClient({
   categories,
@@ -107,6 +108,7 @@ export function CatalogsHomeClient({
             ← К объявлениям
           </Link>
         </p>
+        <CatalogLegalDisclaimer className="mx-auto mt-4 max-w-2xl text-center" />
       </div>
     </div>
   );

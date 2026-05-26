@@ -247,7 +247,8 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       if (action === "publish") {
         setMessage(`Опубликовано: ${d.published ?? 0}, пропущено: ${d.skipped ?? 0}`);
       } else if (action === "approve") {
-        setMessage(`Одобрено: ${d.updated ?? ids.length}`);
+        const n = d.updated ?? ids.length;
+        setMessage(ids.length === 1 ? "Кандидат одобрен" : `Одобрено: ${n}`);
       } else if (action === "reject") {
         setMessage(`Отклонено: ${d.updated ?? ids.length}`);
       } else {
@@ -405,7 +406,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
   }
 
   const canReject = tab === "draft" || tab === "saved" || tab === "approved";
-  const canApprove = tab === "draft" || tab === "saved";
+  const canApprove = tab === "draft" || tab === "saved" || tab === "rejected";
   const selectedCount = selectedIds.length;
   const tabLabel = TABS.find((t) => t.id === tab)?.label ?? tab;
 
@@ -705,7 +706,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     </button>
                   </>
                 : null}
-                {(d.status === "published" || d.status === "rejected") ?
+                {d.status === "published" ?
                   <button
                     type="button"
                     disabled={busy}
@@ -714,6 +715,26 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   >
                     Редактировать
                   </button>
+                : null}
+                {d.status === "rejected" ?
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs font-medium disabled:opacity-40"
+                      onClick={() => openEdit(d)}
+                    >
+                      Редактировать
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="rounded-full border border-black/15 px-2.5 py-1 text-xs disabled:opacity-40"
+                      onClick={() => void runAction("approve", [d.id])}
+                    >
+                      {busy ? "…" : "Одобрить"}
+                    </button>
+                  </>
                 : null}
                 {d.status === "saved" ?
                   <>

@@ -6,6 +6,7 @@ import type { CatalogCategory, CatalogCompanyListItem } from "../../lib/catalogT
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
 import { CatalogCompanyMap } from "./CatalogCompanyMap";
 import { CatalogCompanySubmissionForm } from "./CatalogCompanySubmissionForm";
+import { CatalogLegalDisclaimer } from "./CatalogLegalDisclaimer";
 
 type ViewMode = "cards" | "map";
 
@@ -163,6 +164,7 @@ export function CatalogCategoryClient({
           <div className="pt-1 text-center">{addCompanyForm}</div>
         </>
       )}
+      <CatalogLegalDisclaimer className="mx-auto max-w-2xl pt-2 text-center" />
     </div>
   );
 }

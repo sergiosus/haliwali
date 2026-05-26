@@ -3,6 +3,7 @@ import type {
   CatalogCategory,
   CatalogCompanyAdminItem,
   CatalogCompanyContact,
+  CatalogCompanyClaimRequest,
   CatalogCompanyListItem,
   CatalogCompanyProfile,
   CatalogReport,
@@ -39,6 +40,10 @@ function rowContacts(v: unknown): CatalogCompanyContact[] {
     .filter((x): x is CatalogCompanyContact => Boolean(x));
 }
 
+function rowProfileStatus(v: unknown): "imported" | "verified" {
+  return v === "verified" ? "verified" : "imported";
+}
+
 function toCompanyListItem(
   r: {
     slug: string;
@@ -49,6 +54,9 @@ function toCompanyListItem(
     service_cities?: unknown;
     description: string;
     logo_url: string | null;
+    website?: string | null;
+    phone?: string | null;
+    profile_status?: string | null;
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
@@ -66,6 +74,9 @@ function toCompanyListItem(
     locationContext: matchedServiceCity(normalized.primaryCity, normalized.serviceCities, query),
     description: r.description ?? "",
     logoUrl: r.logo_url,
+    website: r.website ?? null,
+    phone: r.phone?.trim() || null,
+    profileStatus: rowProfileStatus(r.profile_status),
     rating: rowRating(r.rating),
     latitude: r.latitude,
     longitude: r.longitude,
@@ -188,14 +199,24 @@ export async function pgSearchCompanies(opts: {
     service_cities: unknown;
     description: string;
     logo_url: string | null;
+    website: string | null;
+    phone: string | null;
+    profile_status: string | null;
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
   }>(
     `
     SELECT co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.service_cities, co.description, co.logo_url, co.rating,
-           loc.latitude, loc.longitude
+           co.city, co.service_cities, co.description, co.logo_url, co.website, co.profile_status, co.rating,
+           loc.latitude, loc.longitude,
+           (
+             SELECT cc.value
+             FROM catalog_company_contacts cc
+             WHERE cc.company_id = co.id AND cc.contact_type = 'phone'
+             ORDER BY cc.sort_order ASC, cc.id ASC
+             LIMIT 1
+           ) AS phone
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
     LEFT JOIN catalog_company_locations loc ON loc.company_id = co.id
@@ -222,13 +243,14 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
     description: string;
     logo_url: string | null;
     website: string | null;
+    profile_status: string | null;
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
   }>(
     `
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.rating,
+           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.profile_status, co.rating,
            loc.latitude, loc.longitude
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
@@ -240,13 +262,23 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
   const r = rows[0];
   if (!r) return null;
 
-  const [imgRes, contactRes] = await Promise.all([
+  const [imgRes, contactRes, sourceRes] = await Promise.all([
     pool.query<{ url: string }>(
       `SELECT url FROM catalog_company_images WHERE company_id = $1 ORDER BY sort_order ASC, id ASC`,
       [r.id],
     ),
     pool.query<{ contact_type: string; value: string }>(
       `SELECT contact_type, value FROM catalog_company_contacts WHERE company_id = $1 ORDER BY sort_order ASC, id ASC`,
+      [r.id],
+    ),
+    pool.query<{ source_url: string }>(
+      `
+      SELECT source_url
+      FROM catalog_company_source_history
+      WHERE company_id = $1
+      ORDER BY imported_at DESC, id DESC
+      LIMIT 1
+      `,
       [r.id],
     ),
   ]);
@@ -267,10 +299,13 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
     description: r.description ?? "",
     logoUrl: r.logo_url,
     website: r.website,
+    sourceUrl: sourceRes.rows[0]?.source_url?.trim() || null,
+    profileStatus: rowProfileStatus(r.profile_status),
     rating: rowRating(r.rating),
     latitude: r.latitude,
     longitude: r.longitude,
     images,
+    phone: contactRes.rows.find((c) => c.contact_type === "phone")?.value?.trim() || null,
     contacts: contactRes.rows.map((c) => ({
       type: c.contact_type === "phone" || c.contact_type === "email" ? c.contact_type : "other",
       value: c.value,
@@ -290,6 +325,31 @@ export async function pgGetRelatedCompanies(
 
 export async function pgEnsureCategoriesSeeded(): Promise<void> {
   const pool = getPool();
+  await pool.query(`
+    ALTER TABLE catalog_companies
+      ADD COLUMN IF NOT EXISTS profile_status TEXT NOT NULL DEFAULT 'imported',
+      ADD COLUMN IF NOT EXISTS claimed_by_user_id TEXT,
+      ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS catalog_company_claim_requests (
+      id SERIAL PRIMARY KEY,
+      company_id INT NOT NULL REFERENCES catalog_companies (id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      proof_type TEXT NOT NULL DEFAULT 'manual',
+      proof_value TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      reviewed_at TIMESTAMPTZ,
+      reviewed_by TEXT
+    )
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_company_claim_pending_unique
+      ON catalog_company_claim_requests (company_id, user_id)
+      WHERE status = 'pending'
+  `);
   for (const c of CATALOG_CATEGORY_SEED) {
     await pool.query(
       `
@@ -299,6 +359,155 @@ export async function pgEnsureCategoriesSeeded(): Promise<void> {
       `,
       [c.slug, c.title, c.subtitle, c.iconKey, c.sortOrder],
     );
+  }
+}
+
+export async function pgRequestCatalogCompanyClaim(input: {
+  slug: string;
+  userId: string;
+  proofType: string;
+  proofValue: string;
+  message: string;
+}): Promise<CatalogCompanyClaimRequest | null> {
+  const pool = getPool();
+  await pgEnsureCategoriesSeeded();
+  const company = await pool.query<{ id: number }>(
+    `SELECT id FROM catalog_companies WHERE slug = $1 AND is_published = TRUE LIMIT 1`,
+    [input.slug],
+  );
+  const companyId = company.rows[0]?.id;
+  if (!companyId) return null;
+
+  const { rows } = await pool.query<{
+    id: number;
+    company_id: number;
+    user_id: string;
+    status: "pending" | "approved" | "rejected";
+    proof_type: string;
+    proof_value: string;
+    message: string;
+    created_at: Date;
+  }>(
+    `
+    INSERT INTO catalog_company_claim_requests (company_id, user_id, proof_type, proof_value, message)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (company_id, user_id) WHERE status = 'pending'
+    DO UPDATE SET proof_type = EXCLUDED.proof_type, proof_value = EXCLUDED.proof_value, message = EXCLUDED.message
+    RETURNING id, company_id, user_id, status, proof_type, proof_value, message, created_at
+    `,
+    [
+      companyId,
+      input.userId,
+      input.proofType.slice(0, 40),
+      input.proofValue.slice(0, 300),
+      input.message.slice(0, 1000),
+    ],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    userId: row.user_id,
+    status: row.status,
+    proofType: row.proof_type,
+    proofValue: row.proof_value,
+    message: row.message,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+export async function pgListCatalogCompanyClaimsAdmin(): Promise<CatalogCompanyClaimRequest[]> {
+  const pool = getPool();
+  await pgEnsureCategoriesSeeded();
+  const { rows } = await pool.query<{
+    id: number;
+    company_id: number;
+    company_name: string;
+    company_slug: string;
+    user_id: string;
+    status: "pending" | "approved" | "rejected";
+    proof_type: string;
+    proof_value: string;
+    message: string;
+    created_at: Date;
+  }>(`
+    SELECT r.id, r.company_id, co.name AS company_name, co.slug AS company_slug, r.user_id, r.status,
+           r.proof_type, r.proof_value, r.message, r.created_at
+    FROM catalog_company_claim_requests r
+    JOIN catalog_companies co ON co.id = r.company_id
+    ORDER BY r.created_at DESC
+    LIMIT 200
+  `);
+  return rows.map((row) => ({
+    id: row.id,
+    companyId: row.company_id,
+    companyName: row.company_name,
+    companySlug: row.company_slug,
+    userId: row.user_id,
+    status: row.status,
+    proofType: row.proof_type,
+    proofValue: row.proof_value,
+    message: row.message,
+    createdAt: row.created_at.toISOString(),
+  }));
+}
+
+export async function pgReviewCatalogCompanyClaim(input: {
+  claimId: number;
+  action: "approve" | "reject";
+  reviewedBy: string;
+}): Promise<CatalogCompanyClaimRequest | null> {
+  const pool = getPool();
+  await pgEnsureCategoriesSeeded();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{
+      id: number;
+      company_id: number;
+      user_id: string;
+      status: "pending" | "approved" | "rejected";
+      proof_type: string;
+      proof_value: string;
+      message: string;
+      created_at: Date;
+    }>(
+      `
+      UPDATE catalog_company_claim_requests
+      SET status = $2, reviewed_at = NOW(), reviewed_by = $3
+      WHERE id = $1
+      RETURNING id, company_id, user_id, status, proof_type, proof_value, message, created_at
+      `,
+      [input.claimId, input.action === "approve" ? "approved" : "rejected", input.reviewedBy],
+    );
+    const row = rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    if (input.action === "approve") {
+      await client.query(
+        `UPDATE catalog_companies SET profile_status = 'verified', claimed_by_user_id = $2, verified_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [row.company_id, row.user_id],
+      );
+    }
+    await client.query("COMMIT");
+    return {
+      id: row.id,
+      companyId: row.company_id,
+      userId: row.user_id,
+      status: row.status,
+      proofType: row.proof_type,
+      proofValue: row.proof_value,
+      message: row.message,
+      createdAt: row.created_at.toISOString(),
+    };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
 }
 
@@ -330,8 +539,10 @@ export async function pgImportCompanies(
     const normalizedCities = normalizeCatalogCompanyCities(row.city.trim());
     const ins = await pool.query<{ id: number }>(
       `
-      INSERT INTO catalog_companies (slug, name, category_slug, city, service_cities, address, description, website, is_published)
-      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, TRUE)
+      INSERT INTO catalog_companies (
+        slug, name, category_slug, city, service_cities, address, description, website, profile_status, is_published
+      )
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, 'imported', TRUE)
       RETURNING id
       `,
       [
@@ -423,13 +634,14 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     description: string;
     logo_url: string | null;
     website: string | null;
+    profile_status: string | null;
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
     contacts: unknown;
   }>(`
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.service_cities, co.description, co.logo_url, co.website, co.rating,
+           co.city, co.service_cities, co.description, co.logo_url, co.website, co.profile_status, co.rating,
            loc.latitude, loc.longitude,
            COALESCE(
              jsonb_agg(jsonb_build_object('type', cc.contact_type, 'value', cc.value) ORDER BY cc.sort_order, cc.id)
@@ -447,7 +659,6 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
   return rows.map((r) => ({
     ...toCompanyListItem(r),
     id: r.id,
-    website: r.website,
     contacts: rowContacts(r.contacts),
   }));
 }
@@ -477,6 +688,7 @@ export async function pgUpdateCatalogCompanyAdmin(
     description: string;
     logo_url: string | null;
     website: string | null;
+    profile_status: string | null;
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
@@ -487,10 +699,10 @@ export async function pgUpdateCatalogCompanyAdmin(
       SET name = $2, city = $3, description = $4, website = NULLIF($5, ''),
           category_slug = $6, logo_url = $7, service_cities = $8::jsonb, updated_at = NOW()
       WHERE id = $1
-      RETURNING id, slug, name, category_slug, city, service_cities, description, logo_url, website, rating
+      RETURNING id, slug, name, category_slug, city, service_cities, description, logo_url, website, profile_status, rating
     )
     SELECT u.id, u.slug, u.name, u.category_slug, cat.title AS category_title,
-           u.city, u.service_cities, u.description, u.logo_url, u.website, u.rating,
+           u.city, u.service_cities, u.description, u.logo_url, u.website, u.profile_status, u.rating,
            loc.latitude, loc.longitude
     FROM updated u
     JOIN catalog_categories cat ON cat.slug = u.category_slug
@@ -512,6 +724,5 @@ export async function pgUpdateCatalogCompanyAdmin(
   return {
     ...toCompanyListItem(r),
     id: r.id,
-    website: r.website,
   };
 }

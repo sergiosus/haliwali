@@ -507,8 +507,8 @@ async function pgWriteCompanyFromDraft(
     const ins = await pool.query<{ id: number }>(
       `
       INSERT INTO catalog_companies (
-        slug, name, category_slug, city, service_cities, address, description, logo_url, website, is_published
-      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, TRUE)
+        slug, name, category_slug, city, service_cities, address, description, logo_url, website, profile_status, is_published
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, 'imported', TRUE)
       RETURNING id
       `,
       [

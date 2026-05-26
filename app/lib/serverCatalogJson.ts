@@ -4,7 +4,9 @@ import { assertFileStoreNotUsedInProduction } from "./productionGuards";
 import type {
   CatalogCategory,
   CatalogCompanyAdminItem,
+  CatalogCompanyClaimRequest,
   CatalogCompanyImportRow,
+  CatalogCompanyProfileStatus,
   CatalogCompanyListItem,
   CatalogCompanyProfile,
   CatalogReport,
@@ -29,18 +31,37 @@ type JsonCompany = {
   description: string;
   logoUrl: string | null;
   website: string | null;
+  sourceUrl?: string | null;
   rating: number | null;
   latitude: number | null;
   longitude: number | null;
   images: string[];
   contacts: { type: "phone" | "email" | "other"; value: string }[];
   isPublished: boolean;
+  profileStatus?: CatalogCompanyProfileStatus;
+  claimedByUserId?: string | null;
+  verifiedAt?: string | null;
+};
+
+export type JsonCatalogCompanyClaimRequest = {
+  id: number;
+  companyId: number;
+  userId: string;
+  status: "pending" | "approved" | "rejected";
+  proofType: string;
+  proofValue: string;
+  message: string;
+  createdAt: string;
+  reviewedAt?: string | null;
+  reviewedBy?: string | null;
 };
 
 type JsonStore = {
   nextId: number;
+  nextClaimRequestId?: number;
   companies: JsonCompany[];
   reports: CatalogReport[];
+  claimRequests?: JsonCatalogCompanyClaimRequest[];
 };
 
 async function readStore(): Promise<JsonStore> {
@@ -48,10 +69,14 @@ async function readStore(): Promise<JsonStore> {
   try {
     const raw = await readFile(path.join(process.cwd(), STORE_PATH), "utf8");
     const parsed = JSON.parse(raw) as JsonStore;
-    if (!parsed.companies) return { nextId: 1, companies: [], reports: [] };
-    return parsed;
+    if (!parsed.companies) return { nextId: 1, nextClaimRequestId: 1, companies: [], reports: [], claimRequests: [] };
+    return {
+      ...parsed,
+      nextClaimRequestId: parsed.nextClaimRequestId ?? 1,
+      claimRequests: parsed.claimRequests ?? [],
+    };
   } catch {
-    return { nextId: 1, companies: [], reports: [] };
+    return { nextId: 1, nextClaimRequestId: 1, companies: [], reports: [], claimRequests: [] };
   }
 }
 
@@ -78,6 +103,9 @@ function toListItem(c: JsonCompany, query = ""): CatalogCompanyListItem {
     locationContext: matchedServiceCity(normalized.primaryCity, normalized.serviceCities, query),
     description: c.description,
     logoUrl: c.logoUrl,
+    website: c.website,
+    phone: c.contacts.find((x) => x.type === "phone")?.value?.trim() || null,
+    profileStatus: c.profileStatus ?? "imported",
     rating: c.rating,
     latitude: c.latitude,
     longitude: c.longitude,
@@ -144,6 +172,7 @@ export async function jsonGetCompanyBySlug(slug: string): Promise<CatalogCompany
     ...toListItem(c),
     address: c.address,
     website: c.website,
+    sourceUrl: c.sourceUrl ?? null,
     images,
     contacts: c.contacts,
     services: [],
@@ -157,6 +186,90 @@ export async function jsonGetRelatedCompanies(
 ): Promise<CatalogCompanyListItem[]> {
   const items = await jsonSearchCompanies({ categorySlug, limit: limit + 8 });
   return items.filter((c) => c.slug !== excludeSlug).slice(0, limit);
+}
+
+export async function jsonRequestCatalogCompanyClaim(input: {
+  slug: string;
+  userId: string;
+  proofType: string;
+  proofValue: string;
+  message: string;
+}): Promise<CatalogCompanyClaimRequest | null> {
+  const store = await readStore();
+  const company = store.companies.find((c) => c.slug === input.slug && c.isPublished);
+  if (!company) return null;
+  const requests = store.claimRequests ?? [];
+  const existing = requests.find(
+    (request) =>
+      request.companyId === company.id &&
+      request.userId === input.userId &&
+      request.status === "pending",
+  );
+  const now = new Date().toISOString();
+  if (existing) {
+    existing.proofType = input.proofType.slice(0, 40);
+    existing.proofValue = input.proofValue.slice(0, 300);
+    existing.message = input.message.slice(0, 1000);
+    await writeStore({ ...store, claimRequests: requests });
+    return existing;
+  }
+  const request: JsonCatalogCompanyClaimRequest = {
+    id: store.nextClaimRequestId ?? 1,
+    companyId: company.id,
+    userId: input.userId,
+    status: "pending",
+    proofType: input.proofType.slice(0, 40),
+    proofValue: input.proofValue.slice(0, 300),
+    message: input.message.slice(0, 1000),
+    createdAt: now,
+  };
+  store.nextClaimRequestId = request.id + 1;
+  store.claimRequests = [request, ...requests];
+  await writeStore(store);
+  return request;
+}
+
+export async function jsonListCatalogCompanyClaimsAdmin(): Promise<CatalogCompanyClaimRequest[]> {
+  const store = await readStore();
+  const companiesById = new Map(store.companies.map((company) => [company.id, company]));
+  return (store.claimRequests ?? []).slice(0, 200).map((request) => {
+    const company = companiesById.get(request.companyId);
+    return {
+      id: request.id,
+      companyId: request.companyId,
+      companyName: company?.name,
+      companySlug: company?.slug,
+      userId: request.userId,
+      status: request.status,
+      proofType: request.proofType,
+      proofValue: request.proofValue,
+      message: request.message,
+      createdAt: request.createdAt,
+    };
+  });
+}
+
+export async function jsonReviewCatalogCompanyClaim(input: {
+  claimId: number;
+  action: "approve" | "reject";
+  reviewedBy: string;
+}): Promise<CatalogCompanyClaimRequest | null> {
+  const store = await readStore();
+  const request = (store.claimRequests ?? []).find((item) => item.id === input.claimId);
+  if (!request) return null;
+  request.status = input.action === "approve" ? "approved" : "rejected";
+  request.reviewedAt = new Date().toISOString();
+  request.reviewedBy = input.reviewedBy;
+  if (input.action === "approve") {
+    const company = store.companies.find((item) => item.id === request.companyId);
+    if (company) {
+      company.profileStatus = "verified";
+      company.claimedByUserId = request.userId;
+      company.verifiedAt = request.reviewedAt;
+    }
+  }
+  await writeStore(store);
+  return request;
 }
 
 export async function jsonImportCompanies(
@@ -192,6 +305,7 @@ export async function jsonImportCompanies(
       images: [],
       contacts: row.phone.trim() ? [{ type: "phone", value: row.phone.trim() }] : [],
       isPublished: true,
+      profileStatus: "imported",
     });
     imported += 1;
   }
@@ -209,7 +323,6 @@ export async function jsonListAllCompaniesAdmin(): Promise<CatalogCompanyAdminIt
   return store.companies.map((c) => ({
     ...toListItem(c),
     id: c.id,
-    website: c.website,
     contacts: c.contacts,
   }));
 }
@@ -243,7 +356,7 @@ export async function jsonUpdateCatalogCompanyAdmin(
   };
   store.companies[idx] = next;
   await writeStore(store);
-  return { ...toListItem(next), id: next.id, website: next.website };
+  return { ...toListItem(next), id: next.id };
 }
 
 export async function jsonDeleteCatalogCompaniesByIds(ids: number[]): Promise<number> {

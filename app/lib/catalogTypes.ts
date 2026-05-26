@@ -12,6 +12,8 @@ export type CatalogCompanyContact = {
   value: string;
 };
 
+export type CatalogCompanyProfileStatus = "imported" | "verified";
+
 export type CatalogCompanyListItem = {
   slug: string;
   name: string;
@@ -22,6 +24,10 @@ export type CatalogCompanyListItem = {
   locationContext: string | null;
   description: string;
   logoUrl: string | null;
+  website: string | null;
+  /** First phone contact, for imported cards without a website. */
+  phone?: string | null;
+  profileStatus: CatalogCompanyProfileStatus;
   rating: number | null;
   latitude: number | null;
   longitude: number | null;
@@ -30,13 +36,14 @@ export type CatalogCompanyListItem = {
 /** Admin-only: includes DB id for merge/import/edit */
 export type CatalogCompanyAdminItem = CatalogCompanyListItem & {
   id: number;
-  website: string | null;
   contacts?: CatalogCompanyContact[];
 };
 
 export type CatalogCompanyProfile = CatalogCompanyListItem & {
   address: string;
   website: string | null;
+  /** Original import/discovery URL when different from website. */
+  sourceUrl?: string | null;
   images: string[];
   contacts: CatalogCompanyContact[];
   services: string[];
@@ -49,6 +56,19 @@ export type CatalogReport = {
   reason: string;
   details: string;
   status: string;
+  createdAt: string;
+};
+
+export type CatalogCompanyClaimRequest = {
+  id: number;
+  companyId: number;
+  companyName?: string;
+  companySlug?: string;
+  userId: string;
+  status: "pending" | "approved" | "rejected";
+  proofType: string;
+  proofValue: string;
+  message: string;
   createdAt: string;
 };
 

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminCatalogCompanyEditModal } from "./AdminCatalogCompanyEditModal";
+import { AdminCatalogClaimsSection } from "./AdminCatalogClaimsSection";
 import { AdminCatalogImportCandidatesSection } from "./catalogs/AdminCatalogImportCandidatesSection";
 import { isLikelyBadCompanyName } from "../lib/catalogCompanyNameExtract";
 import type { CatalogCategory, CatalogCompanyAdminItem, CatalogReport } from "../lib/catalogTypes";
@@ -213,6 +214,15 @@ export function AdminCatalogPanel() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{co.name}</span>
+                  <span
+                    className={
+                      co.profileStatus === "verified" ?
+                        "rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800"
+                      : "rounded-full bg-black/[0.04] px-2 py-0.5 text-xs font-medium text-black/45"
+                    }
+                  >
+                    {co.profileStatus === "verified" ? "Подтверждённая" : "Публичный каталог"}
+                  </span>
                   {isLikelyBadCompanyName(co.name) ?
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
                       Можно редактировать
@@ -264,6 +274,7 @@ export function AdminCatalogPanel() {
 
       {tab === "import" ?
         <div className="space-y-4">
+          <AdminCatalogClaimsSection />
           <div className="flex flex-wrap gap-2 text-sm">
             <Link
               href="/admin/catalogs/import"

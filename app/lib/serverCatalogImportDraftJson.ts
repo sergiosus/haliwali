@@ -358,6 +358,8 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
       description: string;
       logoUrl: string | null;
       website: string | null;
+      sourceUrl?: string | null;
+      profileStatus?: "imported" | "verified";
       rating: number | null;
       latitude: number | null;
       longitude: number | null;
@@ -417,12 +419,14 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
       description: d.description.trim(),
       logoUrl: d.imageUrl,
       website: d.website.trim() || null,
+      sourceUrl: d.sourceUrl?.trim() || null,
       rating: null,
       latitude: d.latitude,
       longitude: d.longitude,
       images,
       contacts,
       isPublished: true,
+      profileStatus: "imported",
     });
     d.status = "published";
     d.publishedCompanySlug = slug;
@@ -473,6 +477,8 @@ export async function jsonMergeDraftIntoCompany(
       description: string;
       logoUrl: string | null;
       website: string | null;
+      sourceUrl?: string | null;
+      profileStatus?: "imported" | "verified";
       rating: number | null;
       latitude: number | null;
       longitude: number | null;

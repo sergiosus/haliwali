@@ -14,6 +14,7 @@ import {
   privateChatFileApiUrl,
   savePrivateChatFile,
 } from "../../../lib/serverChatPrivateFiles";
+import { isCompanyConversationParticipant } from "../../../lib/serverCompanyChatsStore";
 import { isListingConversationParticipant } from "../../../lib/serverListingChatsStore";
 import { chatUserBlockedForbidden } from "../../../lib/serverChatUserBlock";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
@@ -36,7 +37,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
     }
     const chatIdRaw = typeof form.get("chatId") === "string" ? (form.get("chatId") as string).trim() : "";
-    if (!chatIdRaw || !isListingConversationParticipant(userId, chatIdRaw)) {
+    const participantOk = chatIdRaw.startsWith("company:")
+      ? isCompanyConversationParticipant(userId, chatIdRaw)
+      : isListingConversationParticipant(userId, chatIdRaw);
+    if (!chatIdRaw || !participantOk) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
 

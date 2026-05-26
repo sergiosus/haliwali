@@ -212,8 +212,10 @@ function openDraftsInNewTab() {
 
 export function AdminCatalogImportCandidatesSection({
   compact = false,
+  onChanged,
 }: {
   compact?: boolean;
+  onChanged?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
@@ -561,6 +563,7 @@ export function AdminCatalogImportCandidatesSection({
       setMessage(
         `${limitNotice}Импортировано: ${summary.imported} · Дубликаты: ${summary.duplicates} · Ошибки: ${summary.errors} · Пропущено: ${summary.skipped}`,
       );
+      onChanged?.();
     } catch {
       setMessage("Ошибка сети");
     } finally {

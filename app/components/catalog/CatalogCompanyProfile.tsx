@@ -65,6 +65,7 @@ export function CatalogCompanyProfileView({
   const phone = company.contacts.find((c) => c.type === "phone")?.value;
   const coverageText = formatCoverageText(company.serviceCities);
   const isVerified = company.profileStatus === "verified";
+  const canMessageCompany = isVerified && Boolean(company.id && company.claimedByUserId);
   const originView = catalogCompanyOriginView(company);
   const sourceHref = catalogPublicSourceHref(company.sourceUrl, company.website);
   const mapHref = catalogYandexMapsHref(company);
@@ -186,9 +187,9 @@ export function CatalogCompanyProfileView({
             <p className="mt-2 text-sm font-medium text-black/60">★ {company.rating.toFixed(1)}</p>
           : null}
           <div className="mt-4 flex flex-wrap gap-2">
-            {isVerified ?
+            {canMessageCompany ?
               <Link
-                href="/chat"
+                href={`/messages/company/${encodeURIComponent(String(company.id))}`}
                 className="inline-flex h-10 items-center justify-center rounded-xl bg-[#ff7a00] px-5 text-sm font-semibold text-white hover:bg-[#f07000]"
               >
                 Написать

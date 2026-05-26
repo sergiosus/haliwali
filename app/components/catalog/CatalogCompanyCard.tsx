@@ -24,10 +24,10 @@ function Stars({ rating }: { rating: number | null }) {
 
 export function CatalogCompanyCard({ company }: { company: CatalogCompanyListItem }) {
   const visual = catalogCategoryVisual(company.categorySlug);
-  const isVerified = company.profileStatus === "verified";
+  const canMessageCompany = company.profileStatus === "verified" && Boolean(company.id && company.claimedByUserId);
   const originView = catalogCompanyOriginView(company);
   const mapHref = catalogYandexMapsHref(company);
-  const hasFooterAction = isVerified || Boolean(company.website || company.phone || mapHref);
+  const hasFooterAction = canMessageCompany || Boolean(company.website || company.phone || mapHref);
   const locationLabel = company.locationContext ?? company.city;
 
   return (
@@ -69,9 +69,9 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
       </Link>
       {hasFooterAction ?
         <div className="mt-auto flex gap-2 border-t border-black/[0.04] px-3 py-2.5">
-          {isVerified ?
+          {canMessageCompany ?
             <Link
-              href="/chat"
+              href={`/messages/company/${encodeURIComponent(String(company.id))}`}
               className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
             >
               Написать

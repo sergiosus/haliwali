@@ -59,6 +59,22 @@ export async function getRelatedCatalogCompanies(
   );
 }
 
+export type CatalogCompanyChatTarget = {
+  id: number;
+  slug: string;
+  name: string;
+  categorySlug: string;
+  profileStatus: "imported" | "verified";
+  ownerUserId: string | null;
+};
+
+export async function getCatalogCompanyChatTarget(companyId: number): Promise<CatalogCompanyChatTarget | null> {
+  return withPg(
+    () => pg.pgGetCatalogCompanyChatTarget(companyId),
+    () => json.jsonGetCatalogCompanyChatTarget(companyId),
+  );
+}
+
 export async function listCatalogCompaniesSitemap(): Promise<CatalogCompanyListItem[]> {
   return withPg(
     () => pg.pgListCatalogCompaniesSitemap(),

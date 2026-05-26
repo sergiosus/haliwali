@@ -14,7 +14,6 @@ import { listingDealStatusBadgeRu } from "../lib/listingCardMeta";
 import type { Listing, ListingStatus } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { inferredSupportSenderType, supportMessageLabelAdminPanel } from "../lib/supportUiLabels";
-import type { CatalogCompanyClaimRequest } from "../lib/catalogTypes";
 import { AdminCatalogPanel } from "./AdminCatalogPanel";
 
 const statusLabel: Record<ListingStatus, string> = {
@@ -149,14 +148,8 @@ function ListingCard({
   );
 }
 
-type AdminTab =
-  | "pending"
-  | "published"
-  | "rejected"
-  | "reports"
-  | "support"
-  | "users"
-  | "catalog";
+type AdminTab = "ads" | "reports" | "support" | "users" | "catalog";
+type ListingModerationTab = "pending" | "published" | "rejected";
 
 const supportCategoryRu: Record<string, string> = {
   listing_problem: "Проблема с объявлением",
@@ -315,13 +308,10 @@ function Tabs({
     reports: number;
     support: number;
     users: number;
-    catalogClaims: number;
   };
 }) {
   const tabs: Array<{ key: AdminTab; label: string; counter?: number }> = [
-    { key: "pending", label: "На проверке" },
-    { key: "published", label: "Опубликованные" },
-    { key: "rejected", label: "Отклонённые" },
+    { key: "ads", label: "Объявления" },
     { key: "reports", label: "Жалобы", counter: counts.reports },
     { key: "support", label: "Обращения", counter: counts.support },
     { key: "users", label: "Пользователи", counter: counts.users },
@@ -349,15 +339,7 @@ function Tabs({
               <span className="text-black/50">({t.counter ?? 0})</span>
             ) : t.key === "support" ? (
               <span className="text-black/50">({t.counter ?? 0})</span>
-            ) : t.key === "pending" ? (
-              <span className="text-black/50">({counts.pending})</span>
-            ) : t.key === "published" ? (
-              <span className="text-black/50">({counts.published})</span>
-            ) : t.key === "catalog" ? (
-              counts.catalogClaims > 0 ? <span className="text-black/50">({counts.catalogClaims})</span> : null
-            ) : (
-              <span className="text-black/50">({counts.rejected})</span>
-            )}
+            ) : null}
           </button>
         );
       })}
@@ -367,7 +349,8 @@ function Tabs({
 
 export default function AdminClient() {
   const { loaded, listings, setStatus, deleteListing, refreshListings } = useListingsStore();
-  const [tab, setTab] = useState<AdminTab>("pending");
+  const [tab, setTab] = useState<AdminTab>("ads");
+  const [listingTab, setListingTab] = useState<ListingModerationTab>("pending");
   const [reportsReload, setReportsReload] = useState(0);
   const [reports, setReports] = useState<AdminReportRow[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUserRow[]>([]);
@@ -405,22 +388,7 @@ export default function AdminClient() {
     reports: 0,
     support: 0,
     users: 0,
-    catalogClaims: 0,
   });
-
-  const loadCatalogClaimPendingCount = useCallback(() => {
-    void fetch("/api/admin/catalog/companies/claims", { credentials: "include", cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: { claims?: CatalogCompanyClaimRequest[] }) => {
-        const pending = (d.claims ?? []).filter((claim) => claim.status === "pending").length;
-        setCounts((c) => ({ ...c, catalogClaims: pending }));
-      })
-      .catch(() => setCounts((c) => ({ ...c, catalogClaims: 0 })));
-  }, []);
-
-  const handleCatalogClaimPendingCountChange = useCallback((count: number) => {
-    setCounts((c) => ({ ...c, catalogClaims: count }));
-  }, []);
 
   const sorted = useMemo(() => {
     return [...listings].sort((a, b) => b.createdAt - a.createdAt);
@@ -438,10 +406,6 @@ export default function AdminClient() {
     }
     setCounts((c) => ({ ...c, pending, published, rejected }));
   }, [loaded, listings]);
-
-  useEffect(() => {
-    loadCatalogClaimPendingCount();
-  }, [loadCatalogClaimPendingCount]);
 
   const ownerLabelById = useMemo(() => {
     const m = new Map<string, string>();
@@ -502,12 +466,12 @@ export default function AdminClient() {
   );
 
   const filtered = useMemo(() => {
-    if (tab === "pending") return sorted.filter((l) => l.status === "pending");
-    if (tab === "rejected") return sorted.filter((l) => l.status === "rejected");
-    if (tab === "published") return sorted.filter((l) => l.status === "auto" || l.status === "approved");
-    if (tab === "support" || tab === "users" || tab === "reports" || tab === "catalog") return [];
+    if (tab !== "ads") return [];
+    if (listingTab === "pending") return sorted.filter((l) => l.status === "pending");
+    if (listingTab === "rejected") return sorted.filter((l) => l.status === "rejected");
+    if (listingTab === "published") return sorted.filter((l) => l.status === "auto" || l.status === "approved");
     return [];
-  }, [sorted, tab]);
+  }, [sorted, tab, listingTab]);
 
   const bumpReports = useCallback(() => setReportsReload((n) => n + 1), []);
 
@@ -1258,9 +1222,7 @@ export default function AdminClient() {
           ) : null}
         </div>
       ) : tab === "catalog" ? (
-        <AdminCatalogPanel
-          onClaimPendingCountChange={handleCatalogClaimPendingCountChange}
-        />
+        <AdminCatalogPanel />
       ) : tab === "support" ? (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1 space-y-3">
@@ -1655,30 +1617,58 @@ export default function AdminClient() {
           ) : null}
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {filtered.map((l) => (
-            <ListingCard
-              key={l.id}
-              listing={l}
-              ownerLabel={
-                (l.authorPublicName ?? "").trim() || ownerLabelById.get((l.ownerId ?? "").trim()) || ""
-              }
-              onPublish={() => void setStatus(l.id, "approved").catch(() => {})}
-              onReject={() => void setStatus(l.id, "rejected").catch(() => {})}
-              onDelete={() => void deleteListing(l.id).catch(() => {})}
-            />
-          ))}
-          {filtered.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-black/15 bg-white p-6 md:col-span-2">
-              <div className="text-sm text-black/70">
-                {tab === "pending"
-                  ? "Нет объявлений на проверке."
-                  : tab === "published"
-                    ? "Нет опубликованных объявлений."
-                    : "Нет отклонённых объявлений."}
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["pending", "На проверке", counts.pending],
+                ["published", "Опубликованные", counts.published],
+                ["rejected", "Отклонённые", counts.rejected],
+              ] as const
+            ).map(([key, label, count]) => {
+              const active = listingTab === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setListingTab(key)}
+                  className={[
+                    "h-9 rounded-2xl border px-4 text-sm font-semibold transition-colors",
+                    active ?
+                      "border-black/15 bg-black/5 text-black"
+                    : "border-black/10 bg-white text-black/70 hover:bg-black/5",
+                  ].join(" ")}
+                >
+                  {label} <span className="text-black/50">({count})</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {filtered.map((l) => (
+              <ListingCard
+                key={l.id}
+                listing={l}
+                ownerLabel={
+                  (l.authorPublicName ?? "").trim() || ownerLabelById.get((l.ownerId ?? "").trim()) || ""
+                }
+                onPublish={() => void setStatus(l.id, "approved").catch(() => {})}
+                onReject={() => void setStatus(l.id, "rejected").catch(() => {})}
+                onDelete={() => void deleteListing(l.id).catch(() => {})}
+              />
+            ))}
+            {filtered.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-black/15 bg-white p-6 md:col-span-2">
+                <div className="text-sm text-black/70">
+                  {listingTab === "pending"
+                    ? "Нет объявлений на проверке."
+                    : listingTab === "published"
+                      ? "Нет опубликованных объявлений."
+                      : "Нет отклонённых объявлений."}
+                </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { pulseChatTyping, readPeerTyping } from "../../../../lib/serverChatTyping";
 import { denyIfMutationOriginForbidden } from "../../../../lib/serverCsrf";
+import { isCompanyConversationParticipant } from "../../../../lib/serverCompanyChatsStore";
 import { isListingConversationParticipant } from "../../../../lib/serverListingChatsStore";
 import { getUserIdFromSessionCookie } from "../../../../lib/serverSession";
 
@@ -12,7 +13,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ chatId: string
 
   const { chatId: raw } = await ctx.params;
   const chatId = decodeURIComponent(raw ?? "").trim();
-  if (!chatId || !isListingConversationParticipant(uid, chatId)) {
+  if (!chatId || !(chatId.startsWith("company:") ? isCompanyConversationParticipant(uid, chatId) : isListingConversationParticipant(uid, chatId))) {
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
   }
 
@@ -29,7 +30,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chatId: string
 
   const { chatId: raw } = await ctx.params;
   const chatId = decodeURIComponent(raw ?? "").trim();
-  if (!chatId || !isListingConversationParticipant(uid, chatId)) {
+  if (!chatId || !(chatId.startsWith("company:") ? isCompanyConversationParticipant(uid, chatId) : isListingConversationParticipant(uid, chatId))) {
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
   }
 

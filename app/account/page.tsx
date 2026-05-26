@@ -70,8 +70,11 @@ type MainTab = "ads" | "favorites" | "profile" | "messages" | "settings";
 
 type ChatConversationSummary = {
   conversationId: string;
+  chatType: "listing" | "company";
   listingId: string;
   listingTitle: string;
+  companyId: number;
+  companyTitle: string;
   otherUserId: string;
   /** Resolved on server from verified user profile (safe email prefix pattern). */
   participantPublicName: string;
@@ -342,8 +345,11 @@ function AccountPageInner() {
       const rows: ChatConversationSummary[] = d.conversations
         .map((raw) => ({
           conversationId: String(raw.conversationId ?? ""),
+          chatType: raw.chatType === "company" ? "company" as const : "listing" as const,
           listingId: String(raw.listingId ?? ""),
           listingTitle: String(raw.listingTitle ?? "Объявление"),
+          companyId: Number(raw.companyId ?? 0),
+          companyTitle: String(raw.companyTitle ?? "Компания"),
           otherUserId: String(raw.otherUserId ?? ""),
           participantPublicName: String(raw.participantPublicName ?? "").trim(),
           lastMessageSenderLabel: String(raw.lastMessageSenderLabel ?? "").trim(),
@@ -351,7 +357,7 @@ function AccountPageInner() {
           lastMessageAt: typeof raw.lastMessageAt === "number" ? raw.lastMessageAt : 0,
           unreadCount: typeof raw.unreadCount === "number" ? raw.unreadCount : 0,
         }))
-        .filter((x) => x.conversationId && x.listingId && x.otherUserId);
+        .filter((x) => x.conversationId && x.otherUserId && (x.chatType === "company" ? x.companyId > 0 : x.listingId));
       setChatRows(rows);
     } catch {
       setChatRows([]);
@@ -1055,9 +1061,12 @@ function AccountPageInner() {
                   <div className="grid gap-2">
                     {chatRows.map((c) => {
                       const chatHref = appendReturnUrlQuery(
-                        `/chat?listingId=${encodeURIComponent(c.listingId)}&peerUserId=${encodeURIComponent(c.otherUserId)}`,
+                        c.chatType === "company" ?
+                          `/chat?chatType=company&companyId=${encodeURIComponent(String(c.companyId))}&peerUserId=${encodeURIComponent(c.otherUserId)}`
+                        : `/chat?listingId=${encodeURIComponent(c.listingId)}&peerUserId=${encodeURIComponent(c.otherUserId)}`,
                         "/account?tab=messages",
                       );
+                      const title = c.chatType === "company" ? c.companyTitle : c.listingTitle;
                       const preview = c.lastMessageText.trim() ? c.lastMessageText : "—";
                       const timeRu = new Date(c.lastMessageAt).toLocaleString("ru-RU", {
                         day: "2-digit",
@@ -1075,7 +1084,7 @@ function AccountPageInner() {
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <div className={"text-sm font-semibold text-black/90 " + (c.unreadCount > 0 ? "" : "font-medium")}>
-                                {c.listingTitle}
+                                {title}
                                 {c.unreadCount > 0 ? (
                                   <span className="ml-2 inline-block h-2 w-2 rounded-full align-middle bg-orange-500" aria-label="Непрочитано" />
                                 ) : null}

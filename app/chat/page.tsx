@@ -381,6 +381,13 @@ function ChatInner() {
   // Gate query-derived values behind `mounted` so server + first client render match.
   const listingIdRaw = mounted ? (sp.get("listingId") ?? "") : "";
   const listingId = useMemo(() => normalizeListingId(listingIdRaw), [listingIdRaw]);
+  const chatType = mounted ? (sp.get("chatType") ?? "") : "";
+  const companyIdRaw = mounted ? (sp.get("companyId") ?? "") : "";
+  const companyId = useMemo(() => {
+    const n = Number(companyIdRaw);
+    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+  }, [companyIdRaw]);
+  const isCompanyChat = chatType === "company" && companyId > 0;
   const peerUserIdRaw = mounted ? (sp.get("peerUserId") ?? "").trim() : "";
   const chatSelfReturnHref = useMemo(
     () => pathnameWithSearchSansReturn(pathname, mounted ? sp : new URLSearchParams()),
@@ -398,6 +405,15 @@ function ChatInner() {
     ownerId?: string;
     authorPublicName?: string;
   } | null>(null);
+  const [companyChat, setCompanyChat] = useState<{
+    companyId: number;
+    companyTitle: string;
+    ownerUserId: string;
+    customerId: string;
+    chatId: string;
+  } | null>(null);
+  const [companyChatLoading, setCompanyChatLoading] = useState(false);
+  const [companyChatUnavailable, setCompanyChatUnavailable] = useState<string | null>(null);
   const [adLoading, setAdLoading] = useState(false);
   const [adNotFound, setAdNotFound] = useState(false);
   const [opponentPublic, setOpponentPublic] = useState<{
@@ -454,10 +470,13 @@ function ChatInner() {
   const displayAd = ad ?? localAdFallback;
 
   const listingOwnerId = useMemo(() => {
+    if (isCompanyChat) return companyChat?.ownerUserId?.trim() ?? "";
     const fromAd = (displayAd as { ownerId?: string } | null)?.ownerId;
     if (typeof fromAd === "string" && fromAd.trim()) return fromAd.trim();
     return ((localListing as Listing | null)?.ownerId ?? "").trim();
-  }, [displayAd, localListing]);
+  }, [isCompanyChat, companyChat?.ownerUserId, displayAd, localListing]);
+
+  const chatStorageKey = isCompanyChat ? `company:${companyId}` : listingId;
 
   const [msgs, setMsgs] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
@@ -559,6 +578,7 @@ function ChatInner() {
   const outboundSenderNameForApi = useMemo(() => buildSenderNameForApi(currentSenderId), [currentSenderId]);
 
   const buyerIdResolved = useMemo(() => {
+    if (isCompanyChat && companyChat?.customerId) return companyChat.customerId.trim();
     const ownerId = listingOwnerId;
     if (!ownerId || !currentSenderId) return "";
     if (currentSenderId !== ownerId) return currentSenderId;
@@ -568,7 +588,7 @@ function ChatInner() {
     const fromSingleServer =
       ownerListingPeerOptions.length === 1 ? ownerListingPeerOptions[0]!.otherUserId.trim() : "";
     return (fromUrl || fromMsgs || fromPick || fromSingleServer).trim();
-  }, [listingOwnerId, currentSenderId, msgs, peerUserIdRaw, ownerPeerPick, ownerListingPeerOptions]);
+  }, [isCompanyChat, companyChat?.customerId, listingOwnerId, currentSenderId, msgs, peerUserIdRaw, ownerPeerPick, ownerListingPeerOptions]);
 
   const displayNameForUserId = useCallback((userId: string) => {
     if (!userId) return "Собеседник";
@@ -816,9 +836,11 @@ function ChatInner() {
   const chatId = useMemo(() => {
     const ownerId = listingOwnerId.trim();
     const buyer = buyerIdResolved.trim();
-    if (!listingId || !ownerId || !buyer) return "";
+    if (!ownerId || !buyer) return "";
+    if (isCompanyChat) return companyId > 0 ? `company:${companyId}::${ownerId}::${buyer}` : "";
+    if (!listingId) return "";
     return `${listingId}::${ownerId}::${buyer}`;
-  }, [listingId, listingOwnerId, buyerIdResolved]);
+  }, [isCompanyChat, companyId, listingId, listingOwnerId, buyerIdResolved]);
 
   useEffect(() => {
     setSafetyWarning(analyzeChatComposerSafety(text));
@@ -839,6 +861,7 @@ function ChatInner() {
 
   useEffect(() => {
     if (!chatId || !auth.userId) return;
+    if (isCompanyChat) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -856,7 +879,7 @@ function ChatInner() {
     return () => {
       cancelled = true;
     };
-  }, [chatId, auth.userId]);
+  }, [chatId, auth.userId, isCompanyChat]);
 
   useEffect(() => {
     if (!chatId || !auth.userId) return;
@@ -1168,9 +1191,9 @@ function ChatInner() {
 
   function persistMessages(next: ChatMessage[]) {
     setMsgs(next);
-    if (!listingId) return;
+    if (!chatStorageKey) return;
     const store = readStore();
-    store[listingId] = next;
+    store[chatStorageKey] = next;
     writeStore(store);
   }
 
@@ -1195,7 +1218,7 @@ function ChatInner() {
   );
 
   const refreshDeletions = useCallback(async () => {
-    if (!listingId || !auth.userId || !chatId) return;
+    if (!chatStorageKey || !auth.userId || !chatId) return;
     try {
       const r = await fetch(`/api/chat/deletions?chatId=${encodeURIComponent(chatId)}`, {
         credentials: "include",
@@ -1223,19 +1246,19 @@ function ChatInner() {
         }
       >;
       const store = readStore();
-      const raw = store[listingId] ?? [];
-      const base = hydrateChatMessages(Array.isArray(raw) ? raw : [], listingId);
+      const raw = store[chatStorageKey] ?? [];
+      const base = hydrateChatMessages(Array.isArray(raw) ? raw : [], chatStorageKey);
       const merged = mergeAllDeletions(base, rows);
       setMsgs(merged);
-      store[listingId] = merged;
+      store[chatStorageKey] = merged;
       writeStore(store);
     } catch {
       /* ignore */
     }
-  }, [listingId, auth.userId, chatId]);
+  }, [chatStorageKey, auth.userId, chatId]);
 
   const syncServerChat = useCallback(async () => {
-    if (!listingId || !auth.userId || !chatId) return;
+    if (!chatStorageKey || !auth.userId || !chatId) return;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     const nowSync = Date.now();
     if (nowSync < syncChatBackoffUntilRef.current) return;
@@ -1259,8 +1282,8 @@ function ChatInner() {
         .filter((x): x is Record<string, unknown> => Boolean(x && typeof x === "object"))
         .map((row) => serverRowToChatMessage(row, chatId));
       const store = readStore();
-      const localRaw = store[listingId] ?? [];
-      const localMsgs = hydrateChatMessages(Array.isArray(localRaw) ? localRaw : [], listingId);
+      const localRaw = store[chatStorageKey] ?? [];
+      const localMsgs = hydrateChatMessages(Array.isArray(localRaw) ? localRaw : [], chatStorageKey);
       const merged = mergeChatLists(serverMsgs, localMsgs);
       const delR = await fetch(`/api/chat/deletions?chatId=${encodeURIComponent(chatId)}`, {
         credentials: "include",
@@ -1282,12 +1305,13 @@ function ChatInner() {
         final = mergeAllDeletions(merged, (dj.deletions ?? {}) as Record<string, MessageDeletionRow>);
       }
       setMsgs(final);
-      store[listingId] = final;
+      store[chatStorageKey] = final;
       writeStore(store);
 
       const ownerTrim = listingOwnerId.trim();
       const buyerTrim = buyerIdResolved.trim();
       const canHydrateServer =
+        !isCompanyChat &&
         !hydrateLocalToServerRef.current.has(chatId) &&
         raw.length === 0 &&
         final.length > 0 &&
@@ -1344,7 +1368,7 @@ function ChatInner() {
     } finally {
       syncChatFlightRef.current = false;
     }
-  }, [listingId, auth.userId, chatId, listingOwnerId, buyerIdResolved, displayAd?.title, localListing]);
+  }, [chatStorageKey, auth.userId, chatId, isCompanyChat, listingId, listingOwnerId, buyerIdResolved, displayAd?.title, localListing]);
 
   async function executeMessageDeletion(scope: "me" | "everyone") {
     if (!deleteModal || deleteBusy) return;
@@ -1415,13 +1439,13 @@ function ChatInner() {
   }
 
   useEffect(() => {
-    if (!listingId || !auth.userId || !chatId) return;
+    if (!chatStorageKey || !auth.userId || !chatId) return;
     const tid = window.setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       void syncServerChat();
     }, 45000);
     return () => window.clearInterval(tid);
-  }, [listingId, auth.userId, chatId, syncServerChat]);
+  }, [chatStorageKey, auth.userId, chatId, syncServerChat]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1807,6 +1831,87 @@ function ChatInner() {
   }, [listingId]);
 
   useEffect(() => {
+    if (!isCompanyChat || !companyId || !auth.userId) return;
+    let cancelled = false;
+    setCompanyChatLoading(true);
+    setCompanyChatUnavailable(null);
+    const params = new URLSearchParams({ companyId: String(companyId) });
+    if (peerUserIdRaw.trim()) params.set("peerUserId", peerUserIdRaw.trim());
+    fetch(`/api/chats?${params.toString()}`, { credentials: "include", cache: "no-store" })
+      .then(async (r) => {
+        const data = (await r.json().catch(() => ({}))) as {
+          ok?: boolean;
+          chatId?: string;
+          error?: string;
+          message?: string;
+          conversation?: {
+            companyId?: number;
+            companyTitle?: string;
+            ownerUserId?: string;
+            customerId?: string;
+          } | null;
+          messages?: unknown[];
+        };
+        if (!r.ok || data.ok === false) {
+          return { error: data.message || "Не удалось открыть чат компании." };
+        }
+        return data;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        if ("error" in data) {
+          setCompanyChat(null);
+          setCompanyChatUnavailable(data.error ?? "Не удалось открыть чат компании.");
+          setMsgs([]);
+          return;
+        }
+        const conversation = data.conversation;
+        const ownerUserId = String(conversation?.ownerUserId ?? "").trim();
+        const customerId = String(conversation?.customerId ?? "").trim();
+        const title = String(conversation?.companyTitle ?? "Компания").trim() || "Компания";
+        const cid = String(data.chatId ?? "").trim();
+        if (!ownerUserId || !customerId || !cid) {
+          setCompanyChat(null);
+          setCompanyChatUnavailable("У компании пока нет подтверждённого владельца");
+          setMsgs([]);
+          return;
+        }
+        setCompanyChat({
+          companyId: Number(conversation?.companyId ?? companyId),
+          companyTitle: title,
+          ownerUserId,
+          customerId,
+          chatId: cid,
+        });
+        const raw = Array.isArray(data.messages) ? data.messages : [];
+        const serverMsgs = raw
+          .filter((x): x is Record<string, unknown> => Boolean(x && typeof x === "object"))
+          .map((row) => serverRowToChatMessage(row, cid));
+        const store = readStore();
+        const key = `company:${companyId}`;
+        const localRaw = store[key] ?? [];
+        const localMsgs = hydrateChatMessages(Array.isArray(localRaw) ? localRaw : [], key);
+        const merged = mergeChatLists(serverMsgs, localMsgs);
+        setMsgs(merged);
+        store[key] = merged;
+        writeStore(store);
+        inputRef.current?.focus();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCompanyChat(null);
+        setCompanyChatUnavailable("Не удалось открыть чат компании.");
+        setMsgs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCompanyChatLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCompanyChat, companyId, auth.userId, peerUserIdRaw]);
+
+  useEffect(() => {
     if (!listingId) return;
     let cancelled = false;
     queueMicrotask(() => {
@@ -1871,7 +1976,7 @@ function ChatInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!listingId) {
+  if (!listingId && !isCompanyChat) {
     return (
       <div className="min-h-full bg-black/[0.03] text-black">
         <div className={chatPageShellOuterClass}>
@@ -1887,6 +1992,24 @@ function ChatInner() {
     );
   }
 
+  if (isCompanyChat && (companyChatLoading || companyChatUnavailable || !companyChat)) {
+    return (
+      <div className="min-h-full bg-black/[0.03] text-black">
+        <div className={chatPageShellOuterClass}>
+          <div className={chatPageShellInnerClass}>
+            <ReturnLink fallback="/catalogs" className="text-sm text-black/60 hover:text-black" />
+            <div className="mt-4 rounded-3xl border border-black/10 bg-white p-6">
+              <div className="text-lg font-semibold tracking-tight">Чат компании</div>
+              <div className="mt-2 text-sm text-black/60">
+                {companyChatLoading ? "Открываем чат…" : companyChatUnavailable || "У компании пока нет подтверждённого владельца"}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-black/[0.03] text-black">
       <div className={chatPageShellOuterClass}>
@@ -1896,7 +2019,13 @@ function ChatInner() {
         </header>
 
         <main className="flex min-h-0 flex-1 flex-col pb-0 md:pb-16">
-          {adLoading ? (
+          {isCompanyChat && companyChat ? (
+            <div className="mb-3 shrink-0 cursor-default rounded-3xl border border-black/10 bg-white p-5 md:mb-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-black/40">Компания</div>
+              <div className="mt-2 text-base font-semibold tracking-tight text-black">{companyChat.companyTitle}</div>
+              <div className="mt-1 text-sm text-black/50">Чат с подтверждённым владельцем компании</div>
+            </div>
+          ) : adLoading ? (
             <div className="mb-3 shrink-0 cursor-default rounded-3xl border border-black/10 bg-white p-5 md:mb-4">
               <div className="h-3 w-24 rounded bg-black/10" />
               <div className="mt-4 flex gap-4">
@@ -2460,7 +2589,7 @@ function ChatInner() {
                             headers: { "Content-Type": "application/json" },
                             signal: sendController.signal,
                             body: JSON.stringify({
-                              listingId,
+                              ...(isCompanyChat ? { chatType: "company", companyId } : { listingId }),
                               type: "file",
                               fileUrl: uploaded.url,
                               fileName: row.file.name,
@@ -2532,7 +2661,7 @@ function ChatInner() {
                     cache: "no-store",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                      listingId,
+                      ...(isCompanyChat ? { chatType: "company", companyId } : { listingId }),
                       text: t,
                       peerUserId: senderId === listingOwnerId ? buyerIdResolved : undefined,
                       senderName,

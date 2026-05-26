@@ -17,8 +17,10 @@ const PROOF_METHOD_LABELS: Record<CatalogCompanyClaimRequest["proofMethod"], str
 
 export function AdminCatalogClaimsSection({
   onPendingCountChange,
+  onChanged,
 }: {
   onPendingCountChange?: (count: number) => void;
+  onChanged?: () => void;
 }) {
   const [claims, setClaims] = useState<CatalogCompanyClaimRequest[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -62,6 +64,7 @@ export function AdminCatalogClaimsSection({
       }
       setMessage(action === "approve" ? "Подтверждение одобрено" : "Заявка отклонена");
       load();
+      onChanged?.();
     } catch {
       setMessage("Ошибка сети");
     } finally {
@@ -71,7 +74,7 @@ export function AdminCatalogClaimsSection({
 
   return (
     <section className="rounded-2xl border border-black/10 bg-white p-4">
-      <h3 className="text-sm font-semibold text-black">Заявки на владение карточкой ({pending.length})</h3>
+      <h3 className="text-sm font-semibold text-black">Заявки на владение ({pending.length})</h3>
       <p className="mt-1 text-xs text-black/45">
         После одобрения компания получает статус «Подтверждённая» и доступ к «Написать».
       </p>

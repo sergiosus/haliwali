@@ -9,6 +9,15 @@ import {
   unreadCountForUser,
 } from "../../lib/serverListingChatsStore";
 import {
+  buildCompanyConversationId,
+  getCompanyConversation,
+  isCompanyConversationParticipant,
+  listCompanyConversationsForUser,
+  pickLatestStoredCompanyMessage,
+  unreadCompanyCountForUser,
+} from "../../lib/serverCompanyChatsStore";
+import { getCatalogCompanyChatTarget } from "../../lib/serverCatalogStore";
+import {
   lastMessageSenderCabinetLabel,
   publicCabinetLabelForStoredUser,
   publicChatMessageSenderLabel,
@@ -43,6 +52,22 @@ function storedMsgToApi(m: import("../../lib/serverListingChatsStore").StoredLis
   };
 }
 
+function storedCompanyMsgToApi(m: import("../../lib/serverCompanyChatsStore").StoredCompanyChatMessage) {
+  return {
+    id: m.id,
+    senderId: m.senderId,
+    senderName: publicChatMessageSenderLabel(m.senderId, m.senderName),
+    createdAt: m.createdAt,
+    type: m.type ?? "text",
+    text: m.text,
+    fileUrl: m.fileUrl,
+    fileName: m.fileName,
+    replyToMessageId: m.replyToMessageId,
+    replyToText: m.replyToText,
+    editedAt: m.editedAt,
+  };
+}
+
 /** Список переписок для кабинета / шапки; опционально — сообщения по listingId + peerUserId (тот же формат что GET /api/chats/[chatId]). */
 export async function GET(req: Request) {
   const uid = ((await getUserIdFromSessionCookie()) ?? "").trim();
@@ -52,7 +77,48 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const qListing = (url.searchParams.get("listingId") ?? "").trim();
+  const qCompany = (url.searchParams.get("companyId") ?? "").trim();
   const qPeer = (url.searchParams.get("peerUserId") ?? "").trim();
+
+  if (qCompany) {
+    const companyId = Number(qCompany);
+    const company = await getCatalogCompanyChatTarget(companyId);
+    if (!company) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    if (company.profileStatus !== "verified" || !company.ownerUserId) {
+      return NextResponse.json({
+        ok: false,
+        error: "NO_VERIFIED_OWNER",
+        message: "У компании пока нет подтверждённого владельца",
+      }, { status: 409 });
+    }
+    const ownerId = company.ownerUserId.trim();
+    const customerId = uid === ownerId ? qPeer : uid;
+    if (!customerId || customerId === ownerId) return NextResponse.json({ error: "BAD_PEER" }, { status: 400 });
+    const chatId = buildCompanyConversationId(company.id, ownerId, customerId);
+    if (!isCompanyConversationParticipant(uid, chatId)) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+    const conv = await getCompanyConversation(chatId);
+    return NextResponse.json({
+      ok: true,
+      chatType: "company",
+      chatId,
+      conversation: conv ?
+        {
+          companyId: conv.companyId,
+          companyTitle: conv.companyTitle,
+          ownerUserId: conv.ownerUserId,
+          customerId: conv.customerId,
+          lastMessageText: conv.lastMessageText,
+          lastMessageAt: conv.lastMessageAt,
+        }
+      : {
+          companyId: company.id,
+          companyTitle: company.name,
+          ownerUserId: ownerId,
+          customerId,
+        },
+      messages: conv ? conv.messages.map(storedCompanyMsgToApi) : [],
+    });
+  }
 
   if (qListing && qPeer) {
     const listing = await getListingById(qListing);
@@ -97,11 +163,14 @@ export async function GET(req: Request) {
     });
   }
 
-  const rows = await listListingConversationsForUser(uid);
+  const [rows, companyRows] = await Promise.all([
+    listListingConversationsForUser(uid),
+    listCompanyConversationsForUser(uid),
+  ]);
   const usersDb = await readUsersDb(USERS_PATH);
   const usersById = usersDb.usersById;
   let unreadTotal = 0;
-  const conversations = rows.map((c) => {
+  const listingConversations = rows.map((c) => {
     const preview = typeof c.lastMessageText === "string" ? c.lastMessageText : "";
     const otherUserId = peerUserForViewer(c, uid);
     const unread = unreadCountForUser(c, uid);
@@ -112,6 +181,7 @@ export async function GET(req: Request) {
     const lastMessageSenderLabel = lastMessageSenderCabinetLabel(uid, lm, usersById);
     return {
       conversationId: c.conversationId,
+      chatType: "listing",
       listingId: c.listingId,
       listingTitle: c.listingTitle || "Объявление",
       otherUserId,
@@ -122,6 +192,35 @@ export async function GET(req: Request) {
       unreadCount: unread,
     };
   });
+  const companyConversations = companyRows.map((c) => {
+    const preview = typeof c.lastMessageText === "string" ? c.lastMessageText : "";
+    const otherUserId = c.ownerUserId.trim() === uid ? c.customerId.trim() : c.ownerUserId.trim();
+    const unread = unreadCompanyCountForUser(c, uid);
+    unreadTotal += unread;
+    const peer = usersById[otherUserId.trim()];
+    const participantPublicName = publicCabinetLabelForStoredUser(peer);
+    const lm = pickLatestStoredCompanyMessage(c);
+    const lastMessageSenderLabel =
+      !lm ? ""
+      : lm.senderId.trim() === uid ? "Вы"
+      : publicCabinetLabelForStoredUser(usersById[lm.senderId.trim()]) ||
+        publicChatMessageSenderLabel(lm.senderId, lm.senderName);
+    return {
+      conversationId: c.conversationId,
+      chatType: "company",
+      companyId: c.companyId,
+      companyTitle: c.companyTitle || "Компания",
+      otherUserId,
+      participantPublicName,
+      lastMessageSenderLabel,
+      lastMessageText: preview,
+      lastMessageAt: c.lastMessageAt,
+      unreadCount: unread,
+    };
+  });
+  const conversations = [...listingConversations, ...companyConversations].sort(
+    (a, b) => b.lastMessageAt - a.lastMessageAt,
+  );
 
   const viewerPublicName = publicCabinetLabelForStoredUser(usersById[uid.trim()]);
 

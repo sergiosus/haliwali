@@ -27,12 +27,12 @@ export function HeroMarketplaceEntry({ className = "" }: { className?: string })
   const active = pathname === "/marketplaces";
 
   return (
-    <div className={`group relative w-full sm:w-auto ${className}`}>
+    <div className={`group relative w-auto ${className}`}>
       <Link
         href="/marketplaces"
         title="Поиск товаров с внешних площадок"
         className={[
-          "inline-flex h-[2.75rem] w-full shrink-0 items-center justify-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all duration-200 sm:h-[3rem] sm:w-auto sm:text-[13px]",
+          "inline-flex h-9 w-auto shrink-0 items-center justify-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all duration-200 sm:text-[13px]",
           active
             ? "border-[rgba(255,122,0,0.45)] bg-[rgba(255,122,0,0.22)] text-[#a84a00] shadow-[0_4px_16px_rgba(255,122,0,0.18)]"
             : "border-[rgba(255,122,0,0.28)] bg-[rgba(255,122,0,0.12)] text-[#c25a00] shadow-sm hover:border-[rgba(255,122,0,0.4)] hover:bg-[rgba(255,122,0,0.18)] hover:text-[#a84f00] hover:shadow-[0_6px_20px_rgba(255,122,0,0.16)] active:scale-[0.99]",

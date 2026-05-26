@@ -5,6 +5,8 @@ import {
 } from "../../../lib/serverChatPrivateFiles";
 import { publicChatMessageSenderLabel } from "../../../lib/serverChatParticipantLabel";
 import { chatUserBlockedForbidden } from "../../../lib/serverChatUserBlock";
+import { appendCompanyChatMessage, buildCompanyConversationId } from "../../../lib/serverCompanyChatsStore";
+import { getCatalogCompanyChatTarget } from "../../../lib/serverCatalogStore";
 import { appendListingChatMessage, buildListingConversationId } from "../../../lib/serverListingChatsStore";
 import { getListingById } from "../../../lib/serverListingsStore";
 import { denyIfMutationOriginForbidden } from "../../../lib/serverCsrf";
@@ -30,6 +32,8 @@ export async function POST(req: Request) {
   const o = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
 
   const listingIdRaw = typeof o.listingId === "string" ? o.listingId.trim() : "";
+  const chatType = o.chatType === "company" ? "company" : "listing";
+  const companyIdRaw = typeof o.companyId === "string" || typeof o.companyId === "number" ? String(o.companyId).trim() : "";
   const text = typeof o.text === "string" ? o.text : "";
   const type = o.type === "file" ? "file" : "text";
   const fileUrl = typeof o.fileUrl === "string" ? o.fileUrl.trim() : "";
@@ -38,6 +42,65 @@ export async function POST(req: Request) {
   const peerRaw = typeof o.peerUserId === "string" ? o.peerUserId.trim() : "";
   const replyToMessageId = typeof o.replyToMessageId === "string" ? o.replyToMessageId.trim() : undefined;
   const replyToText = typeof o.replyToText === "string" ? o.replyToText.trim() : undefined;
+
+  if (chatType === "company") {
+    const companyId = Number(companyIdRaw);
+    const company = await getCatalogCompanyChatTarget(companyId);
+    if (!company) return NextResponse.json({ error: "COMPANY_NOT_FOUND" }, { status: 404 });
+    if (company.profileStatus !== "verified" || !company.ownerUserId) {
+      return NextResponse.json({ error: "NO_VERIFIED_OWNER", message: "У компании пока нет подтверждённого владельца" }, { status: 409 });
+    }
+    const ownerId = company.ownerUserId.trim();
+    const customerId = uid === ownerId ? peerRaw : uid;
+    if (!customerId || customerId === ownerId) return NextResponse.json({ error: "BAD_PEER" }, { status: 400 });
+    const conversationId = buildCompanyConversationId(company.id, ownerId, customerId);
+    const recipientId = uid === ownerId ? customerId : ownerId;
+    const blockedForbidden = await chatUserBlockedForbidden(uid, recipientId);
+    if (blockedForbidden) return blockedForbidden;
+    if (type === "file") {
+      if (!fileUrl) return NextResponse.json({ error: "BAD_REQUEST" }, { status: 400 });
+      const privateId = parsePrivateChatFileIdFromMessageUrl(fileUrl);
+      if (privateId) {
+        const meta = await readChatPrivateFileMeta(privateId);
+        if (!meta || meta.chatId !== conversationId || meta.uploadedBy !== uid) {
+          return NextResponse.json({ error: "BAD_FILE" }, { status: 400 });
+        }
+      }
+    } else if (!text.trim()) {
+      return NextResponse.json({ error: "BAD_REQUEST" }, { status: 400 });
+    }
+    const msg = await appendCompanyChatMessage({
+      conversationId,
+      companyId: company.id,
+      companyTitle: company.name,
+      ownerUserId: ownerId,
+      customerId,
+      senderId: uid,
+      recipientId,
+      text: type === "file" ? text.trim() : text.trim(),
+      type,
+      ...(type === "file" ? { fileUrl, ...(fileName ? { fileName } : {}) } : {}),
+      senderName,
+      ...(replyToMessageId ? { replyToMessageId } : {}),
+      ...(replyToText ? { replyToText } : {}),
+    });
+    return NextResponse.json({
+      ok: true,
+      message: {
+        id: msg.id,
+        senderId: msg.senderId,
+        senderName: publicChatMessageSenderLabel(msg.senderId, msg.senderName),
+        createdAt: msg.createdAt,
+        type: msg.type ?? "text",
+        text: msg.text,
+        fileUrl: msg.fileUrl,
+        fileName: msg.fileName,
+        replyToMessageId: msg.replyToMessageId,
+        replyToText: msg.replyToText,
+        editedAt: msg.editedAt,
+      },
+    });
+  }
 
   if (!listingIdRaw) {
     return NextResponse.json({ error: "BAD_REQUEST" }, { status: 400 });

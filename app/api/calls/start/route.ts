@@ -8,6 +8,10 @@ import {
   isListingConversationParticipant,
   parseListingConversationId,
 } from "../../../lib/serverListingChatsStore";
+import {
+  isCompanyConversationParticipant,
+  parseCompanyConversationId,
+} from "../../../lib/serverCompanyChatsStore";
 import path from "node:path";
 
 export const runtime = "nodejs";
@@ -34,17 +38,27 @@ export async function POST(req: Request) {
   // Must include caller.
   if (!participantIds.includes(userId)) return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
-  const parsedChat = parseListingConversationId(chatId);
+  const parsedCompanyChat = parseCompanyConversationId(chatId);
+  const parsedChat = parsedCompanyChat ? null : parseListingConversationId(chatId);
   if (!parsedChat) {
-    if (isDev) console.warn("[calls/start] invalid chatId", { chatId });
-    return NextResponse.json({ ok: false, error: "BAD_REQUEST", message: "invalid chatId" }, { status: 400 });
+    if (!parsedCompanyChat) {
+      if (isDev) console.warn("[calls/start] invalid chatId", { chatId });
+      return NextResponse.json({ ok: false, error: "BAD_REQUEST", message: "invalid chatId" }, { status: 400 });
+    }
   }
-  if (!isListingConversationParticipant(userId, chatId)) {
+  const participantOk = parsedCompanyChat
+    ? isCompanyConversationParticipant(userId, chatId)
+    : isListingConversationParticipant(userId, chatId);
+  if (!participantOk) {
     if (isDev) console.warn("[calls/start] caller not in chat", { chatId, userId });
     return NextResponse.json({ ok: false, error: "FORBIDDEN", message: "not a chat participant" }, { status: 403 });
   }
 
-  const allowedParticipantIds = new Set([parsedChat.ownerId, parsedChat.buyerId]);
+  const allowedParticipantIds = new Set(
+    parsedCompanyChat ?
+      [parsedCompanyChat.ownerUserId, parsedCompanyChat.customerId]
+    : [parsedChat!.ownerId, parsedChat!.buyerId],
+  );
   const uniqueParticipantIds = [...new Set(participantIds.filter(Boolean))];
   if (uniqueParticipantIds.length !== 2) {
     return NextResponse.json(

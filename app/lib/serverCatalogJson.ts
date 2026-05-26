@@ -105,6 +105,7 @@ function categoryTitle(slug: string): string {
 function toListItem(c: JsonCompany, query = ""): CatalogCompanyListItem {
   const normalized = normalizeCatalogCompanyCities(c.city, c.serviceCities ?? []);
   return {
+    id: c.id,
     slug: c.slug,
     name: c.name,
     categorySlug: c.categorySlug,
@@ -119,6 +120,7 @@ function toListItem(c: JsonCompany, query = ""): CatalogCompanyListItem {
     phone: c.contacts.find((x) => x.type === "phone")?.value?.trim() || null,
     origin: normalizeCatalogCompanyOrigin(c.origin),
     profileStatus: c.profileStatus ?? "imported",
+    claimedByUserId: c.claimedByUserId?.trim() || null,
     rating: c.rating,
     latitude: c.latitude,
     longitude: c.longitude,
@@ -199,6 +201,30 @@ export async function jsonGetRelatedCompanies(
 ): Promise<CatalogCompanyListItem[]> {
   const items = await jsonSearchCompanies({ categorySlug, limit: limit + 8 });
   return items.filter((c) => c.slug !== excludeSlug).slice(0, limit);
+}
+
+export type JsonCatalogCompanyChatTarget = {
+  id: number;
+  slug: string;
+  name: string;
+  categorySlug: string;
+  profileStatus: CatalogCompanyProfileStatus;
+  ownerUserId: string | null;
+};
+
+export async function jsonGetCatalogCompanyChatTarget(companyId: number): Promise<JsonCatalogCompanyChatTarget | null> {
+  if (!Number.isFinite(companyId) || companyId <= 0) return null;
+  const store = await readStore();
+  const company = store.companies.find((c) => c.id === companyId && c.isPublished !== false);
+  if (!company) return null;
+  return {
+    id: company.id,
+    slug: company.slug,
+    name: company.name,
+    categorySlug: company.categorySlug,
+    profileStatus: company.profileStatus ?? "imported",
+    ownerUserId: company.claimedByUserId?.trim() || null,
+  };
 }
 
 export async function jsonListCatalogCompaniesSitemap(): Promise<CatalogCompanyListItem[]> {

@@ -25,6 +25,7 @@ export type CatalogCompanyOwnershipStatus =
   | "verified_owner";
 
 export type CatalogCompanyListItem = {
+  id?: number;
   slug: string;
   name: string;
   categorySlug: string;
@@ -40,6 +41,7 @@ export type CatalogCompanyListItem = {
   phone?: string | null;
   origin: CatalogCompanyOrigin;
   profileStatus: CatalogCompanyProfileStatus;
+  claimedByUserId?: string | null;
   rating: number | null;
   latitude: number | null;
   longitude: number | null;

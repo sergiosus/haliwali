@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isCompanyConversationParticipant, markCompanyConversationRead } from "../../../../lib/serverCompanyChatsStore";
 import { isListingConversationParticipant, markListingConversationRead } from "../../../../lib/serverListingChatsStore";
 import { denyIfMutationOriginForbidden } from "../../../../lib/serverCsrf";
 import { getUserIdFromSessionCookie } from "../../../../lib/serverSession";
@@ -16,6 +17,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ chatId: string
 
   const { chatId: raw } = await ctx.params;
   const chatId = decodeURIComponent((raw ?? "").trim());
+  if (chatId.startsWith("company:")) {
+    if (!chatId || !isCompanyConversationParticipant(uid, chatId)) {
+      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+    }
+    const n = await markCompanyConversationRead(chatId, uid);
+    return NextResponse.json({ ok: true, marked: n });
+  }
   if (!chatId || !isListingConversationParticipant(uid, chatId)) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }

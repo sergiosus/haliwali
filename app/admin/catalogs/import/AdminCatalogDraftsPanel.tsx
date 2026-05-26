@@ -180,7 +180,13 @@ function patchFromDraft(draft: CatalogImportDraft): Record<string, unknown> {
   };
 }
 
-export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportLink?: boolean }) {
+export function AdminCatalogDraftsPanel({
+  showImportLink = true,
+  onChanged,
+}: {
+  showImportLink?: boolean;
+  onChanged?: () => void;
+}) {
   const [tab, setTab] = useState<CatalogImportDraftStatus>("draft");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<DraftSort>("new_first");
@@ -261,6 +267,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       } else {
         setMessage(`Сохранено в очередь: ${d.updated ?? ids.length}`);
       }
+      onChanged?.();
       void loadDrafts();
       void loadCompanies();
     } catch {
@@ -287,6 +294,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       }
       removeDraftsFromList([draftId]);
       setMessage("Объединено с существующей компанией");
+      onChanged?.();
       void loadDrafts();
       void loadCompanies();
     } catch {
@@ -372,6 +380,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       const deleted = d.deleted ?? ids.length;
       removeDraftsFromList(ids);
       setMessage(`Удалено: ${deleted}`);
+      onChanged?.();
     } catch {
       setMessage("Ошибка сети. Повторите попытку.");
     } finally {

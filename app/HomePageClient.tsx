@@ -676,7 +676,7 @@ function HaliwaliLanding() {
         className="w-full px-3 pb-5 pt-1 sm:px-6 sm:pb-6"
         aria-label="Поиск по объявлениям"
       >
-        <div className="mx-auto w-full max-w-3xl text-center">
+        <div className="mx-auto w-full max-w-[1040px] text-center">
           <p className="text-sm font-medium leading-snug text-black/55 sm:text-base">
             Найдите услуги, товары и помощь рядом
           </p>

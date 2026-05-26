@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminCatalogCompanyEditModal } from "./AdminCatalogCompanyEditModal";
 import { AdminCatalogClaimsSection } from "./AdminCatalogClaimsSection";
 import { AdminCatalogImportCandidatesSection } from "./catalogs/AdminCatalogImportCandidatesSection";
+import { AdminCatalogDraftsPanel } from "./catalogs/import/AdminCatalogDraftsPanel";
 import {
   catalogCompanyOriginBadgeClass,
   catalogCompanyOriginLabel,
@@ -18,15 +19,12 @@ import type {
   CatalogReport,
 } from "../lib/catalogTypes";
 import { CATALOG_CATEGORY_SEED } from "../lib/catalogTypes";
+import type { CatalogImportDraft } from "../lib/catalogImportTypes";
 
-type CatalogAdminTab = "overview" | "companies" | "categories" | "import" | "reports";
+type CatalogAdminTab = "companies" | "categories" | "import" | "claims" | "reports";
 
-export function AdminCatalogPanel({
-  onClaimPendingCountChange,
-}: {
-  onClaimPendingCountChange?: (count: number) => void;
-}) {
-  const [tab, setTab] = useState<CatalogAdminTab>("overview");
+export function AdminCatalogPanel() {
+  const [tab, setTab] = useState<CatalogAdminTab>("companies");
   const [companies, setCompanies] = useState<CatalogCompanyAdminItem[]>([]);
   const [reports, setReports] = useState<CatalogReport[]>([]);
   const [companyFilter, setCompanyFilter] = useState("");
@@ -35,6 +33,7 @@ export function AdminCatalogPanel({
   const [companyMessage, setCompanyMessage] = useState<string | null>(null);
   const [editingCompany, setEditingCompany] = useState<CatalogCompanyAdminItem | null>(null);
   const [claimPendingCount, setClaimPendingCount] = useState(0);
+  const [importActionCount, setImportActionCount] = useState(0);
 
   const loadCompanies = useCallback(() => {
     void fetch("/api/admin/catalog/companies", { credentials: "include", cache: "no-store" })
@@ -50,13 +49,9 @@ export function AdminCatalogPanel({
       .catch(() => setReports([]));
   }, []);
 
-  const setClaimCount = useCallback(
-    (count: number) => {
-      setClaimPendingCount(count);
-      onClaimPendingCountChange?.(count);
-    },
-    [onClaimPendingCountChange],
-  );
+  const setClaimCount = useCallback((count: number) => {
+    setClaimPendingCount(count);
+  }, []);
 
   const loadClaimCount = useCallback(() => {
     void fetch("/api/admin/catalog/companies/claims", { credentials: "include", cache: "no-store" })
@@ -67,26 +62,59 @@ export function AdminCatalogPanel({
       .catch(() => setClaimCount(0));
   }, [setClaimCount]);
 
+  const loadImportActionCount = useCallback(() => {
+    void fetch("/api/admin/catalogs/import/drafts", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { drafts?: CatalogImportDraft[] }) => {
+        const count = (d.drafts ?? []).filter((draft) => {
+          const status = String(draft.status ?? "").trim().toLowerCase();
+          return status === "draft" || status === "new" || status === "pending" || status === "saved";
+        }).length;
+        setImportActionCount(count);
+      })
+      .catch(() => setImportActionCount(0));
+  }, []);
+
   useEffect(() => {
-    if (tab === "companies" || tab === "overview") loadCompanies();
-    if (tab === "reports") loadReports();
-  }, [tab, loadCompanies, loadReports]);
+    loadCompanies();
+    loadReports();
+    loadImportActionCount();
+  }, [loadCompanies, loadReports, loadImportActionCount]);
 
   useEffect(() => {
     loadClaimCount();
   }, [loadClaimCount]);
+
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== "visible") return;
+      loadCompanies();
+      loadReports();
+      loadImportActionCount();
+      loadClaimCount();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [loadCompanies, loadReports, loadImportActionCount, loadClaimCount]);
 
   const filteredCompanies = useMemo(() => {
     if (!companyFilter) return companies;
     return companies.filter((co) => co.categorySlug === companyFilter);
   }, [companies, companyFilter]);
 
-  const subTabs: { key: CatalogAdminTab; label: string }[] = [
-    { key: "overview", label: "Каталоги компаний" },
-    { key: "companies", label: "Компании" },
-    { key: "categories", label: "Категории" },
-    { key: "import", label: "Импорт" },
-    { key: "reports", label: "Жалобы" },
+  const refreshCatalogCounts = useCallback(() => {
+    loadCompanies();
+    loadReports();
+    loadImportActionCount();
+    loadClaimCount();
+  }, [loadCompanies, loadReports, loadImportActionCount, loadClaimCount]);
+
+  const subTabs: { key: CatalogAdminTab; label: string; count: number }[] = [
+    { key: "companies", label: "Компании в базе", count: companies.length },
+    { key: "categories", label: "Категории", count: CATALOG_CATEGORY_SEED.length },
+    { key: "import", label: "Импорт", count: importActionCount },
+    { key: "claims", label: "Заявки на владение", count: claimPendingCount },
+    { key: "reports", label: "Жалобы", count: reports.length },
   ];
 
   const categories: CatalogCategory[] = CATALOG_CATEGORY_SEED.map((c) => ({
@@ -132,6 +160,7 @@ export function AdminCatalogPanel({
       setCompanyMessage(`Удалено записей: ${d.deleted ?? 0}`);
       setSelectedCompanyIds(new Set());
       loadCompanies();
+      refreshCatalogCounts();
     } catch {
       setCompanyMessage("Ошибка сети");
     } finally {
@@ -155,17 +184,10 @@ export function AdminCatalogPanel({
             ].join(" ")}
           >
             {t.label}
-            {t.key === "import" && claimPendingCount > 0 ? ` (${claimPendingCount})` : ""}
+            <span className="text-black/45"> ({t.count})</span>
           </button>
         ))}
       </div>
-
-      {tab === "overview" ?
-        <div className="rounded-3xl border border-black/10 bg-white p-5 text-sm text-black/65">
-          <p>Каталог компаний отделён от объявлений. Данные в таблицах catalog_* (PostgreSQL).</p>
-          <p className="mt-2">Компаний в базе: {companies.length}</p>
-        </div>
-      : null}
 
       {tab === "categories" ?
         <ul className="grid gap-2 sm:grid-cols-2">
@@ -307,7 +329,6 @@ export function AdminCatalogPanel({
 
       {tab === "import" ?
         <div className="space-y-4">
-          <AdminCatalogClaimsSection onPendingCountChange={setClaimCount} />
           <div className="flex flex-wrap gap-2 text-sm">
             <Link
               href="/admin/catalogs/import"
@@ -322,8 +343,16 @@ export function AdminCatalogPanel({
               Кандидаты
             </Link>
           </div>
-          <AdminCatalogImportCandidatesSection compact />
+          <AdminCatalogImportCandidatesSection compact onChanged={refreshCatalogCounts} />
+          <AdminCatalogDraftsPanel showImportLink={false} onChanged={refreshCatalogCounts} />
         </div>
+      : null}
+
+      {tab === "claims" ?
+        <AdminCatalogClaimsSection
+          onPendingCountChange={setClaimCount}
+          onChanged={refreshCatalogCounts}
+        />
       : null}
 
       {tab === "reports" ?

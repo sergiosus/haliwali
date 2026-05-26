@@ -535,12 +535,12 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
           : null}
         </div>
 
-        {selectedCount > 0 ?
+        {selectedCount > 0 || tab === "rejected" ?
           <div className="mt-3 flex flex-wrap gap-2 border-t border-black/10 pt-3">
             {canApprove ?
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || selectedCount === 0}
                 onClick={() => void runAction("approve", selectedIds)}
                 className="rounded-full border border-black/15 px-3 py-1.5 text-sm font-medium hover:bg-black/5 disabled:opacity-40"
               >
@@ -559,7 +559,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
             : null}
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || selectedCount === 0}
               onClick={() => void runDelete(selectedIds)}
               className="rounded-full border border-red-200 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-50 disabled:opacity-40"
             >
@@ -580,6 +580,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
       : filteredDrafts.map((d) => {
         const score100 = confidenceFromStored(d.confidenceScore ?? 0.5);
         const confLabel = confidenceLabelRu(score100);
+        const displayStatus: CatalogImportDraftStatus = tab === "rejected" ? "rejected" : d.status;
         const addedByUser =
           String(d.rawPayload?.submissionStatus ?? "") === "user_submitted" ||
           String(d.rawPayload?.submissionType ?? "") === "public_company_form";
@@ -604,7 +605,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{d.name || "—"}</span>
-                  <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs">{STATUS_LABEL[d.status]}</span>
+                  <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs">{STATUS_LABEL[displayStatus]}</span>
                   <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-900">
                     {confLabel} ({score100})
                   </span>
@@ -670,7 +671,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                 </p>
               </div>
               <div className="flex flex-col gap-2">
-                {d.status === "draft" ?
+                {displayStatus === "draft" ?
                   <>
                     <button
                       type="button"
@@ -706,7 +707,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     </button>
                   </>
                 : null}
-                {d.status === "published" ?
+                {displayStatus === "published" ?
                   <button
                     type="button"
                     disabled={busy}
@@ -716,7 +717,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     Редактировать
                   </button>
                 : null}
-                {d.status === "rejected" ?
+                {displayStatus === "rejected" ?
                   <>
                     <button
                       type="button"
@@ -736,7 +737,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     </button>
                   </>
                 : null}
-                {d.status === "saved" ?
+                {displayStatus === "saved" ?
                   <>
                     <button
                       type="button"
@@ -764,7 +765,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                     </button>
                   </>
                 : null}
-                {d.status === "approved" ?
+                {displayStatus === "approved" ?
                   <>
                     <button
                       type="button"
@@ -795,7 +796,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
               </div>
             </div>
 
-            {d.status !== "published" && d.status !== "rejected" ?
+            {displayStatus !== "published" && displayStatus !== "rejected" ?
               <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-black/10 pt-3">
                 <label className="text-xs text-black/55">
                   Объединить дубликат

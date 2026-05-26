@@ -2,6 +2,8 @@
  * Server-only AI chat summary helper. Does not log message text or prompts.
  */
 
+import { callOpenAiChatCompletion } from "./serverChatAiOpenAi";
+
 const INSUFFICIENT_RU = "Недостаточно данных для краткого итога.";
 const MAX_MESSAGES = 40;
 const MIN_LINES = 2;
@@ -19,14 +21,6 @@ export type ChatSummarySourceMessage = {
 export type ChatAiSummaryResult =
   | { ok: true; summary: string }
   | { ok: false; code: "INSUFFICIENT" | "UNCONFIGURED" | "UPSTREAM"; message: string };
-
-function logStage(stage: string, detail?: Record<string, string | number | boolean>) {
-  if (detail) {
-    console.error("[chat-ai-summary]", stage, detail);
-  } else {
-    console.error("[chat-ai-summary]", stage);
-  }
-}
 
 export function buildSummaryTranscript(messages: ChatSummarySourceMessage[]): string[] {
   const sorted = [...messages]
@@ -96,69 +90,27 @@ export async function generateChatAiSummary(messages: ChatSummarySourceMessage[]
     return { ok: false, code: "INSUFFICIENT", message: INSUFFICIENT_RU };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    logStage("unconfigured");
-    return {
-      ok: false,
-      code: "UNCONFIGURED",
-      message: "Итог AI временно недоступен. Обратитесь к администратору сайта.",
-    };
-  }
-
-  const model = process.env.OPENAI_CHAT_MODEL?.trim() || "gpt-4o-mini";
   const transcript = lines.join("\n");
+  const ai = await callOpenAiChatCompletion({
+    feature: "summary",
+    system: SYSTEM_PROMPT,
+    user: `Переписка:\n\n${transcript}`,
+    maxTokens: 700,
+    temperature: 0.2,
+  });
 
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        max_tokens: 700,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: `Переписка:\n\n${transcript}` },
-        ],
-      }),
-      signal: AbortSignal.timeout(45_000),
-    });
-
-    if (!res.ok) {
-      logStage("openai_http_error", { status: res.status });
-      return {
-        ok: false,
-        code: "UPSTREAM",
-        message: "Не удалось сформировать итог. Попробуйте позже.",
-      };
-    }
-
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = data.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content.trim()) {
-      logStage("openai_empty_response");
-      return {
-        ok: false,
-        code: "UPSTREAM",
-        message: "Не удалось сформировать итог. Попробуйте позже.",
-      };
-    }
-
-    return parseModelContent(content);
-  } catch {
-    logStage("openai_request_failed");
+  if (!ai.ok) {
     return {
       ok: false,
-      code: "UPSTREAM",
-      message: "Не удалось сформировать итог. Попробуйте позже.",
+      code: ai.code,
+      message:
+        ai.code === "UNCONFIGURED"
+          ? "Итог AI временно недоступен. Обратитесь к администратору сайта."
+          : ai.message,
     };
   }
+
+  return parseModelContent(ai.content);
 }
 
 export { INSUFFICIENT_RU };

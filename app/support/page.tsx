@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../lib/auth";
 import type { StoredSupportTicket } from "../lib/serverSupportStore";
@@ -88,7 +89,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<{ ok: boo
   return { ok: r.ok, json, status: r.status };
 }
 
-export default function SupportPage() {
+export function SupportCabinetPanel() {
   const auth = useAuth();
 
   const [appeals, setAppeals] = useState<MineAppealRow[]>([]);
@@ -284,16 +285,8 @@ export default function SupportPage() {
   }
 
   return (
-    <div className="min-h-full bg-black/[0.03] text-black">
-      <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
-        <Link
-          href="/account"
-          className="inline-flex items-center gap-1 text-sm text-black/60 transition-colors hover:text-black"
-        >
-          ← Назад в кабинет
-        </Link>
-
-        <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="text-black">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Поддержка</h1>
             <p className="mt-2 max-w-xl text-sm text-black/60">
@@ -323,7 +316,7 @@ export default function SupportPage() {
           <div className="mt-8 rounded-2xl border border-black/10 bg-white p-5 text-sm text-black/80">
             <p>Чтобы написать в поддержку, войдите в аккаунт.</p>
             <Link
-              href={`/login?next=${encodeURIComponent("/support")}`}
+              href={`/login?next=${encodeURIComponent("/account?tab=support")}`}
               className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-[#ff7a00] px-4 text-sm font-semibold text-white hover:brightness-95"
             >
               Войти
@@ -588,6 +581,23 @@ export default function SupportPage() {
             </div>
           </div>
         )}
+    </div>
+  );
+}
+
+export default function SupportPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/account?tab=support");
+  }, [router]);
+
+  return (
+    <div className="min-h-full bg-black/[0.03] text-black">
+      <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
+        <div className="rounded-2xl border border-black/10 bg-white p-5 text-sm text-black/60">
+          Открываем поддержку в личном кабинете…
+        </div>
       </main>
     </div>
   );

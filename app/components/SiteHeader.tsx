@@ -498,12 +498,12 @@ export function SiteHeader() {
             Профиль
           </Link>
           <Link
-            href="/support"
+            href="/account?tab=support"
             onClick={(e) => {
               if (isAccountMenuDebugOn()) {
                 console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
                   label: "Поддержка",
-                  href: "/support",
+                  href: "/account?tab=support",
                   defaultPrevented: e.defaultPrevented,
                 });
               }

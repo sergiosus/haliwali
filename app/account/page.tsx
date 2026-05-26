@@ -31,6 +31,7 @@ import { getSiteIdentityLabel, USER_DISPLAY_FALLBACK } from "../lib/userDisplayN
 import { formatListingCardAuthor } from "../lib/listingCardAuthorDisplay";
 import { normalizeListingId } from "../lib/listingId";
 import { appendReturnUrlQuery } from "../lib/returnNavigation";
+import { SupportCabinetPanel } from "../support/page";
 
 /** Центрированная колонка для сетки объявлений (max ~900px, на узких экранах — с боковым отступом). */
 const listingCardsContainerClass =
@@ -66,7 +67,7 @@ const favoritesBottomSectionClass =
   "mt-auto flex flex-col gap-2 border-t border-black/[0.06] pt-3 max-md:gap-2";
 
 type StatusTab = "all" | "pending" | "published" | "rejected" | "trash" | "archive";
-type MainTab = "ads" | "favorites" | "profile" | "messages" | "settings";
+type MainTab = "ads" | "favorites" | "profile" | "messages" | "settings" | "support";
 
 type ChatConversationSummary = {
   conversationId: string;
@@ -261,6 +262,7 @@ function AccountPageInner() {
     if (initialTab === "profile") return "profile";
     if (initialTab === "messages") return "messages";
     if (initialTab === "settings") return "settings";
+    if (initialTab === "support") return "support";
     return "ads";
   });
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
@@ -373,6 +375,7 @@ function AccountPageInner() {
     else if (t === "profile") setMainTab("profile");
     else if (t === "messages") setMainTab("messages");
     else if (t === "settings") setMainTab("settings");
+    else if (t === "support") setMainTab("support");
   }, [searchParams]);
 
   useEffect(() => {
@@ -773,13 +776,8 @@ function AccountPageInner() {
                 onClick={() => setMainTab("messages")}
               />
               <TabButton label="Профиль" active={mainTab === "profile"} onClick={() => setMainTab("profile")} />
+              <TabButton label="Поддержка" active={mainTab === "support"} onClick={() => setMainTab("support")} />
               <TabButton label="Настройки" active={mainTab === "settings"} onClick={() => setMainTab("settings")} />
-              <Link
-                href="/support"
-                className="inline-flex h-[32px] max-w-full shrink-0 items-center rounded-[13px] border border-black/10 bg-white px-3 text-[13px] font-semibold leading-none text-black/70 transition-colors hover:bg-black/5"
-              >
-                Поддержка
-              </Link>
               </div>
             </div>
 
@@ -997,6 +995,8 @@ function AccountPageInner() {
                     {profileSaved ? <div className="text-sm text-green-700">Профиль сохранён</div> : null}
                   </div>
                 </div>
+              ) : mainTab === "support" ? (
+                <SupportCabinetPanel />
               ) : mainTab === "settings" ? (
                 <div className="max-w-md grid gap-5">
                   {me?.ok && me.user.deletionStatus === "pending_deletion" && typeof me.user.deleteScheduledAt === "number" ? (

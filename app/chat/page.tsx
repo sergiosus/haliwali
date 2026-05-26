@@ -17,6 +17,7 @@ import {
 } from "../components/chat/ChatComposerMarketplace";
 import { ChatVoicePlayer } from "../components/chat/ChatVoicePlayer";
 import { ChatAiSummaryModal } from "../components/chat/ChatAiSummaryModal";
+import { ChatAiQuickReplies } from "../components/chat/ChatAiQuickReplies";
 import { analyzeChatComposerSafety } from "../lib/chatSafety";
 import { formatChatPeerPresenceRu, CHAT_FAST_REPLY_HINT } from "../lib/chatPresenceUi";
 import type { ChatDealStatus } from "../lib/chatDealStatus";
@@ -561,6 +562,10 @@ function ChatInner() {
   const [aiSummaryText, setAiSummaryText] = useState<string | null>(null);
   const [aiSummarySaveBusy, setAiSummarySaveBusy] = useState(false);
   const [aiSummarySaveDone, setAiSummarySaveDone] = useState(false);
+  const [aiQuickRepliesVisible, setAiQuickRepliesVisible] = useState(false);
+  const [aiQuickRepliesLoading, setAiQuickRepliesLoading] = useState(false);
+  const [aiQuickRepliesError, setAiQuickRepliesError] = useState<string | null>(null);
+  const [aiQuickReplies, setAiQuickReplies] = useState<string[]>([]);
   const [, setDealStatus] = useState<ChatDealStatus>("new");
   const [peerTyping, setPeerTyping] = useState(false);
   const [safetyWarning, setSafetyWarning] = useState<ReturnType<typeof analyzeChatComposerSafety>>(null);
@@ -1038,6 +1043,52 @@ function ChatInner() {
       setAiSummarySaveBusy(false);
     }
   }, [aiSummaryText, aiSummarySaveBusy, chatId]);
+
+  const requestAiQuickReplies = useCallback(async () => {
+    if (!chatId) return;
+    setAiQuickRepliesVisible(true);
+    setAiQuickRepliesLoading(true);
+    setAiQuickRepliesError(null);
+    setAiQuickReplies([]);
+    try {
+      const res = await fetch("/api/ai/quick-replies", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        replies?: unknown;
+        message?: string;
+      };
+      if (res.ok && data.ok && Array.isArray(data.replies)) {
+        const cleaned = data.replies
+          .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+          .map((x) => x.trim())
+          .slice(0, 3);
+        if (cleaned.length >= 1) {
+          setAiQuickReplies(cleaned);
+          return;
+        }
+      }
+      setAiQuickRepliesError(
+        typeof data.message === "string" && data.message.trim()
+          ? data.message.trim()
+          : "Не удалось получить подсказки.",
+      );
+    } catch {
+      setAiQuickRepliesError("Не удалось получить подсказки.");
+    } finally {
+      setAiQuickRepliesLoading(false);
+    }
+  }, [chatId]);
+
+  const pickAiQuickReply = useCallback((reply: string) => {
+    setText(reply);
+    queueMicrotask(() => inputRef.current?.focus());
+  }, []);
 
   const blockPeerUser = useCallback(async () => {
     const peerUserId = opponent.id.trim();
@@ -2583,6 +2634,19 @@ function ChatInner() {
               </div>
             ) : null}
 
+            <ChatAiQuickReplies
+              visible={aiQuickRepliesVisible}
+              loading={aiQuickRepliesLoading}
+              error={aiQuickRepliesError}
+              replies={aiQuickReplies}
+              onPick={pickAiQuickReply}
+              onDismiss={() => {
+                setAiQuickRepliesVisible(false);
+                setAiQuickRepliesError(null);
+                setAiQuickReplies([]);
+              }}
+            />
+
             <form
               className={chatComposerFormClass}
               onSubmit={(e) => {
@@ -2873,6 +2937,15 @@ function ChatInner() {
                       <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
                     </svg>
                   </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white px-2.5 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
+                    onClick={() => void requestAiQuickReplies()}
+                    disabled={composerDisabled || aiQuickRepliesLoading}
+                    aria-label="AI ответ"
+                  >
+                    AI ответ
+                  </button>
                   <div className="relative shrink-0" ref={emojiPickerWrapRef}>
                     <button
                       type="button"
@@ -2928,7 +3001,16 @@ function ChatInner() {
                     <path d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.43-7.43l9.19-9.19a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l8.24-8.24" />
                   </svg>
                 </button>
-                <div className="relative shrink-0 md:order-2">
+                <button
+                  type="button"
+                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-2xl border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50 md:order-2"
+                  onClick={() => void requestAiQuickReplies()}
+                  disabled={composerDisabled || aiQuickRepliesLoading}
+                  aria-label="AI ответ"
+                >
+                  AI ответ
+                </button>
+                <div className="relative shrink-0 md:order-3">
                   <button
                     type="button"
                     className={chatComposerIconBtnClass}
@@ -2963,7 +3045,7 @@ function ChatInner() {
                 </div>
                 <button
                   type="submit"
-                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-2xl bg-orange-500 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 md:order-4"
+                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-2xl bg-orange-500 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 md:order-5"
                   disabled={composerDisabled}
                   aria-label="Отправить"
                 >

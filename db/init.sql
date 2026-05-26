@@ -191,7 +191,9 @@ CREATE TABLE IF NOT EXISTS listing_conversations (
   last_message_text TEXT NOT NULL DEFAULT '',
   last_message_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
-  updated_at BIGINT NOT NULL
+  updated_at BIGINT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'internal',
+  external_chat_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS listing_conversations_buyer_last_message_at_idx
@@ -217,6 +219,9 @@ CREATE TABLE IF NOT EXISTS listing_messages (
   edited_at TEXT,
   created_at BIGINT NOT NULL,
   read_at BIGINT,
+  provider TEXT NOT NULL DEFAULT 'internal',
+  external_message_id TEXT,
+  provider_metadata JSONB,
   PRIMARY KEY (conversation_id, message_id)
 );
 

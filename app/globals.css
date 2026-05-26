@@ -6,6 +6,15 @@
   --background: #ffffff;
   --foreground: #171717;
   --accent: #ff7a00;
+  --site-header-height: 57px;
+}
+
+/* Installed PWA: more vertical room for chat/workspace; footer hidden only on focus routes. */
+@media (display-mode: standalone) {
+  body:has(.pwa-chat-focus) footer,
+  body:has(.pwa-workspace-focus) footer {
+    display: none;
+  }
 }
 
 /* Keep CSS variables as-is (no @theme). */

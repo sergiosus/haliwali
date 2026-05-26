@@ -18,6 +18,7 @@ import {
 import { ChatVoicePlayer } from "../components/chat/ChatVoicePlayer";
 import { ChatAiSummaryModal } from "../components/chat/ChatAiSummaryModal";
 import { ChatAiQuickReplies } from "../components/chat/ChatAiQuickReplies";
+import { ChatAiTasksModal, type ChatAiTaskUi } from "../components/chat/ChatAiTasksModal";
 import { analyzeChatComposerSafety } from "../lib/chatSafety";
 import { formatChatPeerPresenceRu, CHAT_FAST_REPLY_HINT } from "../lib/chatPresenceUi";
 import type { ChatDealStatus } from "../lib/chatDealStatus";
@@ -51,12 +52,12 @@ import { formatListingCardAuthor, LISTING_AUTHOR_FALLBACK_LABEL } from "../lib/l
 
 /** Mobile: fill space between site header/footer; desktop keeps centered shell padding. */
 const chatPageShellOuterClass =
-  "flex min-h-0 w-full flex-1 flex-col px-3 pt-3 pb-2 md:min-h-0 md:flex-none md:px-4 md:pt-6 md:pb-14";
+  "pwa-chat-focus flex min-h-0 w-full flex-1 flex-col px-3 pt-3 pb-2 md:min-h-0 md:flex-none md:px-4 md:pt-6 md:pb-14";
 /** Inner column grows on mobile so the chat card can fill space above the composer. */
 const chatPageShellInnerClass = "mx-auto flex w-full max-w-[920px] min-h-0 flex-1 flex-col";
 /** Mobile messenger panel height; desktop keeps capped card sizing. */
 const chatCardShellClass =
-  "flex min-h-[max(520px,calc(100dvh-17rem))] flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none";
+  "flex min-h-[max(520px,calc(100dvh-17rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))] flex-1 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white [@media(display-mode:standalone)]:min-h-[max(520px,calc(100dvh-9.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))] md:min-h-[min(72dvh,640px)] md:max-h-[min(82dvh,760px)] md:flex-none";
 const chatComposerIconBtnClass =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white text-black/70 hover:bg-black/[0.03] md:h-11 md:w-11 md:rounded-2xl";
 const chatComposerFormClass =
@@ -607,6 +608,12 @@ function ChatInner() {
   const [aiQuickRepliesLoading, setAiQuickRepliesLoading] = useState(false);
   const [aiQuickRepliesError, setAiQuickRepliesError] = useState<string | null>(null);
   const [aiQuickReplies, setAiQuickReplies] = useState<string[]>([]);
+  const [aiTasksOpen, setAiTasksOpen] = useState(false);
+  const [aiTasksLoading, setAiTasksLoading] = useState(false);
+  const [aiTasksError, setAiTasksError] = useState<string | null>(null);
+  const [aiTasks, setAiTasks] = useState<ChatAiTaskUi[]>([]);
+  const [aiTasksSaveBusy, setAiTasksSaveBusy] = useState(false);
+  const [aiTasksSaveDone, setAiTasksSaveDone] = useState(false);
   const [crmOpen, setCrmOpen] = useState(false);
   const [crmLoading, setCrmLoading] = useState(false);
   const [crmSaving, setCrmSaving] = useState(false);
@@ -1143,6 +1150,99 @@ function ChatInner() {
     setText(reply);
     queueMicrotask(() => inputRef.current?.focus());
   }, []);
+
+  const requestAiTasks = useCallback(async () => {
+    if (!chatId) return;
+    setAiTasksOpen(true);
+    setAiTasksLoading(true);
+    setAiTasksError(null);
+    setAiTasks([]);
+    setAiTasksSaveDone(false);
+    try {
+      const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/ai-tasks`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        tasks?: unknown;
+        message?: string;
+      };
+      if (res.ok && data.ok && Array.isArray(data.tasks)) {
+        const tasks = data.tasks
+          .filter((x): x is Record<string, unknown> => Boolean(x && typeof x === "object"))
+          .map((x) => ({
+            title: typeof x.title === "string" ? x.title.trim() : "",
+            deadlineText: typeof x.deadlineText === "string" ? x.deadlineText.trim() : "без срока",
+            assigneeText: typeof x.assigneeText === "string" ? x.assigneeText.trim() : "",
+            sourceType: typeof x.sourceType === "string" ? x.sourceType.trim() : "chat",
+            sourceRef: typeof x.sourceRef === "string" ? x.sourceRef.trim() : undefined,
+          }))
+          .filter((x) => x.title)
+          .slice(0, 12);
+        setAiTasks(tasks);
+        return;
+      }
+      setAiTasksError(
+        typeof data.message === "string" && data.message.trim()
+          ? data.message.trim()
+          : "Не удалось создать задачи.",
+      );
+    } catch {
+      setAiTasksError("Не удалось создать задачи.");
+    } finally {
+      setAiTasksLoading(false);
+    }
+  }, [chatId]);
+
+  const copyAiTasks = useCallback(async () => {
+    if (aiTasks.length === 0) return;
+    const textToCopy = aiTasks
+      .map((task, idx) => {
+        const parts = [`${idx + 1}. ${task.title}`, `Срок: ${task.deadlineText || "без срока"}`];
+        if (task.assigneeText) parts.push(`Ответственный: ${task.assigneeText}`);
+        if (task.sourceRef) parts.push(`Источник: ${task.sourceRef}`);
+        return parts.join("\n");
+      })
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+    } catch {
+      // clipboard may be unavailable
+    }
+  }, [aiTasks]);
+
+  const saveAiTasks = useCallback(async () => {
+    if (!chatId || aiTasks.length === 0 || aiTasksSaveBusy) return;
+    setAiTasksSaveBusy(true);
+    setAiTasksError(null);
+    try {
+      const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/ai-tasks`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ save: true, tasks: aiTasks }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+      if (res.ok && data.ok) {
+        setAiTasksSaveDone(true);
+        return;
+      }
+      setAiTasksError(
+        typeof data.message === "string" && data.message.trim()
+          ? data.message.trim()
+          : "Не удалось сохранить задачи.",
+      );
+    } catch {
+      setAiTasksError("Не удалось сохранить задачи.");
+    } finally {
+      setAiTasksSaveBusy(false);
+    }
+  }, [aiTasks, aiTasksSaveBusy, chatId]);
 
   const applyCrmFromApi = useCallback((raw: unknown) => {
     const crm = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -2605,6 +2705,17 @@ function ChatInner() {
                     AI summary
                   </button>
                 ) : null}
+                {chatId && !showOwnerPeerPicker ? (
+                  <button
+                    type="button"
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
+                    onClick={() => void requestAiTasks()}
+                    disabled={aiTasksLoading}
+                    aria-label="Создать задачи"
+                  >
+                    Создать задачи
+                  </button>
+                ) : null}
                 {opponent.id && !showOwnerPeerPicker && !chatIsBlocked ? (
                   <button
                     type="button"
@@ -3629,6 +3740,20 @@ function ChatInner() {
             }}
             onCopy={() => void copyAiSummary()}
             onSave={() => void saveAiSummary()}
+          />
+          <ChatAiTasksModal
+            open={aiTasksOpen}
+            loading={aiTasksLoading}
+            error={aiTasksError}
+            tasks={aiTasks}
+            saveBusy={aiTasksSaveBusy}
+            saveDone={aiTasksSaveDone}
+            onClose={() => {
+              if (aiTasksSaveBusy) return;
+              setAiTasksOpen(false);
+            }}
+            onCopy={() => void copyAiTasks()}
+            onSave={() => void saveAiTasks()}
           />
           <BlockPeerModal
             open={blockModalOpen}

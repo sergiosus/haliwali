@@ -30,7 +30,24 @@ const nextConfig: NextConfig = {
       "media-src 'self' blob:",
     ].join("; ");
 
+    const privateApiCache = [
+      { key: "Cache-Control", value: "private, no-store, no-cache, must-revalidate" },
+      { key: "Pragma", value: "no-cache" },
+    ] as const;
+
     return [
+      {
+        source: "/api/:path*",
+        headers: [...privateApiCache],
+      },
+      {
+        source: "/chat",
+        headers: [...privateApiCache],
+      },
+      {
+        source: "/account",
+        headers: [...privateApiCache],
+      },
       {
         source: "/:path*",
         headers: [

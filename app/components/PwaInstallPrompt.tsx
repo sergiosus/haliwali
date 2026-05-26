@@ -93,7 +93,7 @@ export function PwaInstallPrompt() {
 
   return (
     <div
-      className="pointer-events-none fixed bottom-3 right-3 z-[42] flex max-w-[min(100vw-1.5rem,20rem)] flex-col items-end gap-1.5 p-0 lg:hidden"
+      className="pointer-events-none fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-3 z-[65] flex max-w-[min(100vw-1.5rem,20rem)] flex-col items-end gap-1.5 p-0 lg:hidden"
       role="region"
       aria-label="Установка приложения"
     >

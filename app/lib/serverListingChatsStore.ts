@@ -5,6 +5,8 @@ import { sanitizeMergedChatFileUrl } from "./serverChatPrivateFiles";
 import { getPool, usesPostgres } from "./pgPool";
 import { normalizeListingId } from "./listingId";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
+import type { ChatMessageProvider } from "./chatMessageProvider";
+import { providerFieldsFromPgConversation, providerFieldsFromPgMessage } from "./chatMessageProvider";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const LISTING_CHATS_PATH = path.join(DATA_DIR, "listing-conversations.json");
@@ -25,6 +27,10 @@ export type StoredListingChatMessage = {
   replyToMessageId?: string;
   replyToText?: string;
   editedAt?: string;
+  /** Channel origin; omitted on legacy JSON rows → treated as internal. */
+  provider?: ChatMessageProvider;
+  externalMessageId?: string;
+  providerMetadata?: Record<string, unknown>;
 };
 
 export type ListingConversationRecord = {
@@ -39,6 +45,8 @@ export type ListingConversationRecord = {
   createdAt: number;
   updatedAt: number;
   messages: StoredListingChatMessage[];
+  provider?: ChatMessageProvider;
+  externalChatId?: string;
 };
 
 type ChatsFile = { conversations: Record<string, ListingConversationRecord> };
@@ -54,6 +62,8 @@ type PgConvRow = {
   last_message_at: string | number;
   created_at: string | number;
   updated_at: string | number;
+  provider?: string | null;
+  external_chat_id?: string | null;
 };
 
 type PgMsgRow = {
@@ -72,7 +82,17 @@ type PgMsgRow = {
   edited_at: string | null;
   created_at: string | number;
   read_at: string | number | null;
+  provider?: string | null;
+  external_message_id?: string | null;
+  provider_metadata?: unknown;
 };
+
+const PG_LISTING_CONV_SELECT = `conversation_id, listing_id, listing_title, listing_owner_id, buyer_id, participant_ids,
+            last_message_text, last_message_at, created_at, updated_at, provider, external_chat_id`;
+
+const PG_LISTING_MSG_SELECT = `conversation_id, message_id, listing_id, sender_id, recipient_id, type, text,
+            file_url, file_name, sender_name, reply_to_message_id, reply_to_text, edited_at,
+            created_at, read_at, provider, external_message_id, provider_metadata`;
 
 function num(v: string | number | null | undefined): number {
   if (v === null || v === undefined) return 0;
@@ -98,10 +118,12 @@ function pgRowToStoredMessage(r: PgMsgRow): StoredListingChatMessage {
     ...(r.reply_to_message_id ? { replyToMessageId: r.reply_to_message_id } : {}),
     ...(r.reply_to_text ? { replyToText: r.reply_to_text } : {}),
     ...(r.edited_at ? { editedAt: r.edited_at } : {}),
+    ...providerFieldsFromPgMessage(r),
   };
 }
 
 function pgConvAndMessagesToRecord(c: PgConvRow, messages: StoredListingChatMessage[]): ListingConversationRecord {
+  const channel = providerFieldsFromPgConversation(c);
   return {
     conversationId: c.conversation_id,
     listingId: c.listing_id,
@@ -114,6 +136,7 @@ function pgConvAndMessagesToRecord(c: PgConvRow, messages: StoredListingChatMess
     createdAt: num(c.created_at),
     updatedAt: num(c.updated_at),
     messages,
+    ...channel,
   };
 }
 
@@ -132,9 +155,7 @@ async function pgLoadConversation(conversationId: string): Promise<ListingConver
   const c = convRows[0];
   if (!c) return null;
   const { rows: msgRows } = await pool.query<PgMsgRow>(
-    `SELECT conversation_id, message_id, listing_id, sender_id, recipient_id, type, text,
-            file_url, file_name, sender_name, reply_to_message_id, reply_to_text, edited_at,
-            created_at, read_at
+    `SELECT ${PG_LISTING_MSG_SELECT}
      FROM listing_messages
      WHERE conversation_id = $1
      ORDER BY created_at ASC`,
@@ -227,8 +248,7 @@ export async function listListingConversationsForUser(userId: string): Promise<L
   if (usesPostgres()) {
     const pool = getPool();
     const { rows: convs } = await pool.query<PgConvRow>(
-      `SELECT conversation_id, listing_id, listing_title, listing_owner_id, buyer_id, participant_ids,
-              last_message_text, last_message_at, created_at, updated_at
+      `SELECT ${PG_LISTING_CONV_SELECT}
        FROM listing_conversations
        WHERE $1 = ANY(participant_ids)
        ORDER BY last_message_at DESC`,
@@ -237,9 +257,7 @@ export async function listListingConversationsForUser(userId: string): Promise<L
     if (convs.length === 0) return [];
     const ids = convs.map((c) => c.conversation_id);
     const { rows: msgRows } = await pool.query<PgMsgRow>(
-      `SELECT conversation_id, message_id, listing_id, sender_id, recipient_id, type, text,
-              file_url, file_name, sender_name, reply_to_message_id, reply_to_text, edited_at,
-              created_at, read_at
+      `SELECT ${PG_LISTING_MSG_SELECT}
        FROM listing_messages
        WHERE conversation_id = ANY($1::text[])
        ORDER BY conversation_id, created_at ASC`,

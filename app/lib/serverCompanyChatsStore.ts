@@ -3,6 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPool, usesPostgres } from "./pgPool";
 import { assertFileStoreNotUsedInProduction } from "./productionGuards";
+import type { ChatMessageProvider } from "./chatMessageProvider";
+import { providerFieldsFromPgConversation, providerFieldsFromPgMessage } from "./chatMessageProvider";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const COMPANY_CHATS_PATH = path.join(DATA_DIR, "company-conversations.json");
@@ -23,6 +25,9 @@ export type StoredCompanyChatMessage = {
   replyToMessageId?: string;
   replyToText?: string;
   editedAt?: string;
+  provider?: ChatMessageProvider;
+  externalMessageId?: string;
+  providerMetadata?: Record<string, unknown>;
 };
 
 export type CompanyConversationRecord = {
@@ -37,6 +42,8 @@ export type CompanyConversationRecord = {
   createdAt: number;
   updatedAt: number;
   messages: StoredCompanyChatMessage[];
+  provider?: ChatMessageProvider;
+  externalChatId?: string;
 };
 
 type ChatsFile = { conversations: Record<string, CompanyConversationRecord> };
@@ -52,6 +59,8 @@ type PgCompanyConvRow = {
   last_message_at: string | number;
   created_at: string | number;
   updated_at: string | number;
+  provider?: string | null;
+  external_chat_id?: string | null;
 };
 
 type PgCompanyMsgRow = {
@@ -70,7 +79,17 @@ type PgCompanyMsgRow = {
   edited_at: string | null;
   created_at: string | number;
   read_at: string | number | null;
+  provider?: string | null;
+  external_message_id?: string | null;
+  provider_metadata?: unknown;
 };
+
+const PG_COMPANY_CONV_SELECT = `conversation_id, company_id, company_title, owner_user_id, customer_id, participant_ids,
+              last_message_text, last_message_at, created_at, updated_at, provider, external_chat_id`;
+
+const PG_COMPANY_MSG_SELECT = `conversation_id, message_id, company_id, sender_id, recipient_id, type, text,
+              file_url, file_name, sender_name, reply_to_message_id, reply_to_text, edited_at,
+              created_at, read_at, provider, external_message_id, provider_metadata`;
 
 function num(v: string | number | null | undefined): number {
   if (v === null || v === undefined) return 0;
@@ -95,10 +114,12 @@ function messageFromPg(r: PgCompanyMsgRow): StoredCompanyChatMessage {
     ...(r.reply_to_message_id ? { replyToMessageId: r.reply_to_message_id } : {}),
     ...(r.reply_to_text ? { replyToText: r.reply_to_text } : {}),
     ...(r.edited_at ? { editedAt: r.edited_at } : {}),
+    ...providerFieldsFromPgMessage(r),
   };
 }
 
 function conversationFromPg(c: PgCompanyConvRow, messages: StoredCompanyChatMessage[]): CompanyConversationRecord {
+  const channel = providerFieldsFromPgConversation(c);
   return {
     conversationId: c.conversation_id,
     companyId: Number(c.company_id),
@@ -111,6 +132,7 @@ function conversationFromPg(c: PgCompanyConvRow, messages: StoredCompanyChatMess
     createdAt: num(c.created_at),
     updatedAt: num(c.updated_at),
     messages,
+    ...channel,
   };
 }
 
@@ -128,7 +150,9 @@ async function ensureCompanyChatTables(): Promise<void> {
       last_message_text TEXT NOT NULL DEFAULT '',
       last_message_at BIGINT NOT NULL,
       created_at BIGINT NOT NULL,
-      updated_at BIGINT NOT NULL
+      updated_at BIGINT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'internal',
+      external_chat_id TEXT
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS company_conversations_participants_idx ON company_conversations USING GIN (participant_ids)`);
@@ -150,6 +174,9 @@ async function ensureCompanyChatTables(): Promise<void> {
       edited_at TEXT,
       created_at BIGINT NOT NULL,
       read_at BIGINT,
+      provider TEXT NOT NULL DEFAULT 'internal',
+      external_message_id TEXT,
+      provider_metadata JSONB,
       PRIMARY KEY (conversation_id, message_id)
     )
   `);
@@ -216,8 +243,7 @@ export async function getCompanyConversation(conversationId: string): Promise<Co
     await ensureCompanyChatTables();
     const pool = getPool();
     const { rows } = await pool.query<PgCompanyConvRow>(
-      `SELECT conversation_id, company_id, company_title, owner_user_id, customer_id, participant_ids,
-              last_message_text, last_message_at, created_at, updated_at
+      `SELECT ${PG_COMPANY_CONV_SELECT}
        FROM company_conversations
        WHERE conversation_id = $1
        LIMIT 1`,
@@ -226,9 +252,7 @@ export async function getCompanyConversation(conversationId: string): Promise<Co
     const conv = rows[0];
     if (!conv) return null;
     const { rows: msgRows } = await pool.query<PgCompanyMsgRow>(
-      `SELECT conversation_id, message_id, company_id, sender_id, recipient_id, type, text,
-              file_url, file_name, sender_name, reply_to_message_id, reply_to_text, edited_at,
-              created_at, read_at
+      `SELECT ${PG_COMPANY_MSG_SELECT}
        FROM company_messages
        WHERE conversation_id = $1
        ORDER BY created_at ASC`,
@@ -246,8 +270,7 @@ export async function listCompanyConversationsForUser(userId: string): Promise<C
     await ensureCompanyChatTables();
     const pool = getPool();
     const { rows } = await pool.query<PgCompanyConvRow>(
-      `SELECT conversation_id, company_id, company_title, owner_user_id, customer_id, participant_ids,
-              last_message_text, last_message_at, created_at, updated_at
+      `SELECT ${PG_COMPANY_CONV_SELECT}
        FROM company_conversations
        WHERE $1 = ANY(participant_ids)
        ORDER BY last_message_at DESC`,
@@ -256,9 +279,7 @@ export async function listCompanyConversationsForUser(userId: string): Promise<C
     if (!rows.length) return [];
     const ids = rows.map((r) => r.conversation_id);
     const { rows: msgRows } = await pool.query<PgCompanyMsgRow>(
-      `SELECT conversation_id, message_id, company_id, sender_id, recipient_id, type, text,
-              file_url, file_name, sender_name, reply_to_message_id, reply_to_text, edited_at,
-              created_at, read_at
+      `SELECT ${PG_COMPANY_MSG_SELECT}
        FROM company_messages
        WHERE conversation_id = ANY($1::text[])
        ORDER BY conversation_id, created_at ASC`,

@@ -482,6 +482,22 @@ export function SiteHeader() {
             {chatUnreadTotal > 0 ? `Сообщения (${chatUnreadTotal})` : "Сообщения"}
           </Link>
           <Link
+            href="/account?tab=workspace"
+            onClick={(e) => {
+              if (isAccountMenuDebugOn()) {
+                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
+                  label: "Рабочее пространство",
+                  href: "/account?tab=workspace",
+                  defaultPrevented: e.defaultPrevented,
+                });
+              }
+              queueMicrotask(() => closeAccountMenu());
+            }}
+            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+          >
+            Рабочее пространство
+          </Link>
+          <Link
             href="/account?tab=profile"
             onClick={(e) => {
               if (isAccountMenuDebugOn()) {
@@ -567,7 +583,7 @@ export function SiteHeader() {
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-gray-200 bg-white">
+    <header className="sticky top-0 z-50 border-b border-gray-200 bg-white pt-[env(safe-area-inset-top)]">
       <div className="mx-auto w-full min-w-0 max-w-7xl px-3 py-3 sm:px-6">
         <div className="flex flex-col gap-3 md:hidden">
           <div className="flex min-w-0 items-center justify-between gap-2">

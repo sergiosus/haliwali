@@ -80,6 +80,44 @@ async function writeJson(data: JsonFile): Promise<void> {
   await writeFile(CHAT_CRM_PATH, JSON.stringify(data, null, 2), "utf8");
 }
 
+export async function listChatCrmRecordsForUser(userIdRaw: string): Promise<ChatCrmRecord[]> {
+  const userId = userIdRaw.trim();
+  if (!userId) return [];
+
+  if (usesPostgres()) {
+    const pool = getPool();
+    const { rows } = await pool.query<{
+      conversation_id: string;
+      user_id: string;
+      status: string;
+      private_note: string | null;
+      tags: string[] | null;
+      created_at: string | number;
+      updated_at: string | number;
+    }>(
+      `SELECT conversation_id, user_id, status, private_note, tags, created_at, updated_at
+       FROM chat_crm_fields
+       WHERE user_id = $1
+       ORDER BY updated_at DESC`,
+      [userId],
+    );
+    return rows.map((row) => ({
+      conversationId: row.conversation_id,
+      userId: row.user_id,
+      status: normalizeChatCrmStatus(row.status),
+      privateNote: row.private_note ?? "",
+      tags: normalizeTags(row.tags ?? []),
+      createdAt: Number(row.created_at) || Date.now(),
+      updatedAt: Number(row.updated_at) || Date.now(),
+    }));
+  }
+
+  const db = await readJson();
+  return Object.values(db.records)
+    .filter((r) => r.userId.trim() === userId)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 export async function getChatCrmRecord(conversationIdRaw: string, userIdRaw: string): Promise<ChatCrmRecord> {
   const conversationId = conversationIdRaw.trim();
   const userId = userIdRaw.trim();

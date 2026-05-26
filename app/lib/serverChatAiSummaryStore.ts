@@ -36,6 +36,63 @@ async function writeJson(data: JsonFile): Promise<void> {
   await writeFile(SUMMARIES_PATH, JSON.stringify(data, null, 2), "utf8");
 }
 
+export type ChatAiSummaryListItem = {
+  conversationId: string;
+  summaryText: string;
+  createdAt: number;
+};
+
+export async function listUserChatAiSummaries(userIdRaw: string, limit = 24): Promise<ChatAiSummaryListItem[]> {
+  const userId = userIdRaw.trim();
+  if (!userId) return [];
+  const cap = Math.min(Math.max(limit, 1), 48);
+
+  if (usesPostgres()) {
+    try {
+      const { rows } = await getPool().query<{
+        conversation_id: string;
+        summary_text: string;
+        created_at: string | number;
+      }>(
+        `SELECT DISTINCT ON (conversation_id) conversation_id, summary_text, created_at
+         FROM chat_ai_summaries
+         WHERE user_id = $1
+         ORDER BY conversation_id, created_at DESC`,
+        [userId],
+      );
+      return rows
+        .map((row) => ({
+          conversationId: row.conversation_id,
+          summaryText: row.summary_text,
+          createdAt: Number(row.created_at) || 0,
+        }))
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, cap);
+    } catch {
+      return [];
+    }
+  }
+
+  try {
+    const file = await readJson();
+    const latest = new Map<string, ChatAiSummaryListItem>();
+    for (const item of file.items) {
+      if (item.userId.trim() !== userId) continue;
+      const prev = latest.get(item.conversationId);
+      if (!prev || item.createdAt > prev.createdAt) {
+        latest.set(item.conversationId, {
+          conversationId: item.conversationId,
+          summaryText: item.summaryText,
+          createdAt: item.createdAt,
+        });
+      }
+    }
+    return [...latest.values()].sort((a, b) => b.createdAt - a.createdAt).slice(0, cap);
+  } catch {
+    return [];
+  }
+}
+
 export async function saveChatAiSummary(input: {
   conversationId: string;
   userId: string;

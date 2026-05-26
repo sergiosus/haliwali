@@ -1,10 +1,12 @@
 {
+  "id": "/",
   "name": "Haliwali",
   "short_name": "Haliwali",
   "description": "Задачи, услуги и товары в России",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "prefer_related_applications": false,
   "background_color": "#ffffff",
   "theme_color": "#FF7F50",
   "lang": "ru",

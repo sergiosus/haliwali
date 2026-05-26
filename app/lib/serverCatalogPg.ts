@@ -4,11 +4,16 @@ import type {
   CatalogCompanyAdminItem,
   CatalogCompanyContact,
   CatalogCompanyClaimRequest,
+  CatalogCompanyOrigin,
   CatalogCompanyListItem,
   CatalogCompanyProfile,
   CatalogReport,
 } from "./catalogTypes";
 import { CATALOG_CATEGORY_SEED, type CatalogCompanyImportRow } from "./catalogTypes";
+import {
+  catalogCompanyOriginFromDraftPayload,
+  normalizeCatalogCompanyOrigin,
+} from "./catalogCompanyOrigin";
 import {
   matchedServiceCity,
   normalizeCatalogCompanyCities,
@@ -44,6 +49,10 @@ function rowProfileStatus(v: unknown): "imported" | "verified" {
   return v === "verified" ? "verified" : "imported";
 }
 
+function rowOrigin(v: unknown): CatalogCompanyOrigin {
+  return normalizeCatalogCompanyOrigin(v);
+}
+
 function toCompanyListItem(
   r: {
     slug: string;
@@ -52,10 +61,12 @@ function toCompanyListItem(
     category_title: string;
     city: string;
     service_cities?: unknown;
+    address?: string | null;
     description: string;
     logo_url: string | null;
     website?: string | null;
     phone?: string | null;
+    origin?: string | null;
     profile_status?: string | null;
     rating: string | null;
     latitude: number | null;
@@ -72,10 +83,12 @@ function toCompanyListItem(
     city: normalized.primaryCity,
     serviceCities: normalized.serviceCities,
     locationContext: matchedServiceCity(normalized.primaryCity, normalized.serviceCities, query),
+    address: r.address ?? "",
     description: r.description ?? "",
     logoUrl: r.logo_url,
     website: r.website ?? null,
     phone: r.phone?.trim() || null,
+    origin: rowOrigin(r.origin),
     profileStatus: rowProfileStatus(r.profile_status),
     rating: rowRating(r.rating),
     latitude: r.latitude,
@@ -197,10 +210,12 @@ export async function pgSearchCompanies(opts: {
     category_title: string;
     city: string;
     service_cities: unknown;
+    address: string;
     description: string;
     logo_url: string | null;
     website: string | null;
     phone: string | null;
+    origin: string | null;
     profile_status: string | null;
     rating: string | null;
     latitude: number | null;
@@ -208,7 +223,7 @@ export async function pgSearchCompanies(opts: {
   }>(
     `
     SELECT co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.service_cities, co.description, co.logo_url, co.website, co.profile_status, co.rating,
+           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.origin, co.profile_status, co.rating,
            loc.latitude, loc.longitude,
            (
              SELECT cc.value
@@ -243,6 +258,7 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
     description: string;
     logo_url: string | null;
     website: string | null;
+    origin: string | null;
     profile_status: string | null;
     rating: string | null;
     latitude: number | null;
@@ -250,7 +266,7 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
   }>(
     `
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.profile_status, co.rating,
+           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.origin, co.profile_status, co.rating,
            loc.latitude, loc.longitude
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
@@ -300,6 +316,7 @@ export async function pgGetCompanyBySlug(slug: string): Promise<CatalogCompanyPr
     logoUrl: r.logo_url,
     website: r.website,
     sourceUrl: sourceRes.rows[0]?.source_url?.trim() || null,
+    origin: rowOrigin(r.origin),
     profileStatus: rowProfileStatus(r.profile_status),
     rating: rowRating(r.rating),
     latitude: r.latitude,
@@ -327,9 +344,46 @@ export async function pgEnsureCategoriesSeeded(): Promise<void> {
   const pool = getPool();
   await pool.query(`
     ALTER TABLE catalog_companies
+      ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'imported_public',
       ADD COLUMN IF NOT EXISTS profile_status TEXT NOT NULL DEFAULT 'imported',
       ADD COLUMN IF NOT EXISTS claimed_by_user_id TEXT,
       ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ
+  `);
+  await pool.query(`
+    ALTER TABLE catalog_companies
+      DROP CONSTRAINT IF EXISTS catalog_companies_origin_check
+  `);
+  await pool.query(`
+    ALTER TABLE catalog_companies
+      ADD CONSTRAINT catalog_companies_origin_check
+      CHECK (origin IN ('imported_by_admin', 'imported_public', 'owner_submitted', 'user_submitted'))
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_companies_origin ON catalog_companies (origin)`);
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF to_regclass('catalog_company_import_drafts') IS NOT NULL THEN
+        UPDATE catalog_companies co
+        SET origin = 'user_submitted'
+        FROM catalog_company_import_drafts d
+        WHERE d.published_company_slug = co.slug
+          AND (
+            d.raw_payload->>'origin' = 'user_submitted'
+            OR d.raw_payload->>'sourceType' = 'user_submitted'
+            OR d.raw_payload->>'submissionStatus' = 'user_submitted'
+            OR d.raw_payload->>'submissionType' = 'public_company_form'
+          );
+
+        UPDATE catalog_companies co
+        SET origin = 'owner_submitted'
+        FROM catalog_company_import_drafts d
+        WHERE d.published_company_slug = co.slug
+          AND (
+            d.raw_payload->>'origin' = 'owner_submitted'
+            OR d.raw_payload->>'sourceType' = 'owner_submitted'
+          );
+      END IF;
+    END $$
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS catalog_company_claim_requests (
@@ -540,9 +594,9 @@ export async function pgImportCompanies(
     const ins = await pool.query<{ id: number }>(
       `
       INSERT INTO catalog_companies (
-        slug, name, category_slug, city, service_cities, address, description, website, profile_status, is_published
+        slug, name, category_slug, city, service_cities, address, description, website, origin, profile_status, is_published
       )
-      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, 'imported', TRUE)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, 'imported_by_admin', 'imported', TRUE)
       RETURNING id
       `,
       [
@@ -631,9 +685,11 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     category_title: string;
     city: string;
     service_cities: unknown;
+    address: string;
     description: string;
     logo_url: string | null;
     website: string | null;
+    origin: string | null;
     profile_status: string | null;
     rating: string | null;
     latitude: number | null;
@@ -641,7 +697,7 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     contacts: unknown;
   }>(`
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.service_cities, co.description, co.logo_url, co.website, co.profile_status, co.rating,
+           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.origin, co.profile_status, co.rating,
            loc.latitude, loc.longitude,
            COALESCE(
              jsonb_agg(jsonb_build_object('type', cc.contact_type, 'value', cc.value) ORDER BY cc.sort_order, cc.id)
@@ -685,9 +741,11 @@ export async function pgUpdateCatalogCompanyAdmin(
     category_title: string;
     city: string;
     service_cities: unknown;
+    address: string;
     description: string;
     logo_url: string | null;
     website: string | null;
+    origin: string | null;
     profile_status: string | null;
     rating: string | null;
     latitude: number | null;
@@ -699,10 +757,10 @@ export async function pgUpdateCatalogCompanyAdmin(
       SET name = $2, city = $3, description = $4, website = NULLIF($5, ''),
           category_slug = $6, logo_url = $7, service_cities = $8::jsonb, updated_at = NOW()
       WHERE id = $1
-      RETURNING id, slug, name, category_slug, city, service_cities, description, logo_url, website, profile_status, rating
+      RETURNING id, slug, name, category_slug, city, service_cities, address, description, logo_url, website, origin, profile_status, rating
     )
     SELECT u.id, u.slug, u.name, u.category_slug, cat.title AS category_title,
-           u.city, u.service_cities, u.description, u.logo_url, u.website, u.profile_status, u.rating,
+           u.city, u.service_cities, u.address, u.description, u.logo_url, u.website, u.origin, u.profile_status, u.rating,
            loc.latitude, loc.longitude
     FROM updated u
     JOIN catalog_categories cat ON cat.slug = u.category_slug

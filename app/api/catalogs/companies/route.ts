@@ -33,6 +33,14 @@ function normalizeOptionalUrl(value: unknown): string {
   }
 }
 
+function parseOptionalCoordinate(value: unknown, min: number, max: number): number | null {
+  const raw = cleanText(value, 40).replace(",", ".");
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return n;
+}
+
 export async function GET(req: Request) {
   try {
     await ensureCatalogReady();
@@ -66,11 +74,14 @@ export async function POST(req: Request) {
   const name = cleanText(body.name, 160);
   const categorySlug = cleanText(body.categorySlug, 80).toLowerCase();
   const city = cleanText(body.city, 120);
+  const address = cleanText(body.address, 240);
   const description = cleanText(body.description, 1200);
   const website = normalizeOptionalUrl(body.website);
   const imageUrl = normalizeOptionalUrl(body.imageUrl) || null;
   const submittedPhone = cleanText(body.phone, 80);
   const submittedEmail = cleanText(body.email, 160);
+  const latitude = parseOptionalCoordinate(body.latitude, -90, 90);
+  const longitude = parseOptionalCoordinate(body.longitude, -180, 180);
 
   if (name.length < 2) {
     return NextResponse.json({ ok: false, error: "NAME_REQUIRED" }, { status: 400 });
@@ -98,19 +109,20 @@ export async function POST(req: Request) {
         name,
         categorySlug,
         city,
-        address: "",
-        phone: "",
-        email: "",
+        address,
+        phone: submittedPhone,
+        email: submittedEmail,
         website,
         description,
-        latitude: null,
-        longitude: null,
+        latitude,
+        longitude,
         imageUrl,
         sourceUrl: website || null,
         socialLinks: [],
         confidenceScore: 0.7,
         rawPayload: {
-          sourceType: "text",
+          sourceType: "user_submitted",
+          origin: "user_submitted",
           submissionStatus: "user_submitted",
           submissionType: "public_company_form",
           ownerUserId,

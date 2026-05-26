@@ -13,6 +13,11 @@ export type CatalogCompanyContact = {
 };
 
 export type CatalogCompanyProfileStatus = "imported" | "verified";
+export type CatalogCompanyOrigin =
+  | "imported_by_admin"
+  | "imported_public"
+  | "owner_submitted"
+  | "user_submitted";
 
 export type CatalogCompanyListItem = {
   slug: string;
@@ -22,11 +27,13 @@ export type CatalogCompanyListItem = {
   city: string;
   serviceCities: string[];
   locationContext: string | null;
+  address: string;
   description: string;
   logoUrl: string | null;
   website: string | null;
   /** First phone contact, for imported cards without a website. */
   phone?: string | null;
+  origin: CatalogCompanyOrigin;
   profileStatus: CatalogCompanyProfileStatus;
   rating: number | null;
   latitude: number | null;
@@ -40,7 +47,6 @@ export type CatalogCompanyAdminItem = CatalogCompanyListItem & {
 };
 
 export type CatalogCompanyProfile = CatalogCompanyListItem & {
-  address: string;
   website: string | null;
   /** Original import/discovery URL when different from website. */
   sourceUrl?: string | null;

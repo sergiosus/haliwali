@@ -11,22 +11,28 @@ type FormState = {
   name: string;
   categorySlug: string;
   city: string;
+  address: string;
   description: string;
   website: string;
   imageUrl: string;
   phone: string;
   email: string;
+  latitude: string;
+  longitude: string;
 };
 
 const INITIAL_FORM: FormState = {
   name: "",
   categorySlug: "",
   city: "",
+  address: "",
   description: "",
   website: "",
   imageUrl: "",
   phone: "",
   email: "",
+  latitude: "",
+  longitude: "",
 };
 
 const ERROR_LABELS: Record<string, string> = {
@@ -172,6 +178,15 @@ export function CatalogCompanySubmissionForm({
             />
           </label>
           <label className="block">
+            <span className="font-medium text-black/70">Адрес</span>
+            <input
+              value={form.address}
+              onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
+              placeholder="Улица, дом, офис"
+              className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+            />
+          </label>
+          <label className="block">
             <span className="font-medium text-black/70">Сайт / ссылка</span>
             <input
               value={form.website}
@@ -206,6 +221,28 @@ export function CatalogCompanySubmissionForm({
               className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
             />
           </label>
+          <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+            <label className="block">
+              <span className="font-medium text-black/70">Широта на карте</span>
+              <input
+                value={form.latitude}
+                onChange={(e) => setForm((prev) => ({ ...prev, latitude: e.target.value }))}
+                inputMode="decimal"
+                placeholder="56.8527"
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              />
+            </label>
+            <label className="block">
+              <span className="font-medium text-black/70">Долгота на карте</span>
+              <input
+                value={form.longitude}
+                onChange={(e) => setForm((prev) => ({ ...prev, longitude: e.target.value }))}
+                inputMode="decimal"
+                placeholder="53.2115"
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              />
+            </label>
+          </div>
           <label className="block sm:col-span-2">
             <span className="font-medium text-black/70">Описание *</span>
             <textarea

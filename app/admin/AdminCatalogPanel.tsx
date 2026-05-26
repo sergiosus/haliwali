@@ -5,6 +5,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminCatalogCompanyEditModal } from "./AdminCatalogCompanyEditModal";
 import { AdminCatalogClaimsSection } from "./AdminCatalogClaimsSection";
 import { AdminCatalogImportCandidatesSection } from "./catalogs/AdminCatalogImportCandidatesSection";
+import {
+  catalogCompanyOriginBadgeClass,
+  catalogCompanyOriginLabel,
+  catalogCompanyOriginView,
+} from "../lib/catalogCompanyOrigin";
 import { isLikelyBadCompanyName } from "../lib/catalogCompanyNameExtract";
 import type { CatalogCategory, CatalogCompanyAdminItem, CatalogReport } from "../lib/catalogTypes";
 import { CATALOG_CATEGORY_SEED } from "../lib/catalogTypes";
@@ -46,7 +51,7 @@ export function AdminCatalogPanel() {
   }, [companies, companyFilter]);
 
   const subTabs: { key: CatalogAdminTab; label: string }[] = [
-    { key: "overview", label: "Каталоги" },
+    { key: "overview", label: "Каталоги компаний" },
     { key: "companies", label: "Компании" },
     { key: "categories", label: "Категории" },
     { key: "import", label: "Импорт" },
@@ -215,13 +220,9 @@ export function AdminCatalogPanel() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{co.name}</span>
                   <span
-                    className={
-                      co.profileStatus === "verified" ?
-                        "rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800"
-                      : "rounded-full bg-black/[0.04] px-2 py-0.5 text-xs font-medium text-black/45"
-                    }
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${catalogCompanyOriginBadgeClass(catalogCompanyOriginView(co))}`}
                   >
-                    {co.profileStatus === "verified" ? "Подтверждённая" : "Публичный каталог"}
+                    {catalogCompanyOriginLabel(catalogCompanyOriginView(co))}
                   </span>
                   {isLikelyBadCompanyName(co.name) ?
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">

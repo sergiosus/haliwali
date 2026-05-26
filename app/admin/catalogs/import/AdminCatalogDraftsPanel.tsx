@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { confidenceFromStored, confidenceLabelRu } from "../../../lib/catalogConfidence";
+import {
+  catalogCompanyOriginBadgeClass,
+  catalogCompanyOriginFromDraftPayload,
+  catalogCompanyOriginLabel,
+} from "../../../lib/catalogCompanyOrigin";
 import { DISCOVERY_SOURCE_LABEL } from "../../../lib/catalogDiscoverSourceType";
 import type { DiscoverySourceType } from "../../../lib/catalogDiscoverSourceType";
 import type { CatalogImportDraft, CatalogImportDraftStatus, CatalogImportSession } from "../../../lib/catalogImportTypes";
@@ -43,6 +48,8 @@ const SOURCE_LABEL: Record<string, string> = {
   listing: "Объявление",
   text: "Текст",
   csv: "CSV",
+  user_submitted: "Добавлено владельцем",
+  owner_submitted: "Добавлено владельцем",
   company_site: DISCOVERY_SOURCE_LABEL.company_site,
   vk_group: DISCOVERY_SOURCE_LABEL.vk_group,
   small_directory: DISCOVERY_SOURCE_LABEL.small_directory,
@@ -581,9 +588,7 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
         const score100 = confidenceFromStored(d.confidenceScore ?? 0.5);
         const confLabel = confidenceLabelRu(score100);
         const displayStatus: CatalogImportDraftStatus = tab === "rejected" ? "rejected" : d.status;
-        const addedByUser =
-          String(d.rawPayload?.submissionStatus ?? "") === "user_submitted" ||
-          String(d.rawPayload?.submissionType ?? "") === "public_company_form";
+        const originView = catalogCompanyOriginFromDraftPayload(d.rawPayload);
         return (
           <article key={d.id} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
             <div className="flex flex-wrap items-start gap-3">
@@ -609,14 +614,14 @@ export function AdminCatalogDraftsPanel({ showImportLink = true }: { showImportL
                   <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-900">
                     {confLabel} ({score100})
                   </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${catalogCompanyOriginBadgeClass(originView)}`}
+                  >
+                    {catalogCompanyOriginLabel(originView)}
+                  </span>
                   {d.sourceType ?
                     <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-900">
                       {SOURCE_LABEL[d.sourceType as DiscoverySourceType] ?? d.sourceType}
-                    </span>
-                  : null}
-                  {addedByUser ?
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900">
-                      Добавлено пользователем
                     </span>
                   : null}
                   {d.needsReview || isLikelyBadCompanyName(d.name) ?

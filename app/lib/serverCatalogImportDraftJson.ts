@@ -10,6 +10,7 @@ import { normalizeImportDomain } from "./catalogImportDomain";
 import { mergeDraftInputs } from "./catalogImportMerge";
 import { buildDraftWarnings } from "./catalogImportEnrich";
 import { normalizeCatalogCompanyCities } from "./catalogCompanyCities";
+import { catalogCompanyOriginFromDraftPayload } from "./catalogCompanyOrigin";
 import { uniqueCompanySlug } from "./catalogSlug";
 import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
 
@@ -359,6 +360,7 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
       logoUrl: string | null;
       website: string | null;
       sourceUrl?: string | null;
+      origin?: "imported_by_admin" | "imported_public" | "owner_submitted" | "user_submitted";
       profileStatus?: "imported" | "verified";
       rating: number | null;
       latitude: number | null;
@@ -420,6 +422,7 @@ export async function jsonPublishImportDrafts(ids: number[]): Promise<{
       logoUrl: d.imageUrl,
       website: d.website.trim() || null,
       sourceUrl: d.sourceUrl?.trim() || null,
+      origin: catalogCompanyOriginFromDraftPayload(d.rawPayload),
       rating: null,
       latitude: d.latitude,
       longitude: d.longitude,
@@ -478,6 +481,7 @@ export async function jsonMergeDraftIntoCompany(
       logoUrl: string | null;
       website: string | null;
       sourceUrl?: string | null;
+      origin?: "imported_by_admin" | "imported_public" | "owner_submitted" | "user_submitted";
       profileStatus?: "imported" | "verified";
       rating: number | null;
       latitude: number | null;

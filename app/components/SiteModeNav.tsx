@@ -9,20 +9,20 @@ export function SiteModeNav() {
   const isCatalog = pathname === "/catalogs" || pathname.startsWith("/catalogs/");
 
   const base =
-    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors sm:text-[13px]";
-  const active = "bg-white text-black shadow-sm";
-  const idle = "text-black/50 hover:text-black/75";
+    "inline-flex h-9 items-center justify-center rounded-full border px-3.5 text-xs font-medium transition-colors sm:text-[13px]";
+  const active = "border-black/15 bg-black/[0.06] text-black shadow-sm";
+  const idle = "border-black/10 bg-white text-black/60 hover:border-black/15 hover:bg-black/[0.03] hover:text-black/80";
 
   return (
     <nav
-      className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-gray-200 bg-gray-50 p-0.5"
+      className="flex min-w-0 shrink-0 flex-wrap items-center gap-2"
       aria-label="Режим сайта"
     >
       <Link href="/" className={`${base} ${!isCatalog ? active : idle}`}>
         Объявления
       </Link>
       <Link href="/catalogs" className={`${base} ${isCatalog ? active : idle}`}>
-        Каталоги
+        Каталоги компаний
       </Link>
     </nav>
   );

@@ -12,6 +12,7 @@ import { draftDomainKey } from "./catalogImportDedup";
 import { mergeDraftInputs } from "./catalogImportMerge";
 import { normalizeImportDomain } from "./catalogImportDomain";
 import { buildDraftWarnings } from "./catalogImportEnrich";
+import { catalogCompanyOriginFromDraftPayload } from "./catalogCompanyOrigin";
 import { slugifyCatalogText } from "./catalogSlug";
 import { normalizeCatalogCompanyCities } from "./catalogCompanyCities";
 import { pgEnsureCategoriesSeeded } from "./serverCatalogPg";
@@ -504,11 +505,12 @@ async function pgWriteCompanyFromDraft(
       while (used.has(`${slug}-${i}`)) i += 1;
       slug = `${slug}-${i}`;
     }
+    const origin = catalogCompanyOriginFromDraftPayload(d.raw_payload);
     const ins = await pool.query<{ id: number }>(
       `
       INSERT INTO catalog_companies (
-        slug, name, category_slug, city, service_cities, address, description, logo_url, website, profile_status, is_published
-      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, 'imported', TRUE)
+        slug, name, category_slug, city, service_cities, address, description, logo_url, website, origin, profile_status, is_published
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, 'imported', TRUE)
       RETURNING id
       `,
       [
@@ -521,6 +523,7 @@ async function pgWriteCompanyFromDraft(
         d.description.trim(),
         d.image_url,
         d.website.trim() || null,
+        origin,
       ],
     );
     cid = ins.rows[0]?.id;

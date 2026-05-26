@@ -6,11 +6,13 @@ import type {
   CatalogCompanyAdminItem,
   CatalogCompanyClaimRequest,
   CatalogCompanyImportRow,
+  CatalogCompanyOrigin,
   CatalogCompanyProfileStatus,
   CatalogCompanyListItem,
   CatalogCompanyProfile,
   CatalogReport,
 } from "./catalogTypes";
+import { normalizeCatalogCompanyOrigin } from "./catalogCompanyOrigin";
 import { CATALOG_CATEGORY_SEED } from "./catalogTypes";
 import {
   matchedServiceCity,
@@ -32,6 +34,7 @@ type JsonCompany = {
   logoUrl: string | null;
   website: string | null;
   sourceUrl?: string | null;
+  origin?: CatalogCompanyOrigin;
   rating: number | null;
   latitude: number | null;
   longitude: number | null;
@@ -101,10 +104,12 @@ function toListItem(c: JsonCompany, query = ""): CatalogCompanyListItem {
     city: normalized.primaryCity,
     serviceCities: normalized.serviceCities,
     locationContext: matchedServiceCity(normalized.primaryCity, normalized.serviceCities, query),
+    address: c.address,
     description: c.description,
     logoUrl: c.logoUrl,
     website: c.website,
     phone: c.contacts.find((x) => x.type === "phone")?.value?.trim() || null,
+    origin: normalizeCatalogCompanyOrigin(c.origin),
     profileStatus: c.profileStatus ?? "imported",
     rating: c.rating,
     latitude: c.latitude,
@@ -305,6 +310,7 @@ export async function jsonImportCompanies(
       images: [],
       contacts: row.phone.trim() ? [{ type: "phone", value: row.phone.trim() }] : [],
       isPublished: true,
+      origin: "imported_by_admin",
       profileStatus: "imported",
     });
     imported += 1;

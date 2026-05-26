@@ -7,9 +7,15 @@ import type { MouseEvent } from "react";
 import { useState } from "react";
 import type { CatalogCompanyListItem, CatalogCompanyProfile } from "../../lib/catalogTypes";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
+import {
+  catalogCompanyOriginBadgeClass,
+  catalogCompanyOriginLabel,
+  catalogCompanyOriginView,
+} from "../../lib/catalogCompanyOrigin";
 import { catalogCategoryVisual } from "../../lib/catalogVisual";
 import { formatCoverageText } from "../../lib/catalogCompanyCities";
 import { catalogExternalHref, catalogPublicSourceHref } from "../../lib/catalogExternalLinks";
+import { catalogYandexMapsHref, hasCatalogCoordinates } from "../../lib/catalogMapLinks";
 import { CatalogLegalDisclaimer } from "./CatalogLegalDisclaimer";
 
 const YandexMapPicker = dynamic(
@@ -29,10 +35,12 @@ export function CatalogCompanyProfileView({
   const phone = company.contacts.find((c) => c.type === "phone")?.value;
   const coverageText = formatCoverageText(company.serviceCities);
   const isVerified = company.profileStatus === "verified";
+  const originView = catalogCompanyOriginView(company);
   const sourceHref = catalogPublicSourceHref(company.sourceUrl, company.website);
+  const mapHref = catalogYandexMapsHref(company);
   const [claimState, setClaimState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const mapCenter =
-    company.latitude != null && company.longitude != null ?
+    hasCatalogCoordinates(company) ?
       { lat: company.latitude, lng: company.longitude }
     : null;
 
@@ -96,7 +104,7 @@ export function CatalogCompanyProfileView({
 
       <nav className="text-sm text-black/45">
         <Link href="/catalogs" className="hover:text-black/70">
-          Каталоги
+          Каталоги компаний
         </Link>
         <span className="mx-1.5">/</span>
         <Link href={`/catalogs/${company.categorySlug}`} className="hover:text-black/70">
@@ -122,15 +130,17 @@ export function CatalogCompanyProfileView({
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{company.name}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{company.name}</h1>
+            <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${catalogCompanyOriginBadgeClass(originView)}`}>
+              {catalogCompanyOriginLabel(originView)}
+            </span>
+          </div>
           <p className="mt-1 text-sm text-black/50">
             {company.city}
           </p>
           <p className="mt-2 inline-flex rounded-md bg-black/[0.04] px-2 py-0.5 text-xs font-medium text-black/55">
             {company.categoryTitle}
-          </p>
-          <p className="mt-2 inline-flex rounded-md bg-black/[0.035] px-2 py-0.5 text-xs font-medium text-black/45">
-            {isVerified ? "Подтверждённая компания" : "Публичный каталог"}
           </p>
           {company.rating != null ?
             <p className="mt-2 text-sm font-medium text-black/60">★ {company.rating.toFixed(1)}</p>
@@ -152,6 +162,16 @@ export function CatalogCompanyProfileView({
                 className="inline-flex h-10 items-center justify-center rounded-xl border border-black/[0.08] px-5 text-sm font-medium text-black/70 hover:bg-black/[0.02]"
               >
                 {isVerified ? "Сайт" : "Перейти на сайт"}
+              </a>
+            : null}
+            {mapHref ?
+              <a
+                href={mapHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-black/[0.08] px-5 text-sm font-medium text-black/70 hover:bg-black/[0.02]"
+              >
+                На карте
               </a>
             : null}
             {!isVerified ?

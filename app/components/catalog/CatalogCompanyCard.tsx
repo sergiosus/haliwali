@@ -2,6 +2,12 @@
 
 import Link from "next/link";
 import type { CatalogCompanyListItem } from "../../lib/catalogTypes";
+import {
+  catalogCompanyOriginBadgeClass,
+  catalogCompanyOriginLabel,
+  catalogCompanyOriginView,
+} from "../../lib/catalogCompanyOrigin";
+import { catalogYandexMapsHref } from "../../lib/catalogMapLinks";
 import { catalogCategoryVisual } from "../../lib/catalogVisual";
 
 function Stars({ rating }: { rating: number | null }) {
@@ -18,10 +24,9 @@ function Stars({ rating }: { rating: number | null }) {
 export function CatalogCompanyCard({ company }: { company: CatalogCompanyListItem }) {
   const visual = catalogCategoryVisual(company.categorySlug);
   const isVerified = company.profileStatus === "verified";
-  const mapHref =
-    company.latitude != null && company.longitude != null ?
-      `https://yandex.ru/maps/?pt=${company.longitude},${company.latitude}&z=16&l=map`
-    : `https://yandex.ru/maps/?text=${encodeURIComponent(`${company.locationContext ?? company.city} ${company.name}`)}`;
+  const originView = catalogCompanyOriginView(company);
+  const mapHref = catalogYandexMapsHref(company);
+  const hasFooterAction = isVerified || Boolean(company.website || company.phone || mapHref);
   const locationLabel = company.locationContext ?? company.city;
 
   return (
@@ -54,47 +59,51 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
             <span className="rounded-md bg-black/[0.04] px-2 py-0.5 text-[11px] font-medium text-black/55">
               {company.categoryTitle}
             </span>
-            <span className="rounded-md bg-black/[0.035] px-2 py-0.5 text-[11px] font-medium text-black/45">
-              {isVerified ? "Подтверждённая компания" : "Публичный каталог"}
+            <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${catalogCompanyOriginBadgeClass(originView)}`}>
+              {catalogCompanyOriginLabel(originView)}
             </span>
             <Stars rating={company.rating} />
           </div>
         </div>
       </Link>
-      <div className="mt-auto flex gap-2 border-t border-black/[0.04] px-3 py-2.5">
-        {isVerified ?
-          <Link
-            href="/chat"
-            className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
-          >
-            Написать
-          </Link>
-        : company.website ?
-          <a
-            href={company.website}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
-          >
-            Перейти на сайт
-          </a>
-        : company.phone ?
-          <a
-            href={`tel:${company.phone.replace(/\s/g, "")}`}
-            className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
-          >
-            Позвонить
-          </a>
-        : null}
-        <a
-          href={mapHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-black/[0.02] text-sm font-medium text-black/70 transition-colors hover:bg-black/[0.04]"
-        >
-          На карте
-        </a>
-      </div>
+      {hasFooterAction ?
+        <div className="mt-auto flex gap-2 border-t border-black/[0.04] px-3 py-2.5">
+          {isVerified ?
+            <Link
+              href="/chat"
+              className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
+            >
+              Написать
+            </Link>
+          : company.website ?
+            <a
+              href={company.website}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
+            >
+              Перейти на сайт
+            </a>
+          : company.phone ?
+            <a
+              href={`tel:${company.phone.replace(/\s/g, "")}`}
+              className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-sm font-medium text-black/75 transition-colors hover:border-orange-200 hover:bg-orange-50"
+            >
+              Позвонить
+            </a>
+          : null}
+          {mapHref ?
+            <a
+              href={mapHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-black/[0.08] bg-black/[0.02] text-sm font-medium text-black/70 transition-colors hover:bg-black/[0.04]"
+            >
+              На карте
+            </a>
+          : null}
+        </div>
+      : null}
     </article>
   );
 }

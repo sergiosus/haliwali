@@ -323,7 +323,7 @@ function Tabs({
     { key: "reports", label: "Жалобы", counter: counts.reports },
     { key: "support", label: "Обращения", counter: counts.support },
     { key: "users", label: "Пользователи", counter: counts.users },
-    { key: "catalog", label: "Каталоги" },
+    { key: "catalog", label: "Каталоги компаний" },
   ];
 
   return (
@@ -351,7 +351,7 @@ function Tabs({
               <span className="text-black/50">({counts.pending})</span>
             ) : t.key === "published" ? (
               <span className="text-black/50">({counts.published})</span>
-            ) : (
+            ) : t.key === "catalog" ? null : (
               <span className="text-black/50">({counts.rejected})</span>
             )}
           </button>

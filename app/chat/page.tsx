@@ -16,6 +16,7 @@ import {
   type PendingChatAttachment,
 } from "../components/chat/ChatComposerMarketplace";
 import { ChatVoicePlayer } from "../components/chat/ChatVoicePlayer";
+import { ChatAiSummaryModal } from "../components/chat/ChatAiSummaryModal";
 import { analyzeChatComposerSafety } from "../lib/chatSafety";
 import { formatChatPeerPresenceRu, CHAT_FAST_REPLY_HINT } from "../lib/chatPresenceUi";
 import type { ChatDealStatus } from "../lib/chatDealStatus";
@@ -554,6 +555,12 @@ function ChatInner() {
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const chatMenuRef = useRef<HTMLDivElement | null>(null);
   const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [aiSummaryOpen, setAiSummaryOpen] = useState(false);
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+  const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
+  const [aiSummaryText, setAiSummaryText] = useState<string | null>(null);
+  const [aiSummarySaveBusy, setAiSummarySaveBusy] = useState(false);
+  const [aiSummarySaveDone, setAiSummarySaveDone] = useState(false);
   const [, setDealStatus] = useState<ChatDealStatus>("new");
   const [peerTyping, setPeerTyping] = useState(false);
   const [safetyWarning, setSafetyWarning] = useState<ReturnType<typeof analyzeChatComposerSafety>>(null);
@@ -960,6 +967,77 @@ function ChatInner() {
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [chatMenuOpen]);
+
+  const requestAiSummary = useCallback(async () => {
+    if (!chatId) return;
+    setAiSummaryOpen(true);
+    setAiSummaryLoading(true);
+    setAiSummaryError(null);
+    setAiSummaryText(null);
+    setAiSummarySaveDone(false);
+    try {
+      const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/ai-summary`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        summary?: string;
+        message?: string;
+      };
+      if (res.ok && data.ok && typeof data.summary === "string") {
+        setAiSummaryText(data.summary);
+        return;
+      }
+      setAiSummaryError(
+        typeof data.message === "string" && data.message.trim()
+          ? data.message.trim()
+          : "Не удалось сформировать итог.",
+      );
+    } catch {
+      setAiSummaryError("Не удалось сформировать итог.");
+    } finally {
+      setAiSummaryLoading(false);
+    }
+  }, [chatId]);
+
+  const copyAiSummary = useCallback(async () => {
+    if (!aiSummaryText) return;
+    try {
+      await navigator.clipboard.writeText(aiSummaryText);
+    } catch {
+      // clipboard may be unavailable
+    }
+  }, [aiSummaryText]);
+
+  const saveAiSummary = useCallback(async () => {
+    if (!chatId || !aiSummaryText || aiSummarySaveBusy) return;
+    setAiSummarySaveBusy(true);
+    try {
+      const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/ai-summary`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ save: true, summaryText: aiSummaryText }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+      if (res.ok && data.ok) {
+        setAiSummarySaveDone(true);
+        return;
+      }
+      setAiSummaryError(
+        typeof data.message === "string" && data.message.trim()
+          ? data.message.trim()
+          : "Не удалось сохранить итог.",
+      );
+    } catch {
+      setAiSummaryError("Не удалось сохранить итог.");
+    } finally {
+      setAiSummarySaveBusy(false);
+    }
+  }, [aiSummaryText, aiSummarySaveBusy, chatId]);
 
   const blockPeerUser = useCallback(async () => {
     const peerUserId = opponent.id.trim();
@@ -2138,6 +2216,17 @@ function ChatInner() {
                 <div className="mt-0.5 text-xs text-black/50">{opponentPresenceLabel}</div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {chatId && !showOwnerPeerPicker ? (
+                  <button
+                    type="button"
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
+                    onClick={() => void requestAiSummary()}
+                    disabled={aiSummaryLoading}
+                    aria-label="AI summary"
+                  >
+                    AI summary
+                  </button>
+                ) : null}
                 {opponent.id && !showOwnerPeerPicker && !chatIsBlocked ? (
                   <button
                     type="button"
@@ -3076,6 +3165,20 @@ function ChatInner() {
             targetType="user"
             targetId={opponent.id}
             onClose={() => setReportModalOpen(false)}
+          />
+          <ChatAiSummaryModal
+            open={aiSummaryOpen}
+            loading={aiSummaryLoading}
+            error={aiSummaryError}
+            summary={aiSummaryText}
+            saveBusy={aiSummarySaveBusy}
+            saveDone={aiSummarySaveDone}
+            onClose={() => {
+              if (aiSummarySaveBusy) return;
+              setAiSummaryOpen(false);
+            }}
+            onCopy={() => void copyAiSummary()}
+            onSave={() => void saveAiSummary()}
           />
           <BlockPeerModal
             open={blockModalOpen}

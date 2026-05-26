@@ -88,6 +88,47 @@ type ChatMessage = {
 
 type ChatStore = Record<string, ChatMessage[]>;
 
+type ChatCrmStatus = "new" | "in_progress" | "waiting" | "done";
+type ChatCrmState = {
+  status: ChatCrmStatus;
+  privateNote: string;
+  tags: string[];
+};
+type VoiceTranscriptStatus = "processing" | "done" | "failed";
+type VoiceTranscriptState = {
+  status: VoiceTranscriptStatus;
+  transcriptText: string;
+  errorCode?: string;
+};
+
+const CHAT_CRM_STATUS_OPTIONS: Array<{ value: ChatCrmStatus; label: string }> = [
+  { value: "new", label: "Новый" },
+  { value: "in_progress", label: "В работе" },
+  { value: "waiting", label: "Ожидание" },
+  { value: "done", label: "Завершено" },
+];
+
+function normalizeChatCrmStatusClient(raw: unknown): ChatCrmStatus {
+  return CHAT_CRM_STATUS_OPTIONS.some((x) => x.value === raw) ? (raw as ChatCrmStatus) : "new";
+}
+
+function parseCrmTagsDraft(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const tag = part.trim().replace(/\s+/g, " ").slice(0, 40);
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    out.push(tag);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function normalizeVoiceTranscriptStatus(raw: unknown): VoiceTranscriptStatus {
+  return raw === "processing" || raw === "done" || raw === "failed" ? raw : "failed";
+}
+
 const STORAGE_KEY = "haliwali_chats";
 
 const CHAT_QUICK_EMOJIS = [
@@ -566,6 +607,19 @@ function ChatInner() {
   const [aiQuickRepliesLoading, setAiQuickRepliesLoading] = useState(false);
   const [aiQuickRepliesError, setAiQuickRepliesError] = useState<string | null>(null);
   const [aiQuickReplies, setAiQuickReplies] = useState<string[]>([]);
+  const [crmOpen, setCrmOpen] = useState(false);
+  const [crmLoading, setCrmLoading] = useState(false);
+  const [crmSaving, setCrmSaving] = useState(false);
+  const [crmError, setCrmError] = useState<string | null>(null);
+  const [crmSavedFlash, setCrmSavedFlash] = useState(false);
+  const [crmState, setCrmState] = useState<ChatCrmState>({
+    status: "new",
+    privateNote: "",
+    tags: [],
+  });
+  const [crmNoteDraft, setCrmNoteDraft] = useState("");
+  const [crmTagsDraft, setCrmTagsDraft] = useState("");
+  const [voiceTranscripts, setVoiceTranscripts] = useState<Record<string, VoiceTranscriptState>>({});
   const [, setDealStatus] = useState<ChatDealStatus>("new");
   const [peerTyping, setPeerTyping] = useState(false);
   const [safetyWarning, setSafetyWarning] = useState<ReturnType<typeof analyzeChatComposerSafety>>(null);
@@ -1088,6 +1142,180 @@ function ChatInner() {
   const pickAiQuickReply = useCallback((reply: string) => {
     setText(reply);
     queueMicrotask(() => inputRef.current?.focus());
+  }, []);
+
+  const applyCrmFromApi = useCallback((raw: unknown) => {
+    const crm = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const tags = Array.isArray(crm.tags) ? crm.tags.filter((x): x is string => typeof x === "string") : [];
+    const next: ChatCrmState = {
+      status: normalizeChatCrmStatusClient(crm.status),
+      privateNote: typeof crm.privateNote === "string" ? crm.privateNote : "",
+      tags: tags.slice(0, 12),
+    };
+    setCrmState(next);
+    setCrmNoteDraft(next.privateNote);
+    setCrmTagsDraft(next.tags.join(", "));
+  }, []);
+
+  const saveCrmPatch = useCallback(
+    async (patch: Partial<ChatCrmState>, opts?: { flash?: boolean }) => {
+      if (!chatId || crmSaving) return false;
+      setCrmSaving(true);
+      setCrmError(null);
+      try {
+        const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/crm`, {
+          method: "PATCH",
+          credentials: "include",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; crm?: unknown };
+        if (!res.ok || !data.ok) {
+          setCrmError("Не удалось сохранить CRM-поля.");
+          return false;
+        }
+        applyCrmFromApi(data.crm);
+        if (opts?.flash) {
+          setCrmSavedFlash(true);
+          window.setTimeout(() => setCrmSavedFlash(false), 1600);
+        }
+        return true;
+      } catch {
+        setCrmError("Не удалось сохранить CRM-поля.");
+        return false;
+      } finally {
+        setCrmSaving(false);
+      }
+    },
+    [applyCrmFromApi, chatId, crmSaving],
+  );
+
+  useEffect(() => {
+    if (!chatId || showOwnerPeerPicker) {
+      setCrmState({ status: "new", privateNote: "", tags: [] });
+      setCrmNoteDraft("");
+      setCrmTagsDraft("");
+      setCrmError(null);
+      setCrmLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setCrmLoading(true);
+    setCrmError(null);
+    void fetch(`/api/chats/${encodeURIComponent(chatId)}/crm`, {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: unknown) => {
+        if (cancelled || !data || typeof data !== "object") return;
+        const crm = (data as { crm?: unknown }).crm;
+        applyCrmFromApi(crm);
+      })
+      .catch(() => {
+        if (!cancelled) setCrmError("Не удалось загрузить CRM-поля.");
+      })
+      .finally(() => {
+        if (!cancelled) setCrmLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyCrmFromApi, chatId, showOwnerPeerPicker]);
+
+  useEffect(() => {
+    if (!chatId || showOwnerPeerPicker) {
+      setVoiceTranscripts({});
+      return;
+    }
+    let cancelled = false;
+    void fetch(`/api/chats/${encodeURIComponent(chatId)}/transcriptions`, {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: unknown) => {
+        if (cancelled || !data || typeof data !== "object") return;
+        const rows = (data as { transcripts?: unknown }).transcripts;
+        if (!Array.isArray(rows)) return;
+        const next: Record<string, VoiceTranscriptState> = {};
+        for (const row of rows) {
+          if (!row || typeof row !== "object") continue;
+          const r = row as Record<string, unknown>;
+          const id = typeof r.messageId === "string" ? r.messageId.trim() : "";
+          if (!id) continue;
+          next[id] = {
+            status: normalizeVoiceTranscriptStatus(r.status),
+            transcriptText: typeof r.transcriptText === "string" ? r.transcriptText : "",
+            errorCode: typeof r.errorCode === "string" ? r.errorCode : undefined,
+          };
+        }
+        setVoiceTranscripts(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, showOwnerPeerPicker]);
+
+  const transcribeVoiceMessage = useCallback(
+    async (messageId: string) => {
+      if (!chatId || !messageId) return;
+      setVoiceTranscripts((prev) => ({
+        ...prev,
+        [messageId]: { status: "processing", transcriptText: prev[messageId]?.transcriptText ?? "" },
+      }));
+      try {
+        const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/transcriptions`, {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageId }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          transcript?: {
+            messageId?: string;
+            status?: unknown;
+            transcriptText?: string;
+            errorCode?: string;
+          };
+          message?: string;
+        };
+        const row = data.transcript;
+        if (row?.messageId) {
+          setVoiceTranscripts((prev) => ({
+            ...prev,
+            [row.messageId!]: {
+              status: normalizeVoiceTranscriptStatus(row.status),
+              transcriptText: typeof row.transcriptText === "string" ? row.transcriptText : "",
+              errorCode: typeof row.errorCode === "string" && row.errorCode ? row.errorCode : data.message,
+            },
+          }));
+          return;
+        }
+        setVoiceTranscripts((prev) => ({
+          ...prev,
+          [messageId]: { status: "failed", transcriptText: "", errorCode: data.message || "TRANSCRIBE_FAILED" },
+        }));
+      } catch {
+        setVoiceTranscripts((prev) => ({
+          ...prev,
+          [messageId]: { status: "failed", transcriptText: "", errorCode: "TRANSCRIBE_FAILED" },
+        }));
+      }
+    },
+    [chatId],
+  );
+
+  const copyVoiceTranscript = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // clipboard may be unavailable
+    }
   }, []);
 
   const blockPeerUser = useCallback(async () => {
@@ -2259,6 +2487,105 @@ function ChatInner() {
             </div>
           ) : null}
 
+          {chatId && !showOwnerPeerPicker ? (
+            <div className="mb-3 shrink-0 overflow-hidden rounded-3xl border border-black/10 bg-white md:mb-4">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/[0.02]"
+                onClick={() => setCrmOpen((open) => !open)}
+                aria-expanded={crmOpen}
+              >
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-black/40">CRM</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-black/55">
+                    <span className="rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 font-medium text-black/70">
+                      {CHAT_CRM_STATUS_OPTIONS.find((x) => x.value === crmState.status)?.label ?? "Новый"}
+                    </span>
+                    {crmState.tags.length > 0 ? (
+                      crmState.tags.slice(0, 4).map((tag) => (
+                        <span key={tag} className="rounded-full border border-orange-100 bg-orange-50 px-2 py-0.5 text-orange-800">
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <span>личные заметки и теги</span>
+                    )}
+                  </div>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-black/45">{crmOpen ? "Скрыть" : "Открыть"}</span>
+              </button>
+
+              {crmOpen ? (
+                <div className="border-t border-black/10 px-4 py-3">
+                  <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
+                      Статус
+                      <select
+                        value={crmState.status}
+                        disabled={crmLoading || crmSaving}
+                        onChange={(e) => {
+                          const status = normalizeChatCrmStatusClient(e.target.value);
+                          setCrmState((prev) => ({ ...prev, status }));
+                          void saveCrmPatch({ status });
+                        }}
+                        className="mt-1.5 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm font-medium normal-case tracking-normal text-black/80 outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:opacity-60"
+                      >
+                        {CHAT_CRM_STATUS_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
+                      Теги
+                      <input
+                        value={crmTagsDraft}
+                        disabled={crmLoading || crmSaving}
+                        onChange={(e) => setCrmTagsDraft(e.target.value)}
+                        placeholder="например: доставка, торг"
+                        className="mt-1.5 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm font-medium normal-case tracking-normal text-black/80 outline-none placeholder:text-black/35 focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45 md:col-span-2">
+                      Приватная заметка
+                      <textarea
+                        value={crmNoteDraft}
+                        disabled={crmLoading || crmSaving}
+                        onChange={(e) => setCrmNoteDraft(e.target.value)}
+                        rows={3}
+                        placeholder="Видно только вам. Собеседник не увидит эту заметку."
+                        className="mt-1.5 w-full resize-y rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm font-normal normal-case leading-relaxed tracking-normal text-black/80 outline-none placeholder:text-black/35 focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:opacity-60"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs text-black/45">
+                      {crmError ? <span className="text-red-700">{crmError}</span> : "CRM-поля приватны для вашего аккаунта."}
+                      {crmSavedFlash ? <span className="ml-2 text-green-700">Сохранено</span> : null}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={crmLoading || crmSaving}
+                      onClick={() =>
+                        void saveCrmPatch(
+                          {
+                            privateNote: crmNoteDraft,
+                            tags: parseCrmTagsDraft(crmTagsDraft),
+                          },
+                          { flash: true },
+                        )
+                      }
+                      className="inline-flex h-9 items-center justify-center rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black/80 hover:bg-black/[0.04] disabled:opacity-60"
+                    >
+                      {crmSaving ? "Сохранение…" : "Сохранить CRM"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className={chatCardShellClass}>
             <div className="flex shrink-0 flex-col border-b border-black/10">
             <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
@@ -2458,7 +2785,48 @@ function ChatInner() {
                       ) : m.type === "file" ? (
                         <div className="mt-1">
                           {m.fileUrl && isVoiceChatFileName(m.fileName) ? (
-                            <ChatVoicePlayer src={m.fileUrl} label="Голосовое сообщение" />
+                            <div className="space-y-2">
+                              <ChatVoicePlayer src={m.fileUrl} label="Голосовое сообщение" />
+                              {(() => {
+                                const tr = voiceTranscripts[m.id];
+                                const isProcessing = tr?.status === "processing";
+                                const isDone = tr?.status === "done" && tr.transcriptText.trim();
+                                const isFailed = tr?.status === "failed";
+                                return (
+                                  <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={isProcessing}
+                                        onClick={() => void transcribeVoiceMessage(m.id)}
+                                        className="inline-flex h-8 items-center justify-center rounded-lg border border-black/15 bg-white px-2.5 text-xs font-semibold text-black/75 hover:bg-black/[0.04] disabled:opacity-50"
+                                      >
+                                        {isProcessing ? "Расшифровка…" : isDone ? "Расшифровать заново" : "Расшифровать"}
+                                      </button>
+                                      {isProcessing ? (
+                                        <span className="text-xs text-black/50">Обрабатываем аудио</span>
+                                      ) : isFailed ? (
+                                        <span className="text-xs text-red-700">
+                                          {tr?.errorCode && tr.errorCode.length > 20 ? tr.errorCode : "Не удалось расшифровать"}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    {isDone ? (
+                                      <div className="mt-2 rounded-lg bg-black/[0.03] px-3 py-2">
+                                        <div className="whitespace-pre-wrap text-sm text-black/80">{tr.transcriptText}</div>
+                                        <button
+                                          type="button"
+                                          onClick={() => void copyVoiceTranscript(tr.transcriptText)}
+                                          className="mt-2 text-xs font-semibold text-orange-700 hover:underline"
+                                        >
+                                          Копировать расшифровку
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           ) : m.fileUrl && isImageExt(m.fileName ?? "") ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img

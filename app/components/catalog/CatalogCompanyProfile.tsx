@@ -23,6 +23,35 @@ const YandexMapPicker = dynamic(
   { ssr: false, loading: () => <div className="h-56 animate-pulse rounded-2xl bg-black/[0.04]" /> },
 );
 
+type ClaimFormState = {
+  fullName: string;
+  position: string;
+  email: string;
+  phone: string;
+  companyWebsite: string;
+  message: string;
+  proofMethod: "domain_email" | "official_phone" | "document_screenshot" | "other";
+  proofText: string;
+};
+
+const INITIAL_CLAIM_FORM: ClaimFormState = {
+  fullName: "",
+  position: "",
+  email: "",
+  phone: "",
+  companyWebsite: "",
+  message: "",
+  proofMethod: "domain_email",
+  proofText: "",
+};
+
+const PROOF_METHOD_LABELS: Record<ClaimFormState["proofMethod"], string> = {
+  domain_email: "Email на домене компании",
+  official_phone: "Звонок по официальному телефону",
+  document_screenshot: "Документ/скрин подтверждения",
+  other: "Другое",
+};
+
 export function CatalogCompanyProfileView({
   company,
   related,
@@ -39,6 +68,11 @@ export function CatalogCompanyProfileView({
   const sourceHref = catalogPublicSourceHref(company.sourceUrl, company.website);
   const mapHref = catalogYandexMapsHref(company);
   const [claimState, setClaimState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [claimOpen, setClaimOpen] = useState(false);
+  const [claimForm, setClaimForm] = useState<ClaimFormState>({
+    ...INITIAL_CLAIM_FORM,
+    companyWebsite: company.website ?? "",
+  });
   const mapCenter =
     hasCatalogCoordinates(company) ?
       { lat: company.latitude, lng: company.longitude }
@@ -52,22 +86,33 @@ export function CatalogCompanyProfileView({
   }
 
   async function requestClaim() {
+    if (
+      !claimForm.fullName.trim() ||
+      !claimForm.position.trim() ||
+      !claimForm.email.trim() ||
+      !claimForm.phone.trim() ||
+      !claimForm.proofText.trim()
+    ) {
+      setClaimState("error");
+      return;
+    }
     setClaimState("sending");
     try {
       const r = await fetch(`/api/catalogs/companies/${encodeURIComponent(company.slug)}/claim`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          proofType: "manual",
-          message: "Пользователь запросил подтверждение прав на карточку компании.",
-        }),
+        body: JSON.stringify(claimForm),
       });
       if (r.status === 401) {
         router.push(`/login?next=${encodeURIComponent(`/catalogs/company/${company.slug}`)}`);
         return;
       }
-      setClaimState(r.ok ? "sent" : "error");
+      if (r.ok) {
+        setClaimState("sent");
+        return;
+      }
+      setClaimState("error");
     } catch {
       setClaimState("error");
     }
@@ -177,19 +222,100 @@ export function CatalogCompanyProfileView({
             {!isVerified ?
               <button
                 type="button"
-                onClick={() => void requestClaim()}
+                onClick={() => {
+                  setClaimOpen((value) => !value);
+                  setClaimState("idle");
+                }}
                 disabled={claimState === "sending" || claimState === "sent"}
                 className="inline-flex h-10 items-center justify-center rounded-xl border border-black/[0.08] px-5 text-sm font-medium text-black/55 hover:bg-black/[0.02] disabled:opacity-50"
               >
-                {claimState === "sending" ? "Отправка..." : claimState === "sent" ? "Заявка отправлена" : "Я представитель компании"}
+                {claimState === "sent" ? "Заявка отправлена" : "Я представитель компании"}
               </button>
             : null}
           </div>
-          {!isVerified && claimState === "error" ?
-            <p className="mt-2 text-xs text-red-700">Не удалось отправить заявку. Попробуйте позже.</p>
-          : null}
         </div>
       </header>
+
+      {!isVerified && claimOpen ?
+        <section className="rounded-2xl border border-black/[0.08] bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-black/75">Подтверждение права на компанию</h2>
+          <p className="mt-1 text-xs leading-relaxed text-black/45">
+            Заполните данные представителя и способ подтверждения. До проверки администратором карточка не получит
+            статус подтверждённой компании.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                ["fullName", "ФИО *"],
+                ["position", "Должность *"],
+                ["email", "Email *"],
+                ["phone", "Телефон *"],
+                ["companyWebsite", "Сайт компании"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="block text-sm">
+                <span className="font-medium text-black/65">{label}</span>
+                <input
+                  value={claimForm[key]}
+                  onChange={(e) => setClaimForm((prev) => ({ ...prev, [key]: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                />
+              </label>
+            ))}
+            <label className="block text-sm sm:col-span-2">
+              <span className="font-medium text-black/65">Способ подтверждения</span>
+              <select
+                value={claimForm.proofMethod}
+                onChange={(e) =>
+                  setClaimForm((prev) => ({
+                    ...prev,
+                    proofMethod: e.target.value as ClaimFormState["proofMethod"],
+                  }))
+                }
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              >
+                {Object.entries(PROOF_METHOD_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm sm:col-span-2">
+              <span className="font-medium text-black/65">Описание доказательства *</span>
+              <textarea
+                value={claimForm.proofText}
+                onChange={(e) => setClaimForm((prev) => ({ ...prev, proofText: e.target.value }))}
+                rows={3}
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              />
+            </label>
+            <label className="block text-sm sm:col-span-2">
+              <span className="font-medium text-black/65">Комментарий</span>
+              <textarea
+                value={claimForm.message}
+                onChange={(e) => setClaimForm((prev) => ({ ...prev, message: e.target.value }))}
+                rows={2}
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              />
+            </label>
+          </div>
+          {claimState === "error" ?
+            <p className="mt-3 text-xs font-medium text-red-700">Заполните обязательные поля или попробуйте позже.</p>
+          : null}
+          {claimState === "sent" ?
+            <p className="mt-3 text-xs font-medium text-emerald-700">Заявка отправлена на проверку</p>
+          : null}
+          <button
+            type="button"
+            disabled={claimState === "sending" || claimState === "sent"}
+            onClick={() => void requestClaim()}
+            className="mt-3 rounded-full bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {claimState === "sending" ? "Отправка..." : "Отправить заявку"}
+          </button>
+        </section>
+      : null}
 
       {!isVerified ? <CatalogLegalDisclaimer /> : null}
 

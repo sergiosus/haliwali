@@ -51,6 +51,14 @@ export type JsonCatalogCompanyClaimRequest = {
   companyId: number;
   userId: string;
   status: "pending" | "approved" | "rejected";
+  fullName: string;
+  position: string;
+  email: string;
+  phone: string;
+  companyWebsite: string;
+  proofMethod: "domain_email" | "official_phone" | "document_screenshot" | "other";
+  proofText: string;
+  proofFileUrl: string;
   proofType: string;
   proofValue: string;
   message: string;
@@ -196,6 +204,14 @@ export async function jsonGetRelatedCompanies(
 export async function jsonRequestCatalogCompanyClaim(input: {
   slug: string;
   userId: string;
+  fullName: string;
+  position: string;
+  email: string;
+  phone: string;
+  companyWebsite: string;
+  proofMethod: "domain_email" | "official_phone" | "document_screenshot" | "other";
+  proofText: string;
+  proofFileUrl: string;
   proofType: string;
   proofValue: string;
   message: string;
@@ -212,6 +228,14 @@ export async function jsonRequestCatalogCompanyClaim(input: {
   );
   const now = new Date().toISOString();
   if (existing) {
+    existing.fullName = input.fullName.slice(0, 160);
+    existing.position = input.position.slice(0, 120);
+    existing.email = input.email.slice(0, 160);
+    existing.phone = input.phone.slice(0, 80);
+    existing.companyWebsite = input.companyWebsite.slice(0, 300);
+    existing.proofMethod = input.proofMethod;
+    existing.proofText = input.proofText.slice(0, 2000);
+    existing.proofFileUrl = input.proofFileUrl.slice(0, 500);
     existing.proofType = input.proofType.slice(0, 40);
     existing.proofValue = input.proofValue.slice(0, 300);
     existing.message = input.message.slice(0, 1000);
@@ -223,6 +247,14 @@ export async function jsonRequestCatalogCompanyClaim(input: {
     companyId: company.id,
     userId: input.userId,
     status: "pending",
+    fullName: input.fullName.slice(0, 160),
+    position: input.position.slice(0, 120),
+    email: input.email.slice(0, 160),
+    phone: input.phone.slice(0, 80),
+    companyWebsite: input.companyWebsite.slice(0, 300),
+    proofMethod: input.proofMethod,
+    proofText: input.proofText.slice(0, 2000),
+    proofFileUrl: input.proofFileUrl.slice(0, 500),
     proofType: input.proofType.slice(0, 40),
     proofValue: input.proofValue.slice(0, 300),
     message: input.message.slice(0, 1000),
@@ -244,8 +276,18 @@ export async function jsonListCatalogCompanyClaimsAdmin(): Promise<CatalogCompan
       companyId: request.companyId,
       companyName: company?.name,
       companySlug: company?.slug,
+      companyOrigin: normalizeCatalogCompanyOrigin(company?.origin),
+      companyProfileStatus: company?.profileStatus === "verified" ? "verified" : "imported",
       userId: request.userId,
       status: request.status,
+      fullName: request.fullName ?? "",
+      position: request.position ?? "",
+      email: request.email ?? "",
+      phone: request.phone ?? "",
+      companyWebsite: request.companyWebsite ?? "",
+      proofMethod: request.proofMethod ?? "other",
+      proofText: request.proofText ?? "",
+      proofFileUrl: request.proofFileUrl ?? "",
       proofType: request.proofType,
       proofValue: request.proofValue,
       message: request.message,

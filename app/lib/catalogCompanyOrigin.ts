@@ -1,4 +1,8 @@
-import type { CatalogCompanyOrigin, CatalogCompanyProfileStatus } from "./catalogTypes";
+import type {
+  CatalogCompanyOrigin,
+  CatalogCompanyOwnershipStatus,
+  CatalogCompanyProfileStatus,
+} from "./catalogTypes";
 
 export type CatalogCompanyOriginView =
   | CatalogCompanyOrigin
@@ -44,6 +48,25 @@ export function catalogCompanyOriginView(input: {
 }): CatalogCompanyOriginView {
   if (input.profileStatus === "verified") return "verified_owner";
   return normalizeCatalogCompanyOrigin(input.origin);
+}
+
+export function catalogCompanyOwnershipStatus(input: {
+  origin?: CatalogCompanyOrigin | null;
+  profileStatus?: CatalogCompanyProfileStatus | null;
+  hasPendingClaim?: boolean;
+}): CatalogCompanyOwnershipStatus {
+  if (input.profileStatus === "verified") return "verified_owner";
+  if (input.hasPendingClaim) return "claim_pending";
+  const origin = normalizeCatalogCompanyOrigin(input.origin);
+  if (origin === "owner_submitted" || origin === "user_submitted") return "owner_submitted";
+  return "imported_public";
+}
+
+export function catalogCompanyOwnershipStatusLabel(status: CatalogCompanyOwnershipStatus): string {
+  if (status === "verified_owner") return "Подтверждённая компания";
+  if (status === "claim_pending") return "Заявка на подтверждение";
+  if (status === "owner_submitted") return "Добавлено владельцем";
+  return "Публичный каталог";
 }
 
 export function catalogCompanyOriginLabel(view: CatalogCompanyOriginView): string {

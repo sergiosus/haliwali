@@ -62,6 +62,14 @@ export async function getRelatedCatalogCompanies(
 export async function requestCatalogCompanyClaim(input: {
   slug: string;
   userId: string;
+  fullName: string;
+  position: string;
+  email: string;
+  phone: string;
+  companyWebsite: string;
+  proofMethod: "domain_email" | "official_phone" | "document_screenshot" | "other";
+  proofText: string;
+  proofFileUrl: string;
   proofType: string;
   proofValue: string;
   message: string;

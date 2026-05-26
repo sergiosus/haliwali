@@ -391,6 +391,14 @@ export async function pgEnsureCategoriesSeeded(): Promise<void> {
       company_id INT NOT NULL REFERENCES catalog_companies (id) ON DELETE CASCADE,
       user_id TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
+      full_name TEXT NOT NULL DEFAULT '',
+      position TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      company_website TEXT NOT NULL DEFAULT '',
+      proof_method TEXT NOT NULL DEFAULT 'other',
+      proof_text TEXT NOT NULL DEFAULT '',
+      proof_file_url TEXT NOT NULL DEFAULT '',
       proof_type TEXT NOT NULL DEFAULT 'manual',
       proof_value TEXT NOT NULL DEFAULT '',
       message TEXT NOT NULL DEFAULT '',
@@ -398,6 +406,26 @@ export async function pgEnsureCategoriesSeeded(): Promise<void> {
       reviewed_at TIMESTAMPTZ,
       reviewed_by TEXT
     )
+  `);
+  await pool.query(`
+    ALTER TABLE catalog_company_claim_requests
+      ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS position TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS company_website TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS proof_method TEXT NOT NULL DEFAULT 'other',
+      ADD COLUMN IF NOT EXISTS proof_text TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS proof_file_url TEXT NOT NULL DEFAULT ''
+  `);
+  await pool.query(`
+    ALTER TABLE catalog_company_claim_requests
+      DROP CONSTRAINT IF EXISTS catalog_company_claim_requests_proof_method_check
+  `);
+  await pool.query(`
+    ALTER TABLE catalog_company_claim_requests
+      ADD CONSTRAINT catalog_company_claim_requests_proof_method_check
+      CHECK (proof_method IN ('domain_email', 'official_phone', 'document_screenshot', 'other'))
   `);
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_company_claim_pending_unique
@@ -419,6 +447,14 @@ export async function pgEnsureCategoriesSeeded(): Promise<void> {
 export async function pgRequestCatalogCompanyClaim(input: {
   slug: string;
   userId: string;
+  fullName: string;
+  position: string;
+  email: string;
+  phone: string;
+  companyWebsite: string;
+  proofMethod: "domain_email" | "official_phone" | "document_screenshot" | "other";
+  proofText: string;
+  proofFileUrl: string;
   proofType: string;
   proofValue: string;
   message: string;
@@ -437,21 +473,52 @@ export async function pgRequestCatalogCompanyClaim(input: {
     company_id: number;
     user_id: string;
     status: "pending" | "approved" | "rejected";
+    full_name: string;
+    position: string;
+    email: string;
+    phone: string;
+    company_website: string;
+    proof_method: "domain_email" | "official_phone" | "document_screenshot" | "other";
+    proof_text: string;
+    proof_file_url: string;
     proof_type: string;
     proof_value: string;
     message: string;
     created_at: Date;
   }>(
     `
-    INSERT INTO catalog_company_claim_requests (company_id, user_id, proof_type, proof_value, message)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO catalog_company_claim_requests (
+      company_id, user_id, full_name, position, email, phone, company_website,
+      proof_method, proof_text, proof_file_url, proof_type, proof_value, message
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     ON CONFLICT (company_id, user_id) WHERE status = 'pending'
-    DO UPDATE SET proof_type = EXCLUDED.proof_type, proof_value = EXCLUDED.proof_value, message = EXCLUDED.message
-    RETURNING id, company_id, user_id, status, proof_type, proof_value, message, created_at
+    DO UPDATE SET
+      full_name = EXCLUDED.full_name,
+      position = EXCLUDED.position,
+      email = EXCLUDED.email,
+      phone = EXCLUDED.phone,
+      company_website = EXCLUDED.company_website,
+      proof_method = EXCLUDED.proof_method,
+      proof_text = EXCLUDED.proof_text,
+      proof_file_url = EXCLUDED.proof_file_url,
+      proof_type = EXCLUDED.proof_type,
+      proof_value = EXCLUDED.proof_value,
+      message = EXCLUDED.message
+    RETURNING id, company_id, user_id, status, full_name, position, email, phone, company_website,
+              proof_method, proof_text, proof_file_url, proof_type, proof_value, message, created_at
     `,
     [
       companyId,
       input.userId,
+      input.fullName.slice(0, 160),
+      input.position.slice(0, 120),
+      input.email.slice(0, 160),
+      input.phone.slice(0, 80),
+      input.companyWebsite.slice(0, 300),
+      input.proofMethod,
+      input.proofText.slice(0, 2000),
+      input.proofFileUrl.slice(0, 500),
       input.proofType.slice(0, 40),
       input.proofValue.slice(0, 300),
       input.message.slice(0, 1000),
@@ -464,6 +531,14 @@ export async function pgRequestCatalogCompanyClaim(input: {
     companyId: row.company_id,
     userId: row.user_id,
     status: row.status,
+    fullName: row.full_name,
+    position: row.position,
+    email: row.email,
+    phone: row.phone,
+    companyWebsite: row.company_website,
+    proofMethod: row.proof_method,
+    proofText: row.proof_text,
+    proofFileUrl: row.proof_file_url,
     proofType: row.proof_type,
     proofValue: row.proof_value,
     message: row.message,
@@ -479,14 +554,27 @@ export async function pgListCatalogCompanyClaimsAdmin(): Promise<CatalogCompanyC
     company_id: number;
     company_name: string;
     company_slug: string;
+    company_origin: string | null;
+    company_profile_status: string | null;
     user_id: string;
     status: "pending" | "approved" | "rejected";
+    full_name: string;
+    position: string;
+    email: string;
+    phone: string;
+    company_website: string;
+    proof_method: "domain_email" | "official_phone" | "document_screenshot" | "other";
+    proof_text: string;
+    proof_file_url: string;
     proof_type: string;
     proof_value: string;
     message: string;
     created_at: Date;
   }>(`
-    SELECT r.id, r.company_id, co.name AS company_name, co.slug AS company_slug, r.user_id, r.status,
+    SELECT r.id, r.company_id, co.name AS company_name, co.slug AS company_slug,
+           co.origin AS company_origin, co.profile_status AS company_profile_status,
+           r.user_id, r.status, r.full_name, r.position, r.email, r.phone, r.company_website,
+           r.proof_method, r.proof_text, r.proof_file_url,
            r.proof_type, r.proof_value, r.message, r.created_at
     FROM catalog_company_claim_requests r
     JOIN catalog_companies co ON co.id = r.company_id
@@ -498,8 +586,18 @@ export async function pgListCatalogCompanyClaimsAdmin(): Promise<CatalogCompanyC
     companyId: row.company_id,
     companyName: row.company_name,
     companySlug: row.company_slug,
+    companyOrigin: rowOrigin(row.company_origin),
+    companyProfileStatus: rowProfileStatus(row.company_profile_status),
     userId: row.user_id,
     status: row.status,
+    fullName: row.full_name,
+    position: row.position,
+    email: row.email,
+    phone: row.phone,
+    companyWebsite: row.company_website,
+    proofMethod: row.proof_method,
+    proofText: row.proof_text,
+    proofFileUrl: row.proof_file_url,
     proofType: row.proof_type,
     proofValue: row.proof_value,
     message: row.message,
@@ -522,6 +620,14 @@ export async function pgReviewCatalogCompanyClaim(input: {
       company_id: number;
       user_id: string;
       status: "pending" | "approved" | "rejected";
+      full_name: string;
+      position: string;
+      email: string;
+      phone: string;
+      company_website: string;
+      proof_method: "domain_email" | "official_phone" | "document_screenshot" | "other";
+      proof_text: string;
+      proof_file_url: string;
       proof_type: string;
       proof_value: string;
       message: string;
@@ -531,7 +637,8 @@ export async function pgReviewCatalogCompanyClaim(input: {
       UPDATE catalog_company_claim_requests
       SET status = $2, reviewed_at = NOW(), reviewed_by = $3
       WHERE id = $1
-      RETURNING id, company_id, user_id, status, proof_type, proof_value, message, created_at
+      RETURNING id, company_id, user_id, status, full_name, position, email, phone, company_website,
+                proof_method, proof_text, proof_file_url, proof_type, proof_value, message, created_at
       `,
       [input.claimId, input.action === "approve" ? "approved" : "rejected", input.reviewedBy],
     );
@@ -552,6 +659,14 @@ export async function pgReviewCatalogCompanyClaim(input: {
       companyId: row.company_id,
       userId: row.user_id,
       status: row.status,
+      fullName: row.full_name,
+      position: row.position,
+      email: row.email,
+      phone: row.phone,
+      companyWebsite: row.company_website,
+      proofMethod: row.proof_method,
+      proofText: row.proof_text,
+      proofFileUrl: row.proof_file_url,
       proofType: row.proof_type,
       proofValue: row.proof_value,
       message: row.message,

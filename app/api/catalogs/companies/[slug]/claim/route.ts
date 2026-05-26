@@ -15,6 +15,12 @@ function cleanText(value: unknown, maxLength: number): string {
     .slice(0, maxLength);
 }
 
+const PROOF_METHODS = new Set(["domain_email", "official_phone", "document_screenshot", "other"]);
+
+function cleanEmail(value: unknown): string {
+  return cleanText(value, 160).toLowerCase();
+}
+
 export async function POST(
   req: Request,
   ctx: { params: Promise<{ slug: string }> },
@@ -35,12 +41,41 @@ export async function POST(
     body = {};
   }
 
+  const fullName = cleanText(body.fullName, 160);
+  const position = cleanText(body.position, 120);
+  const email = cleanEmail(body.email);
+  const phone = cleanText(body.phone, 80);
+  const companyWebsite = cleanText(body.companyWebsite, 300);
+  const proofMethodRaw = cleanText(body.proofMethod, 40);
+  const proofMethod =
+    PROOF_METHODS.has(proofMethodRaw) ?
+      (proofMethodRaw as "domain_email" | "official_phone" | "document_screenshot" | "other")
+    : null;
+  const proofText = cleanText(body.proofText, 2000);
+  const proofFileUrl = cleanText(body.proofFileUrl, 500);
+  const message = cleanText(body.message, 1000);
+
+  if (!fullName || !position || !email || !phone || !proofMethod || !proofText) {
+    return NextResponse.json({ ok: false, error: "REQUIRED_FIELDS_MISSING" }, { status: 400 });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ ok: false, error: "EMAIL_INVALID" }, { status: 400 });
+  }
+
   const claim = await requestCatalogCompanyClaim({
     slug,
     userId,
-    proofType: cleanText(body.proofType, 40) || "manual",
-    proofValue: cleanText(body.proofValue, 300),
-    message: cleanText(body.message, 1000),
+    fullName,
+    position,
+    email,
+    phone,
+    companyWebsite,
+    proofMethod,
+    proofText,
+    proofFileUrl,
+    proofType: proofMethod,
+    proofValue: proofText.slice(0, 300),
+    message,
   });
 
   if (!claim) {

@@ -14,6 +14,7 @@ import { listingDealStatusBadgeRu } from "../lib/listingCardMeta";
 import type { Listing, ListingStatus } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { inferredSupportSenderType, supportMessageLabelAdminPanel } from "../lib/supportUiLabels";
+import type { CatalogCompanyClaimRequest } from "../lib/catalogTypes";
 import { AdminCatalogPanel } from "./AdminCatalogPanel";
 
 const statusLabel: Record<ListingStatus, string> = {
@@ -314,6 +315,7 @@ function Tabs({
     reports: number;
     support: number;
     users: number;
+    catalogClaims: number;
   };
 }) {
   const tabs: Array<{ key: AdminTab; label: string; counter?: number }> = [
@@ -351,7 +353,9 @@ function Tabs({
               <span className="text-black/50">({counts.pending})</span>
             ) : t.key === "published" ? (
               <span className="text-black/50">({counts.published})</span>
-            ) : t.key === "catalog" ? null : (
+            ) : t.key === "catalog" ? (
+              counts.catalogClaims > 0 ? <span className="text-black/50">({counts.catalogClaims})</span> : null
+            ) : (
               <span className="text-black/50">({counts.rejected})</span>
             )}
           </button>
@@ -401,7 +405,22 @@ export default function AdminClient() {
     reports: 0,
     support: 0,
     users: 0,
+    catalogClaims: 0,
   });
+
+  const loadCatalogClaimPendingCount = useCallback(() => {
+    void fetch("/api/admin/catalog/companies/claims", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { claims?: CatalogCompanyClaimRequest[] }) => {
+        const pending = (d.claims ?? []).filter((claim) => claim.status === "pending").length;
+        setCounts((c) => ({ ...c, catalogClaims: pending }));
+      })
+      .catch(() => setCounts((c) => ({ ...c, catalogClaims: 0 })));
+  }, []);
+
+  const handleCatalogClaimPendingCountChange = useCallback((count: number) => {
+    setCounts((c) => ({ ...c, catalogClaims: count }));
+  }, []);
 
   const sorted = useMemo(() => {
     return [...listings].sort((a, b) => b.createdAt - a.createdAt);
@@ -419,6 +438,10 @@ export default function AdminClient() {
     }
     setCounts((c) => ({ ...c, pending, published, rejected }));
   }, [loaded, listings]);
+
+  useEffect(() => {
+    loadCatalogClaimPendingCount();
+  }, [loadCatalogClaimPendingCount]);
 
   const ownerLabelById = useMemo(() => {
     const m = new Map<string, string>();
@@ -1235,7 +1258,9 @@ export default function AdminClient() {
           ) : null}
         </div>
       ) : tab === "catalog" ? (
-        <AdminCatalogPanel />
+        <AdminCatalogPanel
+          onClaimPendingCountChange={handleCatalogClaimPendingCountChange}
+        />
       ) : tab === "support" ? (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1 space-y-3">

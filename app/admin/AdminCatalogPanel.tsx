@@ -11,12 +11,21 @@ import {
   catalogCompanyOriginView,
 } from "../lib/catalogCompanyOrigin";
 import { isLikelyBadCompanyName } from "../lib/catalogCompanyNameExtract";
-import type { CatalogCategory, CatalogCompanyAdminItem, CatalogReport } from "../lib/catalogTypes";
+import type {
+  CatalogCategory,
+  CatalogCompanyAdminItem,
+  CatalogCompanyClaimRequest,
+  CatalogReport,
+} from "../lib/catalogTypes";
 import { CATALOG_CATEGORY_SEED } from "../lib/catalogTypes";
 
 type CatalogAdminTab = "overview" | "companies" | "categories" | "import" | "reports";
 
-export function AdminCatalogPanel() {
+export function AdminCatalogPanel({
+  onClaimPendingCountChange,
+}: {
+  onClaimPendingCountChange?: (count: number) => void;
+}) {
   const [tab, setTab] = useState<CatalogAdminTab>("overview");
   const [companies, setCompanies] = useState<CatalogCompanyAdminItem[]>([]);
   const [reports, setReports] = useState<CatalogReport[]>([]);
@@ -25,6 +34,7 @@ export function AdminCatalogPanel() {
   const [companyBusy, setCompanyBusy] = useState(false);
   const [companyMessage, setCompanyMessage] = useState<string | null>(null);
   const [editingCompany, setEditingCompany] = useState<CatalogCompanyAdminItem | null>(null);
+  const [claimPendingCount, setClaimPendingCount] = useState(0);
 
   const loadCompanies = useCallback(() => {
     void fetch("/api/admin/catalog/companies", { credentials: "include", cache: "no-store" })
@@ -40,10 +50,31 @@ export function AdminCatalogPanel() {
       .catch(() => setReports([]));
   }, []);
 
+  const setClaimCount = useCallback(
+    (count: number) => {
+      setClaimPendingCount(count);
+      onClaimPendingCountChange?.(count);
+    },
+    [onClaimPendingCountChange],
+  );
+
+  const loadClaimCount = useCallback(() => {
+    void fetch("/api/admin/catalog/companies/claims", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { claims?: CatalogCompanyClaimRequest[] }) => {
+        setClaimCount((d.claims ?? []).filter((claim) => claim.status === "pending").length);
+      })
+      .catch(() => setClaimCount(0));
+  }, [setClaimCount]);
+
   useEffect(() => {
     if (tab === "companies" || tab === "overview") loadCompanies();
     if (tab === "reports") loadReports();
   }, [tab, loadCompanies, loadReports]);
+
+  useEffect(() => {
+    loadClaimCount();
+  }, [loadClaimCount]);
 
   const filteredCompanies = useMemo(() => {
     if (!companyFilter) return companies;
@@ -124,6 +155,7 @@ export function AdminCatalogPanel() {
             ].join(" ")}
           >
             {t.label}
+            {t.key === "import" && claimPendingCount > 0 ? ` (${claimPendingCount})` : ""}
           </button>
         ))}
       </div>
@@ -275,7 +307,7 @@ export function AdminCatalogPanel() {
 
       {tab === "import" ?
         <div className="space-y-4">
-          <AdminCatalogClaimsSection />
+          <AdminCatalogClaimsSection onPendingCountChange={setClaimCount} />
           <div className="flex flex-wrap gap-2 text-sm">
             <Link
               href="/admin/catalogs/import"

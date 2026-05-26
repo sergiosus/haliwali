@@ -18,6 +18,11 @@ export type CatalogCompanyOrigin =
   | "imported_public"
   | "owner_submitted"
   | "user_submitted";
+export type CatalogCompanyOwnershipStatus =
+  | "imported_public"
+  | "owner_submitted"
+  | "claim_pending"
+  | "verified_owner";
 
 export type CatalogCompanyListItem = {
   slug: string;
@@ -70,8 +75,18 @@ export type CatalogCompanyClaimRequest = {
   companyId: number;
   companyName?: string;
   companySlug?: string;
+  companyOrigin?: CatalogCompanyOrigin;
+  companyProfileStatus?: CatalogCompanyProfileStatus;
   userId: string;
   status: "pending" | "approved" | "rejected";
+  fullName: string;
+  position: string;
+  email: string;
+  phone: string;
+  companyWebsite: string;
+  proofMethod: "domain_email" | "official_phone" | "document_screenshot" | "other";
+  proofText: string;
+  proofFileUrl: string;
   proofType: string;
   proofValue: string;
   message: string;

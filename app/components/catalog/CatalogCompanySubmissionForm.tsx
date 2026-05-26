@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LocationModal, type LocationModalChangePayload, type LocationModalValue } from "../modals/LocationModal";
 import type { CatalogCategory } from "../../lib/catalogTypes";
 import { refreshAuthFromServer, useAuth } from "../../lib/auth";
 
@@ -61,6 +62,7 @@ export function CatalogCompanySubmissionForm({
   const router = useRouter();
   const auth = useAuth();
   const [open, setOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(false);
   const [state, setState] = useState<SubmitState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({
@@ -80,6 +82,54 @@ export function CatalogCompanySubmissionForm({
     if (auth.status === "ready") return Boolean(auth.userId);
     return initialLoggedIn;
   }, [auth.status, auth.userId, initialLoggedIn]);
+
+  const latitudeNumber = Number(form.latitude.replace(",", "."));
+  const longitudeNumber = Number(form.longitude.replace(",", "."));
+  const hasMapPoint =
+    Number.isFinite(latitudeNumber) &&
+    Number.isFinite(longitudeNumber) &&
+    latitudeNumber >= -90 &&
+    latitudeNumber <= 90 &&
+    longitudeNumber >= -180 &&
+    longitudeNumber <= 180;
+
+  const locationModalValue = useMemo((): LocationModalValue => {
+    if (hasMapPoint) {
+      return {
+        city: "",
+        displayName: form.address || form.city || "Адрес на карте",
+        pickKind: "point",
+        lat: latitudeNumber,
+        lng: longitudeNumber,
+        radiusKm: 0,
+        scope: {
+          type: "point",
+          label: form.address || form.city || "Адрес на карте",
+          lat: latitudeNumber,
+          lng: longitudeNumber,
+        },
+      };
+    }
+    return {
+      city: form.city,
+      displayName: form.city,
+      pickKind: form.city.trim() ? "settlement" : "",
+      radiusKm: 0,
+    };
+  }, [form.address, form.city, hasMapPoint, latitudeNumber, longitudeNumber]);
+
+  function applyMapLocation(next: LocationModalChangePayload) {
+    setForm((prev) => ({
+      ...prev,
+      address:
+        next.displayName && next.displayName !== "Точка на карте" ?
+          next.displayName
+        : prev.address,
+      latitude: typeof next.lat === "number" && Number.isFinite(next.lat) ? String(next.lat) : "",
+      longitude: typeof next.lng === "number" && Number.isFinite(next.lng) ? String(next.lng) : "",
+    }));
+    setLocationOpen(false);
+  }
 
   function requireLogin(): boolean {
     if (loggedIn) return true;
@@ -177,15 +227,26 @@ export function CatalogCompanySubmissionForm({
               className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
             />
           </label>
-          <label className="block">
-            <span className="font-medium text-black/70">Адрес</span>
-            <input
-              value={form.address}
-              onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
-              placeholder="Улица, дом, офис"
-              className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-            />
-          </label>
+          <div className="rounded-xl border border-black/[0.08] bg-black/[0.02] p-3 sm:col-span-2">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-black/75">Адрес на карте</div>
+                {hasMapPoint ?
+                  <p className="mt-1 text-xs text-emerald-700">Адрес на карте указан</p>
+                : <p className="mt-1 text-xs text-black/45">Выберите точку компании на карте.</p>}
+                {form.address ?
+                  <p className="mt-1 break-words text-xs text-black/55">{form.address}</p>
+                : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setLocationOpen(true)}
+                className="rounded-full border border-black/15 bg-white px-3 py-1.5 text-xs font-medium text-black/70 hover:bg-black/[0.03]"
+              >
+                Указать на карте
+              </button>
+            </div>
+          </div>
           <label className="block">
             <span className="font-medium text-black/70">Сайт / ссылка</span>
             <input
@@ -221,28 +282,6 @@ export function CatalogCompanySubmissionForm({
               className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
             />
           </label>
-          <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
-            <label className="block">
-              <span className="font-medium text-black/70">Широта на карте</span>
-              <input
-                value={form.latitude}
-                onChange={(e) => setForm((prev) => ({ ...prev, latitude: e.target.value }))}
-                inputMode="decimal"
-                placeholder="56.8527"
-                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-              />
-            </label>
-            <label className="block">
-              <span className="font-medium text-black/70">Долгота на карте</span>
-              <input
-                value={form.longitude}
-                onChange={(e) => setForm((prev) => ({ ...prev, longitude: e.target.value }))}
-                inputMode="decimal"
-                placeholder="53.2115"
-                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-              />
-            </label>
-          </div>
           <label className="block sm:col-span-2">
             <span className="font-medium text-black/70">Описание *</span>
             <textarea
@@ -280,6 +319,17 @@ export function CatalogCompanySubmissionForm({
             </button>
           </div>
         </form>
+      : null}
+      {locationOpen ?
+        <LocationModal
+          open
+          variant="company"
+          showRadius={false}
+          cities={[]}
+          value={locationModalValue}
+          onClose={() => setLocationOpen(false)}
+          onChange={applyMapLocation}
+        />
       : null}
     </div>
   );

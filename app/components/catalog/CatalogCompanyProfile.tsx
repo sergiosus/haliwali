@@ -3,7 +3,6 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import type { MouseEvent } from "react";
 import { useState } from "react";
 import type { CatalogCompanyListItem, CatalogCompanyProfile } from "../../lib/catalogTypes";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
@@ -78,13 +77,6 @@ export function CatalogCompanyProfileView({
       { lat: company.latitude, lng: company.longitude }
     : null;
 
-  function goBackToCategory(e: MouseEvent<HTMLAnchorElement>) {
-    if (window.history.length > 1) {
-      e.preventDefault();
-      router.back();
-    }
-  }
-
   async function requestClaim() {
     if (
       !claimForm.fullName.trim() ||
@@ -141,7 +133,6 @@ export function CatalogCompanyProfileView({
 
       <Link
         href={`/catalogs/${company.categorySlug}`}
-        onClick={goBackToCategory}
         className="inline-flex h-9 w-fit items-center rounded-xl border border-black/[0.08] bg-white px-3 text-sm font-medium text-black/65 shadow-sm hover:bg-black/[0.02] hover:text-black"
       >
         ← Назад к категории

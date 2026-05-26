@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { CatalogCategory, CatalogCompanyListItem } from "../../lib/catalogTypes";
 import { CatalogCompanyCard } from "./CatalogCompanyCard";
 import { CatalogCompanyMap } from "./CatalogCompanyMap";
@@ -26,15 +26,6 @@ export function CatalogCategoryClient({
   const [view, setView] = useState<ViewMode>("cards");
   const [companies, setCompanies] = useState(initialCompanies);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
-
-  const goBack = useCallback(() => {
-    if (window.history.length > 1) {
-      router.back();
-      return;
-    }
-    router.push("/catalogs");
-  }, [router]);
 
   const runSearch = useCallback(
     async (query: string) => {
@@ -76,13 +67,12 @@ export function CatalogCategoryClient({
   return (
     <div className="space-y-5">
       <header>
-        <button
-          type="button"
-          onClick={goBack}
+        <Link
+          href="/catalogs"
           className="mb-3 inline-flex h-9 w-fit items-center justify-center rounded-full border border-black/15 bg-white px-3 text-sm font-medium text-black/70 shadow-sm transition-colors hover:bg-black/[0.03]"
         >
-          ← Назад
-        </button>
+          ← К категориям
+        </Link>
         <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">{category.title}</h1>
         <p className="mt-1 text-sm text-black/50">{category.subtitle}</p>
       </header>

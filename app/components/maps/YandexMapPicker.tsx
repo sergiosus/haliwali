@@ -138,6 +138,8 @@ type Props = {
   radiusKm?: number;
   /** Stable id for the selected settlement (name + coords) — triggers marker/center refresh. */
   selectedSettlementKey?: string;
+  /** Fixed center pin for exact point selection (not a radius / search-area overlay). */
+  centerPointMarker?: boolean;
 };
 
 const CENTER_EMIT_DEBOUNCE_MS = 140;
@@ -312,6 +314,7 @@ export function YandexMapPicker({
   mapSyncRevision = 0,
   radiusKm,
   selectedSettlementKey = "",
+  centerPointMarker = false,
 }: Props) {
   const holderRef = useRef<HTMLDivElement | null>(null);
   const effLat = center.lat;
@@ -1264,6 +1267,14 @@ export function YandexMapPicker({
               height: `${SEARCH_OVERLAY_DIAMETER_CQMIN}cqmin`,
             }}
           />
+        </div>
+      : null}
+      {centerPointMarker ?
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-[13] -translate-x-1/2 -translate-y-full" aria-hidden>
+          <div className="flex flex-col items-center">
+            <div className="h-4 w-4 rounded-full border-2 border-white bg-[#ff7a00] shadow-md" />
+            <div className="h-3 w-0.5 bg-[#ff7a00] shadow-sm" />
+          </div>
         </div>
       : null}
       {mapReady && showGeolocationButton ?

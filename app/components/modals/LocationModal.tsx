@@ -496,6 +496,7 @@ export function LocationModal({
   onChange,
   variant: _variant = "browse",
   listingSubMode: _listingSubMode = "full",
+  showRadius = true,
   /** Homepage: no map / no Yandex scripts — search, list, apply only. */
   hideMapPreview = false,
   /** Listing create/edit: commit only explicit picks; never infer city from search draft on confirm. */
@@ -506,11 +507,14 @@ export function LocationModal({
   cities: readonly string[];
   onClose: () => void;
   onChange: (next: LocationModalChangePayload) => void;
-  variant?: "browse" | "listing";
+  variant?: "browse" | "listing" | "company";
   listingSubMode?: "full" | "mapOnly";
+  showRadius?: boolean;
   hideMapPreview?: boolean;
   listingFormMode?: boolean;
 }) {
+  const companyPointMode = _variant === "company";
+  const showRadiusControls = showRadius && !companyPointMode;
   const [draftQuery, setDraftQuery] = useState("");
   const [chosenScope, setChosenScope] = useState<SearchScopeLocation | null>(null);
   /** Geographic radius anchor (selected NP coords only — never updated by map pan / click). */
@@ -587,11 +591,11 @@ export function LocationModal({
       setOriginalSelectedCenter(c);
       setCurrentCircleCenter(c);
       setMapSyncRevision((n) => n + 1);
-      setActiveTab(hideMapPreview ? "nearby" : "map");
+      setActiveTab(hideMapPreview && showRadiusControls ? "nearby" : "map");
       setSuggestionsDismissed(true);
       inputRef.current?.blur();
     },
-    [hideMapPreview],
+    [hideMapPreview, showRadiusControls],
   );
 
   useEffect(() => {
@@ -617,7 +621,7 @@ export function LocationModal({
   useLayoutEffect(() => {
     if (!open) return;
 
-    setActiveTab(hideMapPreview ? "nearby" : "map");
+    setActiveTab(hideMapPreview && showRadiusControls ? "nearby" : "map");
 
     if (!hasCommittedSettlementInModalValue(value)) {
       setChosenScope(null);
@@ -1386,6 +1390,38 @@ export function LocationModal({
     if (!scope) return;
 
     const normScope = normalizeSearchScope(scope);
+    if (companyPointMode) {
+      const scopeCoords: MapCenter | null =
+        typeof normScope.lat === "number" &&
+        Number.isFinite(normScope.lat) &&
+        typeof normScope.lng === "number" &&
+        Number.isFinite(normScope.lng) ?
+          { lat: normScope.lat, lng: normScope.lng }
+        : null;
+      const coordsForPayload =
+        viewportMapCenterForApplyRef.current &&
+        Number.isFinite(viewportMapCenterForApplyRef.current.lat + viewportMapCenterForApplyRef.current.lng) ?
+          viewportMapCenterForApplyRef.current
+        : scopeCoords ??
+          (effectiveCircleCenter && Number.isFinite(effectiveCircleCenter.lat + effectiveCircleCenter.lng) ?
+            effectiveCircleCenter
+          : null);
+      if (!coordsForPayload) return;
+      const label = draftQuery.trim() || normScope.label.trim() || "Адрес на карте";
+      onChange(
+        buildChangePayload(
+          normalizeSearchScope({
+            type: "point",
+            label,
+            lat: coordsForPayload.lat,
+            lng: coordsForPayload.lng,
+          }),
+        ),
+      );
+      onClose();
+      return;
+    }
+
     if (normScope.type === "country") {
       onChange(buildChangePayload(normScope));
       onClose();
@@ -1530,7 +1566,7 @@ export function LocationModal({
       <div className="flex min-h-0 max-h-[90dvh] w-[min(96vw,600px)] max-w-[min(96vw,600px)] flex-col overflow-hidden rounded-2xl border border-black/10 bg-white shadow-xl sm:max-h-[90vh]">
         <div className="flex shrink-0 items-start justify-between gap-2 px-4 pb-2 pt-3 sm:px-5 sm:pb-2.5 sm:pt-3.5">
           <div id="loc-modal-title" className="text-[15px] font-semibold tracking-tight text-black/90">
-            Локация
+            {companyPointMode ? "Адрес на карте" : "Локация"}
           </div>
           <button
             type="button"
@@ -1555,16 +1591,18 @@ export function LocationModal({
                   setChosenScope(null);
                   setSuggestionsDismissed(false);
                 }}
-                placeholder="Город или регион"
+                placeholder={companyPointMode ? "Адрес или город" : "Город или регион"}
                 className="h-10 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)]"
               />
-              <button
-                type="button"
-                onClick={pickWholeRussia}
-                className="shrink-0 whitespace-nowrap rounded-xl border border-black/15 bg-white px-2.5 py-0 text-xs font-semibold leading-10 text-black/75 hover:bg-black/[0.03]"
-              >
-                Вся Россия
-              </button>
+              {showRadiusControls ?
+                <button
+                  type="button"
+                  onClick={pickWholeRussia}
+                  className="shrink-0 whitespace-nowrap rounded-xl border border-black/15 bg-white px-2.5 py-0 text-xs font-semibold leading-10 text-black/75 hover:bg-black/[0.03]"
+                >
+                  Вся Россия
+                </button>
+              : null}
             </div>
 
             {allowSuggestDropdown && qTrim.length >= 2 && !suggestionsDismissed && !isWholeRussiaDraftQuery(qTrim) ?
@@ -1605,7 +1643,7 @@ export function LocationModal({
             : null}
           </div>
 
-          {hideMapPreview ?
+          {hideMapPreview && showRadiusControls ?
             <div className="mt-1 flex min-h-0 flex-1 flex-col gap-0">
               <div className="shrink-0 border-b border-black/10 pb-1.5 pt-0">
                 <span className="text-sm font-semibold text-black">Населённые пункты рядом</span>
@@ -1621,6 +1659,7 @@ export function LocationModal({
               Карта временно недоступна (нет API ключа)
             </div>
           : <div className="mt-1 flex min-h-0 flex-1 flex-col gap-0">
+                {showRadiusControls ?
                 <div className="flex shrink-0 gap-0 border-b border-black/10">
                   <button
                     type="button"
@@ -1645,6 +1684,7 @@ export function LocationModal({
                     Населённые пункты рядом
                   </button>
                 </div>
+                : null}
 
                 {activeTab === "map" ?
                   effectiveCircleCenter ?
@@ -1661,7 +1701,8 @@ export function LocationModal({
                         userLocation={userLocation}
                         onUserLocationMarkerClick={handleUserLocationMarkerClick}
                         onGeolocationButtonSuccess={handleGeolocationButtonForUserMarker}
-                        viewportSearchOverlay
+                        viewportSearchOverlay={showRadiusControls}
+                        centerPointMarker={companyPointMode}
                         onCenterChange={(c) => {
                           viewportMapCenterForApplyRef.current = c;
                           setLiveViewportMapCenter(c);
@@ -1669,7 +1710,7 @@ export function LocationModal({
                         recenterTick={mapRecenterTick}
                         recenterTarget={originalSelectedCenter}
                       />
-                      {settlementRadiusFooterText || showReturnToNpButton ?
+                      {showRadiusControls && (settlementRadiusFooterText || showReturnToNpButton) ?
                         <div className="mt-1.5 space-y-1 text-center">
                           {settlementRadiusFooterText ?
                             <p className="text-sm font-medium text-black/70">{settlementRadiusFooterText}</p>
@@ -1696,7 +1737,7 @@ export function LocationModal({
                   : <div className="flex aspect-square w-full min-h-[288px] max-h-[min(46dvh,92vw)] items-center justify-center rounded-xl border border-black/[0.08] bg-black/[0.03] px-3 py-6 text-center text-sm text-black/55 sm:min-h-[320px] sm:max-h-[min(42vh,560px)]">
                       Нет координат для карты — выберите населённый пункт в списке.
                     </div>
-                : nearbyScrollListPanel}
+                : showRadiusControls ? nearbyScrollListPanel : null}
               </div>
           }
 
@@ -1705,7 +1746,7 @@ export function LocationModal({
             className="mt-2.5 inline-flex h-10 w-full shrink-0 items-center justify-center self-center rounded-xl border border-black/12 bg-white px-5 text-sm font-semibold text-black/85 hover:bg-black/[0.03] sm:w-auto"
             onClick={applySelection}
           >
-            Выбрать эту область
+            {companyPointMode ? "Выбрать адрес" : "Выбрать эту область"}
           </button>
         </div>
       </div>

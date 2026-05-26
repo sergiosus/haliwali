@@ -87,12 +87,14 @@ type PgMsgRow = {
   provider_metadata?: unknown;
 };
 
+// Keep the read path compatible with databases where the future-provider migration
+// has not been applied yet. Missing provider columns should never break /api/chats.
 const PG_LISTING_CONV_SELECT = `conversation_id, listing_id, listing_title, listing_owner_id, buyer_id, participant_ids,
-            last_message_text, last_message_at, created_at, updated_at, provider, external_chat_id`;
+            last_message_text, last_message_at, created_at, updated_at`;
 
 const PG_LISTING_MSG_SELECT = `conversation_id, message_id, listing_id, sender_id, recipient_id, type, text,
             file_url, file_name, sender_name, reply_to_message_id, reply_to_text, edited_at,
-            created_at, read_at, provider, external_message_id, provider_metadata`;
+            created_at, read_at`;
 
 function num(v: string | number | null | undefined): number {
   if (v === null || v === undefined) return 0;

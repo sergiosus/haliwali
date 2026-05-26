@@ -17,6 +17,7 @@ import {
   unreadCompanyCountForUser,
 } from "../../lib/serverCompanyChatsStore";
 import { getCatalogCompanyChatTarget } from "../../lib/serverCatalogStore";
+import { isDebugAuthServer } from "../../lib/debugAuth";
 import {
   lastMessageSenderCabinetLabel,
   publicCabinetLabelForStoredUser,
@@ -70,6 +71,25 @@ function storedCompanyMsgToApi(m: import("../../lib/serverCompanyChatsStore").St
 
 /** Список переписок для кабинета / шапки; опционально — сообщения по listingId + peerUserId (тот же формат что GET /api/chats/[chatId]). */
 export async function GET(req: Request) {
+  try {
+    return await getChats(req);
+  } catch (err) {
+    if (isDebugAuthServer()) {
+      const e = err as { code?: unknown; name?: unknown; message?: unknown };
+      console.error("[api-chats]", "get_failed", {
+        code: typeof e.code === "string" ? e.code : undefined,
+        name: typeof e.name === "string" ? e.name : undefined,
+        message: typeof e.message === "string" ? e.message.slice(0, 180) : undefined,
+      });
+    }
+    return NextResponse.json(
+      { ok: false, error: "CHATS_UNAVAILABLE", conversations: [], unreadTotal: 0 },
+      { status: 503 },
+    );
+  }
+}
+
+async function getChats(req: Request) {
   const uid = ((await getUserIdFromSessionCookie()) ?? "").trim();
   if (!uid) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });

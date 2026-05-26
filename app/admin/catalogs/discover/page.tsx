@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getAdminPageView } from "../../../lib/serverAdminSession";
 import AdminCatalogDiscoverClient from "./AdminCatalogDiscoverClient";
-import AdminLogoutButton from "../../AdminLogoutButton";
 
 export const dynamic = "force-dynamic";
 
@@ -16,23 +15,6 @@ export default async function AdminCatalogDiscoverPage() {
             <div className="font-semibold tracking-tight">Поиск источников</div>
             <div className="text-sm text-black/60">Публичный веб → выбор URL → кандидаты импорта</div>
           </div>
-          {view === "dashboard" ?
-            <div className="flex max-w-full flex-wrap items-center justify-end gap-2 sm:gap-3">
-              <Link
-                href="/admin/catalogs/import"
-                className="rounded-full border border-black/15 px-4 py-2 text-sm font-medium hover:bg-black/5"
-              >
-                Импорт
-              </Link>
-              <Link
-                href="/admin"
-                className="rounded-full border border-black/15 px-4 py-2 text-sm font-medium hover:bg-black/5"
-              >
-                Админка
-              </Link>
-              <AdminLogoutButton />
-            </div>
-          : null}
         </header>
 
         <main className="pb-16">

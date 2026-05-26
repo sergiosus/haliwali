@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { PasswordChangeModal } from "../components/PasswordChangeModal";
 
@@ -75,6 +76,17 @@ export default function AdminLogoutButton() {
         {menuOpen ? (
           <div className="absolute right-0 top-full z-[80] w-[min(220px,calc(100vw-2rem))] pt-2">
             <div id={menuId} role="menu" className="rounded-xl border border-black/10 bg-white p-2 shadow-lg">
+              <Link
+                href="/admin"
+                role="menuitem"
+                className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                }}
+              >
+                Админка
+              </Link>
               <button
                 type="button"
                 role="menuitem"

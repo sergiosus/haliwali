@@ -1,7 +1,6 @@
 import Link from "next/link";
 import AdminClient from "./AdminClient";
 import AdminLoginForm from "./AdminLoginForm";
-import AdminLogoutButton from "./AdminLogoutButton";
 import { getAdminPageView } from "../lib/serverAdminSession";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +25,6 @@ export default async function AdminPage({
             <div className="font-semibold tracking-tight">Админка Haliwali</div>
             <div className="text-sm text-black/60">Модерация задач, услуг и товаров</div>
           </div>
-          {view === "dashboard" ? <AdminLogoutButton /> : null}
         </header>
 
         <main className="pb-16">

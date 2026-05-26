@@ -29,6 +29,7 @@ import { AccountSwitcherModal } from "./AccountSwitcherModal";
 import { GlobalHeaderSearch } from "./GlobalHeaderSearch";
 import { SiteModeNav } from "./SiteModeNav";
 import { PostListingMenu } from "./PostListingMenu";
+import AdminLogoutButton from "../admin/AdminLogoutButton";
 
 /** Temporary account-menu tap debug: `localStorage.setItem("debugAccountMenu","1")` or development build. */
 function isAccountMenuDebugOn(): boolean {
@@ -69,8 +70,9 @@ function HeaderHaliwaliLogo() {
 
 export function SiteHeader() {
   const pathname = usePathname();
-  /** Полноэкранный вход в админку — без меню обычного пользователя и без «Привет, …». */
-  const suppressUserChromeForAdmin = pathname === "/admin";
+  /** Админка использует только админский аккаунт-контрол без публичных действий. */
+  const isAdminPage = pathname === "/admin" || pathname.startsWith("/admin/");
+  const suppressUserChromeForAdmin = isAdminPage;
   /** In-page search only on these routes — no header duplicate. */
   const hideHeaderSearch =
     pathname === "/" || pathname === "/marketplaces" || pathname.startsWith("/catalogs") || pathname.startsWith("/admin");
@@ -355,7 +357,9 @@ export function SiteHeader() {
   const authHeaderPlaceholder = (
     <span className="inline-block min-h-[36px] min-w-0 shrink-0 sm:min-w-[120px]" aria-hidden />
   );
-  const authBlock = suppressUserChromeForAdmin ? null : !mounted ? (
+  const authBlock = isAdminPage ? (
+    <AdminLogoutButton />
+  ) : !mounted ? (
     authHeaderPlaceholder
   ) : auth.userId ? (
     <div

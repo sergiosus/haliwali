@@ -37,6 +37,18 @@ function resultDomain(rawUrl: string, candidate?: PersistedImportCandidate): str
   }
 }
 
+function selectBestUrlsForImport(
+  urls: string[],
+  candidatesByUrl: Map<string, PersistedImportCandidate>,
+): string[] {
+  if (urls.length <= MAX_URLS_PER_BATCH) return urls;
+  return urls
+    .map((url, index) => ({ url, index, score: candidatesByUrl.get(url)?.relevanceScore ?? Number.NEGATIVE_INFINITY }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, MAX_URLS_PER_BATCH)
+    .map((item) => item.url);
+}
+
 function draftDomain(draft: CatalogImportDraft): string {
   const rawRoot = String(draft.rawPayload?.rootDomain ?? "").trim();
   if (rawRoot) return rawRoot.toLowerCase();
@@ -82,6 +94,7 @@ export async function POST(req: Request) {
   const rawUrls = Array.isArray(body.urls)
     ? body.urls.map((u) => String(u).trim()).filter(Boolean)
     : [];
+  const requestedCountFromClient = Number(body.requestedCount);
 
   if (!categorySlug) {
     return NextResponse.json({ ok: false, error: "CATEGORY_REQUIRED" }, { status: 400 });
@@ -89,26 +102,45 @@ export async function POST(req: Request) {
   if (rawUrls.length === 0) {
     return NextResponse.json({ ok: false, error: "URLS_REQUIRED" }, { status: 400 });
   }
-  if (rawUrls.length > MAX_URLS_PER_BATCH) {
-    return NextResponse.json({ ok: false, error: "TOO_MANY_URLS", max: MAX_URLS_PER_BATCH }, { status: 400 });
-  }
-
-  logCatalogImport("selected_count", { count: rawUrls.length });
-  logCatalogDiscover("import_batch", { urlCount: rawUrls.length, categorySlug, city: city.slice(0, 40) });
 
   const searchQuery = String(body.searchQuery ?? body.query ?? "").trim();
   const sessionId = Number(body.sessionId);
   const existing =
     Number.isFinite(sessionId) && sessionId > 0 ? await getImportCandidateSession(sessionId) : null;
   const candidatesByUrl = new Map((existing?.candidates ?? []).map((c) => [c.url.trim(), c]));
+  const urlsToProcess = selectBestUrlsForImport(rawUrls, candidatesByUrl);
+  const requestedCount =
+    Number.isFinite(requestedCountFromClient) && requestedCountFromClient > 0 ?
+      Math.max(rawUrls.length, Math.floor(requestedCountFromClient))
+    : rawUrls.length;
+  const truncated = requestedCount > urlsToProcess.length;
+
+  logCatalogImport("selected_count", { requested: requestedCount, received: rawUrls.length, processed: urlsToProcess.length });
+  logCatalogDiscover("import_batch", {
+    requestedUrlCount: requestedCount,
+    receivedUrlCount: rawUrls.length,
+    processedUrlCount: urlsToProcess.length,
+    categorySlug,
+    city: city.slice(0, 40),
+  });
   const preliminaryResults: CandidateImportResult[] = [];
   const importableUrls: string[] = [];
 
-  for (const url of rawUrls) {
+  for (const url of urlsToProcess) {
     const candidate = candidatesByUrl.get(url);
     const domain = resultDomain(url, candidate);
     if (!/^https?:\/\//i.test(url)) {
       preliminaryResults.push({ url, domain, status: "skipped_invalid", reason: "INVALID_URL" });
+    } else if (candidate?.catalogMatchStatus === "already_published") {
+      preliminaryResults.push({
+        url,
+        domain,
+        status: "skipped_duplicate",
+        reason: "ALREADY_PUBLISHED",
+        duplicateOfCompanyId: candidate.existingCompany?.id ?? null,
+        duplicateName: candidate.existingCompany?.name ?? null,
+        duplicateHref: candidate.existingCompany?.href ?? null,
+      });
     } else if (candidate?.hidden) {
       preliminaryResults.push({ url, domain, status: "skipped_hidden", reason: candidate.hideReason ?? "HIDDEN" });
     } else {
@@ -233,6 +265,10 @@ export async function POST(req: Request) {
     errors,
     dbDraftCount,
     session,
+    requestedCount,
+    processedCount: urlsToProcess.length,
+    processedLimit: MAX_URLS_PER_BATCH,
+    truncated,
     importUrl: "/admin/catalogs/import/drafts",
   });
 }

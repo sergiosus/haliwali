@@ -31,6 +31,7 @@ export type CatalogCompanyListItem = {
 export type CatalogCompanyAdminItem = CatalogCompanyListItem & {
   id: number;
   website: string | null;
+  contacts?: CatalogCompanyContact[];
 };
 
 export type CatalogCompanyProfile = CatalogCompanyListItem & {

@@ -2,6 +2,7 @@ import { getPool } from "./pgPool";
 import type {
   CatalogCategory,
   CatalogCompanyAdminItem,
+  CatalogCompanyContact,
   CatalogCompanyListItem,
   CatalogCompanyProfile,
   CatalogReport,
@@ -22,6 +23,20 @@ function rowRating(v: unknown): number | null {
 function rowServiceCities(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.map((x) => String(x).trim()).filter(Boolean);
+}
+
+function rowContacts(v: unknown): CatalogCompanyContact[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((x) => {
+      if (!x || typeof x !== "object") return null;
+      const item = x as { type?: unknown; value?: unknown };
+      const value = String(item.value ?? "").trim();
+      if (!value) return null;
+      const type = item.type === "phone" || item.type === "email" ? item.type : "other";
+      return { type, value };
+    })
+    .filter((x): x is CatalogCompanyContact => Boolean(x));
 }
 
 function toCompanyListItem(
@@ -411,13 +426,21 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
+    contacts: unknown;
   }>(`
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
            co.city, co.service_cities, co.description, co.logo_url, co.website, co.rating,
-           loc.latitude, loc.longitude
+           loc.latitude, loc.longitude,
+           COALESCE(
+             jsonb_agg(jsonb_build_object('type', cc.contact_type, 'value', cc.value) ORDER BY cc.sort_order, cc.id)
+               FILTER (WHERE cc.id IS NOT NULL),
+             '[]'::jsonb
+           ) AS contacts
     FROM catalog_companies co
     JOIN catalog_categories cat ON cat.slug = co.category_slug
     LEFT JOIN catalog_company_locations loc ON loc.company_id = co.id
+    LEFT JOIN catalog_company_contacts cc ON cc.company_id = co.id
+    GROUP BY co.id, cat.title, loc.latitude, loc.longitude
     ORDER BY co.updated_at DESC
     LIMIT 500
   `);
@@ -425,6 +448,7 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     ...toCompanyListItem(r),
     id: r.id,
     website: r.website,
+    contacts: rowContacts(r.contacts),
   }));
 }
 

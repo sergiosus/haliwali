@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SettlementLocationField } from "../../components/location/SettlementLocationField";
 import { DISCOVERY_SOURCE_LABEL, type DiscoverySourceType } from "../../lib/catalogDiscoverSourceType";
 import {
@@ -11,6 +11,7 @@ import {
 } from "../../lib/catalogDiscoverLocationStorage";
 import type { CatalogImportCandidateHistoryItem, CatalogImportCandidateSession } from "../../lib/catalogImportCandidateTypes";
 import { isLikelyBadCompanyName } from "../../lib/catalogCompanyNameExtract";
+import { MAX_URLS_PER_BATCH } from "../../lib/catalogImportLimits";
 import {
   IMPORT_CANDIDATE_RESULT_LABEL,
   IMPORT_CANDIDATE_STATE_LABEL,
@@ -24,7 +25,7 @@ const IMPORT_CANDIDATES_STATE_KEY = "haliwali_admin_import_candidates_state_v1";
 const RECENT_KEYWORDS_KEY = "haliwali_admin_import_recent_keywords";
 const MAX_RECENT_KEYWORDS = 10;
 
-type ImportResultFilter = "all" | "imported" | "duplicates" | "errors" | "skipped";
+type CandidateResultTab = "new" | "already" | "possible" | "hidden";
 
 type StoredImportCandidatesState = {
   query: string;
@@ -32,20 +33,19 @@ type StoredImportCandidatesState = {
   categorySlug: string;
   session: CatalogImportCandidateSession | null;
   showHidden: boolean;
-  resultFilter: ImportResultFilter;
+  resultFilter: CandidateResultTab;
   queriesUsed: string[];
 };
 
-function visibleCandidates(candidates: PersistedImportCandidate[], showHidden: boolean): PersistedImportCandidate[] {
-  return candidates.filter((c) => showHidden || !c.hidden || c.importStatus);
-}
-
 function filteredCandidates(
   candidates: PersistedImportCandidate[],
-  showHidden: boolean,
-  filter: ImportResultFilter,
+  tab: CandidateResultTab,
 ): PersistedImportCandidate[] {
-  return visibleCandidates(candidates, showHidden).filter((c) => resultFilterMatch(c, filter));
+  if (tab === "hidden") return candidates.filter((c) => c.hidden);
+  const visible = candidates.filter((c) => !c.hidden);
+  if (tab === "already") return visible.filter((c) => c.catalogMatchStatus === "already_published");
+  if (tab === "possible") return visible.filter((c) => c.catalogMatchStatus === "possible_duplicate");
+  return visible.filter((c) => (c.catalogMatchStatus ?? "new_candidate") === "new_candidate");
 }
 
 function groupByDomain(list: PersistedImportCandidate[]): Record<string, PersistedImportCandidate[]> {
@@ -87,18 +87,67 @@ function resultBadgeClass(status: ImportCandidateResultStatus): string {
   }
 }
 
-function resultFilterMatch(c: PersistedImportCandidate, filter: ImportResultFilter): boolean {
-  if (filter === "all") return true;
-  if (filter === "imported") return c.importStatus === "imported";
-  if (filter === "duplicates") return c.importStatus === "skipped_duplicate";
-  if (filter === "errors") return c.importStatus === "failed";
-  return c.importStatus === "skipped_invalid" || c.importStatus === "skipped_hidden";
+function catalogMatchBadgeClass(status: PersistedImportCandidate["catalogMatchStatus"]): string {
+  if (status === "already_published") return "bg-blue-50 text-blue-900";
+  if (status === "possible_duplicate") return "bg-amber-50 text-amber-900";
+  return "bg-emerald-50 text-emerald-900";
+}
+
+function catalogMatchLabel(status: PersistedImportCandidate["catalogMatchStatus"]): string {
+  if (status === "already_published") return "Уже в каталоге";
+  if (status === "possible_duplicate") return "Похожие";
+  return "Новый";
 }
 
 function resultState(status: ImportCandidateResultStatus): PersistedImportCandidate["state"] {
   if (status === "imported") return "imported";
   if (status === "skipped_hidden") return "removed";
   return "rejected";
+}
+
+function selectedCandidatesByRelevance(candidates: PersistedImportCandidate[]): PersistedImportCandidate[] {
+  return candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => candidate.state === "selected" && candidate.catalogMatchStatus !== "already_published")
+    .sort((a, b) => b.candidate.relevanceScore - a.candidate.relevanceScore || a.index - b.index)
+    .map(({ candidate }) => candidate);
+}
+
+function normalizeResultTab(value: unknown): CandidateResultTab {
+  return value === "already" || value === "possible" || value === "hidden" || value === "new" ? value : "new";
+}
+
+function searchResultMatchesInput(
+  session: CatalogImportCandidateSession | null,
+  query: string,
+  city: string,
+  categorySlug: string,
+): boolean {
+  if (!session) return false;
+  return (
+    session.query.trim() === query.trim() &&
+    session.city.trim() === city.trim() &&
+    session.categorySlug.trim().toLowerCase() === categorySlug.trim().toLowerCase()
+  );
+}
+
+async function readApiJson<T extends Record<string, unknown>>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { message: text.slice(0, 300) } as unknown as T;
+  }
+}
+
+function apiErrorMessage(status: number, data: { message?: string; error?: string }, fallback: string): string {
+  const message = data.message?.trim();
+  const error = data.error?.trim();
+  if (message && error) return `${fallback}: HTTP ${status} · ${message} (${error})`;
+  if (message) return `${fallback}: HTTP ${status} · ${message}`;
+  if (error) return `${fallback}: HTTP ${status} · ${error}`;
+  return `${fallback}: HTTP ${status}`;
 }
 
 function readStoredImportCandidatesState(): StoredImportCandidatesState | null {
@@ -113,7 +162,7 @@ function readStoredImportCandidatesState(): StoredImportCandidatesState | null {
       categorySlug: String(parsed.categorySlug ?? "auto"),
       session: parsed.session ?? null,
       showHidden: Boolean(parsed.showHidden),
-      resultFilter: parsed.resultFilter ?? "all",
+      resultFilter: normalizeResultTab(parsed.resultFilter),
       queriesUsed: Array.isArray(parsed.queriesUsed) ? parsed.queriesUsed.map(String) : [],
     };
   } catch {
@@ -172,13 +221,14 @@ export function AdminCatalogImportCandidatesSection({
   const [session, setSession] = useState<CatalogImportCandidateSession | null>(null);
   const [history, setHistory] = useState<CatalogImportCandidateHistoryItem[]>([]);
   const [showHidden, setShowHidden] = useState(false);
-  const [resultFilter, setResultFilter] = useState<ImportResultFilter>("all");
+  const [resultFilter, setResultFilter] = useState<CandidateResultTab>("new");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [queriesUsed, setQueriesUsed] = useState<string[]>([]);
   const [recentKeywords, setRecentKeywords] = useState<string[]>([]);
   const [keywordFocused, setKeywordFocused] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<number | null | undefined>(undefined);
+  const searchRequestSeq = useRef(0);
 
   useEffect(() => {
     setRecentKeywords(readRecentKeywords());
@@ -209,6 +259,7 @@ export function AdminCatalogImportCandidatesSection({
   }, []);
 
   const loadSession = useCallback((id?: number) => {
+    const startedAtSeq = searchRequestSeq.current;
     const url =
       id ?
         `/api/admin/catalogs/import/candidates?id=${id}`
@@ -216,6 +267,7 @@ export function AdminCatalogImportCandidatesSection({
     return fetch(url, { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
       .then((d: { session?: CatalogImportCandidateSession | null }) => {
+        if (startedAtSeq !== searchRequestSeq.current) return null;
         const s = d.session ?? null;
         if (s) {
           setSession(s);
@@ -249,6 +301,8 @@ export function AdminCatalogImportCandidatesSection({
 
   const cityLabel = catalogDiscoverCityLabel(location);
   const candidates = session?.candidates ?? [];
+  const isCurrentSearchResult = searchResultMatchesInput(session, query, cityLabel, categorySlug);
+  const showPreviousResultsLabel = Boolean(session && !isCurrentSearchResult);
 
   useEffect(() => {
     if (initialSessionId === undefined) return;
@@ -272,21 +326,45 @@ export function AdminCatalogImportCandidatesSection({
     ).length;
     return { all: candidates.length, imported, duplicates, errors, skipped };
   }, [candidates]);
+  const candidateCounts = useMemo(() => {
+    const currentCandidates = isCurrentSearchResult ? candidates : [];
+    const visible = currentCandidates.filter((c) => !c.hidden);
+    return {
+      found: currentCandidates.length,
+      new: visible.filter((c) => (c.catalogMatchStatus ?? "new_candidate") === "new_candidate").length,
+      already: visible.filter((c) => c.catalogMatchStatus === "already_published").length,
+      possible: visible.filter((c) => c.catalogMatchStatus === "possible_duplicate").length,
+      hidden: currentCandidates.filter((c) => c.hidden).length,
+    };
+  }, [candidates, isCurrentSearchResult]);
   const hasImportResults =
     resultCounts.imported + resultCounts.duplicates + resultCounts.errors + resultCounts.skipped > 0;
-  const filteredCandidatesList = filteredCandidates(candidates, showHidden, resultFilter);
+  const filteredCandidatesList =
+    isCurrentSearchResult ?
+      filteredCandidates(candidates, resultFilter)
+    : candidates.filter((c) => !c.hidden);
   const displayGroups = groupByDomain(filteredCandidatesList);
-  const hiddenCount = candidates.filter((c) => c.hidden).length;
+  const hiddenCount = candidateCounts.hidden;
 
   const selectedCount = useMemo(
-    () => candidates.filter((c) => c.state === "selected").length,
+    () =>
+      candidates.filter(
+        (c) => c.state === "selected" && !c.hidden && c.catalogMatchStatus !== "already_published",
+      ).length,
     [candidates],
   );
 
   const selectableUrls = useMemo(
     () =>
       filteredCandidatesList
-        .filter((c) => !c.importStatus && c.state !== "imported" && c.state !== "removed")
+        .filter(
+          (c) =>
+            !c.hidden &&
+            c.catalogMatchStatus !== "already_published" &&
+            !c.importStatus &&
+            c.state !== "imported" &&
+            c.state !== "removed",
+        )
         .map((c) => c.url),
     [filteredCandidatesList],
   );
@@ -321,8 +399,14 @@ export function AdminCatalogImportCandidatesSection({
   }
 
   async function runSearch() {
+    const requestSeq = searchRequestSeq.current + 1;
+    searchRequestSeq.current = requestSeq;
     setBusy(true);
     setMessage(null);
+    setSession(null);
+    setResultFilter("new");
+    setQueriesUsed([]);
+    setShowHidden(false);
     try {
       const r = await fetch("/api/admin/catalogs/discover/search", {
         method: "POST",
@@ -338,7 +422,7 @@ export function AdminCatalogImportCandidatesSection({
           region: location?.region ?? "",
         }),
       });
-      const d = (await r.json()) as {
+      const d = await readApiJson<{
         ok?: boolean;
         message?: string;
         error?: string;
@@ -348,9 +432,11 @@ export function AdminCatalogImportCandidatesSection({
         count?: number;
         hiddenCount?: number;
         queriesUsed?: string[];
-      };
+      }>(r);
+      if (requestSeq !== searchRequestSeq.current) return;
       if (!r.ok) {
-        setMessage(d.message ?? d.error ?? "Ошибка поиска");
+        setSession(null);
+        setMessage(apiErrorMessage(r.status, d, "Ошибка поиска"));
         return;
       }
       const nextSession =
@@ -369,24 +455,37 @@ export function AdminCatalogImportCandidatesSection({
           updatedAt: new Date().toISOString(),
         };
       setSession(nextSession);
-      setResultFilter("all");
+      setResultFilter("new");
       setQueriesUsed(d.queriesUsed ?? []);
       const nextKeywords = addRecentKeyword(recentKeywords, query);
       setRecentKeywords(nextKeywords);
       writeRecentKeywords(nextKeywords);
-      const nextHiddenCount = nextSession.candidates.filter((c) => c.hidden).length;
-      const nextShownCount = filteredCandidates(nextSession.candidates, showHidden, "all").length;
-      setMessage(`Показано: ${nextShownCount} · скрыто: ${nextHiddenCount}`);
+      const visible = nextSession.candidates.filter((c) => !c.hidden);
+      const nextCounts = {
+        found: nextSession.candidates.length,
+        new: visible.filter((c) => (c.catalogMatchStatus ?? "new_candidate") === "new_candidate").length,
+        already: visible.filter((c) => c.catalogMatchStatus === "already_published").length,
+        possible: visible.filter((c) => c.catalogMatchStatus === "possible_duplicate").length,
+        hidden: nextSession.candidates.filter((c) => c.hidden).length,
+      };
+      setMessage(
+        `Найдено: ${nextCounts.found} · Новые: ${nextCounts.new} · Уже в каталоге: ${nextCounts.already} · Похожие: ${nextCounts.possible} · Скрыто: ${nextCounts.hidden}`,
+      );
       loadHistory();
-    } catch {
-      setMessage("Ошибка сети");
+    } catch (e) {
+      if (requestSeq !== searchRequestSeq.current) return;
+      setSession(null);
+      const reason = e instanceof Error && e.message ? `: ${e.message}` : "";
+      setMessage(`Ошибка сети при запросе /api/admin/catalogs/discover/search${reason}`);
     } finally {
-      setBusy(false);
+      if (requestSeq === searchRequestSeq.current) setBusy(false);
     }
   }
 
   async function sendToImport() {
-    const urls = candidates.filter((c) => c.state === "selected").map((c) => c.url);
+    const selectedCandidates = selectedCandidatesByRelevance(candidates);
+    const requestedUrlCount = selectedCandidates.length;
+    const urls = selectedCandidates.slice(0, MAX_URLS_PER_BATCH).map((c) => c.url);
     if (urls.length === 0) return;
     setBusy(true);
     try {
@@ -396,6 +495,7 @@ export function AdminCatalogImportCandidatesSection({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           urls,
+          requestedCount: requestedUrlCount,
           categorySlug,
           city: cityLabel,
           searchQuery: queriesUsed.join(" | ") || query,
@@ -421,9 +521,13 @@ export function AdminCatalogImportCandidatesSection({
         }[];
         errors?: { url: string; error: string }[];
         session?: CatalogImportCandidateSession;
+        requestedCount?: number;
+        processedCount?: number;
+        processedLimit?: number;
+        truncated?: boolean;
       };
       if (!r.ok) {
-        setMessage(d.error ?? "Ошибка");
+        setMessage(d.error && !/^[A-Z0-9_]+$/.test(d.error) ? d.error : "Ошибка импорта");
         return;
       }
       if (d.session) {
@@ -449,8 +553,13 @@ export function AdminCatalogImportCandidatesSection({
         });
       }
       const summary = d.summary ?? { imported: d.count ?? 0, duplicates: 0, errors: d.errors?.length ?? 0, skipped: 0 };
+      const processedCount = d.processedCount ?? urls.length;
+      const limitNotice =
+        d.truncated || requestedUrlCount > processedCount ?
+          `Найдено слишком много ссылок, обработаны первые ${processedCount} наиболее подходящих. `
+        : "";
       setMessage(
-        `Импортировано: ${summary.imported} · Дубликаты: ${summary.duplicates} · Ошибки: ${summary.errors} · Пропущено: ${summary.skipped}`,
+        `${limitNotice}Импортировано: ${summary.imported} · Дубликаты: ${summary.duplicates} · Ошибки: ${summary.errors} · Пропущено: ${summary.skipped}`,
       );
     } catch {
       setMessage("Ошибка сети");
@@ -464,6 +573,7 @@ export function AdminCatalogImportCandidatesSection({
     const set = new Set(urls);
     const next = candidates.map((c) => {
       if (!set.has(c.url)) return c;
+      if (c.hidden || c.catalogMatchStatus === "already_published") return c;
       if (c.state === "imported" || c.state === "rejected" || c.state === "removed") return c;
       return { ...c, state: selected ? ("selected" as const) : ("found" as const) };
     });
@@ -473,7 +583,7 @@ export function AdminCatalogImportCandidatesSection({
 
   function toggleUrl(url: string) {
     const c = candidates.find((x) => x.url === url);
-    if (!c || c.importStatus || c.state === "imported") return;
+    if (!c || c.hidden || c.catalogMatchStatus === "already_published" || c.importStatus || c.state === "imported") return;
     setSelection([url], c.state !== "selected");
   }
 
@@ -630,22 +740,15 @@ export function AdminCatalogImportCandidatesSection({
           <p className="mt-3 text-sm font-medium text-black/70">{message}</p>
         : null}
 
-        {hiddenCount > 0 ?
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-            <span className="text-black/55">Скрыто нерелевантных: {hiddenCount}</span>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={showHidden}
-                onChange={(e) => setShowHidden(e.target.checked)}
-              />
-              Показать скрытые
-            </label>
-          </div>
+        {isCurrentSearchResult ?
+          <p className="mt-3 text-sm text-black/55">
+            Найдено: {candidateCounts.found} · Новые: {candidateCounts.new} · Уже в каталоге:{" "}
+            {candidateCounts.already} · Похожие: {candidateCounts.possible} · Скрыто: {candidateCounts.hidden}
+          </p>
         : null}
       </section>
 
-      {filteredCandidatesList.length > 0 ?
+      {session ?
         <section className="w-full min-w-0 space-y-3 overflow-visible sm:space-y-4">
           {hasImportResults ?
             <div className="rounded-2xl border border-black/10 bg-white p-3 text-sm">
@@ -653,34 +756,16 @@ export function AdminCatalogImportCandidatesSection({
                 Импортировано: {resultCounts.imported} · Дубликаты: {resultCounts.duplicates} · Ошибки:{" "}
                 {resultCounts.errors} · Пропущено: {resultCounts.skipped}
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {[
-                  { id: "all" as const, label: "Все", count: resultCounts.all },
-                  { id: "imported" as const, label: "Импортированные", count: resultCounts.imported },
-                  { id: "duplicates" as const, label: "Дубликаты", count: resultCounts.duplicates },
-                  { id: "errors" as const, label: "Ошибки", count: resultCounts.errors },
-                  { id: "skipped" as const, label: "Пропущенные", count: resultCounts.skipped },
-                ].map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setResultFilter(f.id)}
-                    className={[
-                      "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                      resultFilter === f.id ?
-                        "border-black/20 bg-black/[0.06] text-black"
-                      : "border-black/10 bg-white text-black/55 hover:text-black/75",
-                    ].join(" ")}
-                  >
-                    {f.label} ({f.count})
-                  </button>
-                ))}
-              </div>
             </div>
           : null}
 
           <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-semibold">Кандидаты</h2>
+            <div>
+              <h2 className="text-lg font-semibold">Кандидаты</h2>
+              {showPreviousResultsLabel ?
+                <p className="text-sm font-medium text-amber-800">Предыдущие результаты</p>
+              : null}
+            </div>
             <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
               <button
                 type="button"
@@ -724,6 +809,31 @@ export function AdminCatalogImportCandidatesSection({
             </div>
           </div>
 
+          {isCurrentSearchResult ?
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: "new" as const, label: "Новые", count: candidateCounts.new },
+                { id: "already" as const, label: "Уже в каталоге", count: candidateCounts.already },
+                { id: "possible" as const, label: "Похожие", count: candidateCounts.possible },
+                { id: "hidden" as const, label: "Скрытые", count: candidateCounts.hidden },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setResultFilter(f.id)}
+                  className={[
+                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    resultFilter === f.id ?
+                      "border-black/20 bg-black/[0.06] text-black"
+                    : "border-black/10 bg-white text-black/55 hover:text-black/75",
+                  ].join(" ")}
+                >
+                  {f.label} ({f.count})
+                </button>
+              ))}
+            </div>
+          : null}
+
           {Object.keys(displayGroups).length > 0 ?
             Object.entries(displayGroups)
               .sort(([, a], [, b]) => (b[0]?.relevanceScore ?? 0) - (a[0]?.relevanceScore ?? 0))
@@ -739,10 +849,11 @@ export function AdminCatalogImportCandidatesSection({
                           type="checkbox"
                           checked={c.state === "selected" || c.state === "imported"}
                           disabled={
+                            c.catalogMatchStatus === "already_published" ||
+                            c.hidden ||
                             Boolean(c.importStatus) ||
                             c.state === "imported" ||
-                            c.state === "removed" ||
-                            (c.hidden && !showHidden)
+                            c.state === "removed"
                           }
                           onChange={() => toggleUrl(c.url)}
                           className="mt-1 shrink-0"
@@ -767,6 +878,9 @@ export function AdminCatalogImportCandidatesSection({
                                 Можно редактировать
                               </span>
                             : null}
+                            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${catalogMatchBadgeClass(c.catalogMatchStatus)}`}>
+                              {catalogMatchLabel(c.catalogMatchStatus)}
+                            </span>
                             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-900">
                               {c.relevanceScore}
                             </span>
@@ -781,6 +895,22 @@ export function AdminCatalogImportCandidatesSection({
                             : null}
                           </div>
                           <p className="line-clamp-2 text-black/55">{c.snippet}</p>
+                          {c.existingCompany ?
+                            <div className="mt-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-950">
+                              <p className="font-medium">В каталоге: {c.existingCompany.name}</p>
+                              <p className="mt-0.5 text-blue-950/70">
+                                {c.existingCompany.categoryTitle || c.existingCompany.categorySlug} · {c.existingCompany.city}
+                              </p>
+                              <a
+                                href={c.existingCompany.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-1 inline-flex font-semibold underline"
+                              >
+                                Открыть в каталоге
+                              </a>
+                            </div>
+                          : null}
                           {c.importStatus === "skipped_duplicate" && (c.duplicateName || c.duplicateHref) ?
                             <p className="mt-1 text-xs text-blue-900/80">
                               Дубликат:{" "}
@@ -817,8 +947,6 @@ export function AdminCatalogImportCandidatesSection({
               Нет кандидатов в выбранном фильтре
             </p>}
         </section>
-      : session ?
-        <p className="text-sm text-black/50">Нет видимых кандидатов. Включите «Показать скрытые» или выполните поиск.</p>
       : null}
     </div>
   );

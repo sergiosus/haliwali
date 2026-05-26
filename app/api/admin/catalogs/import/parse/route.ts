@@ -1,7 +1,6 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
 import {
-  MAX_URLS_PER_BATCH,
   parseUrlList,
   processCsvInput,
   processTextInput,
@@ -84,9 +83,6 @@ export async function POST(req: Request) {
     const urls = kind === "urls" ? parseUrlList(text || url) : [url || text].filter((u) => /^https?:\/\//i.test(u));
     if (urls.length === 0) {
       return NextResponse.json({ ok: false, error: "URL_REQUIRED" }, { status: 400 });
-    }
-    if (urls.length > MAX_URLS_PER_BATCH) {
-      return NextResponse.json({ ok: false, error: "TOO_MANY_URLS", max: MAX_URLS_PER_BATCH }, { status: 400 });
     }
 
     const { drafts, errors } = await processUrlBatch(urls, defaults);

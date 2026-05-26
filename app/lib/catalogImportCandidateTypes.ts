@@ -1,6 +1,7 @@
 import type { RankedSearchCandidate } from "./catalogDiscoverRanking";
 
 export type ImportCandidateState = "found" | "selected" | "imported" | "rejected" | "removed";
+export type CatalogCandidateMatchStatus = "new_candidate" | "already_published" | "possible_duplicate";
 
 export type ImportCandidateResultStatus =
   | "imported"
@@ -11,6 +12,18 @@ export type ImportCandidateResultStatus =
 
 export type PersistedImportCandidate = RankedSearchCandidate & {
   state: ImportCandidateState;
+  catalogMatchStatus?: CatalogCandidateMatchStatus;
+  existingCompany?: {
+    id: number;
+    name: string;
+    categorySlug: string;
+    categoryTitle: string;
+    city: string;
+    slug: string;
+    href: string;
+    website?: string | null;
+  } | null;
+  catalogMatchReason?: string | null;
   importStatus?: ImportCandidateResultStatus;
   importReason?: string | null;
   draftId?: number | null;

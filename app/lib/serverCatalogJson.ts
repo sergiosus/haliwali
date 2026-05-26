@@ -210,6 +210,7 @@ export async function jsonListAllCompaniesAdmin(): Promise<CatalogCompanyAdminIt
     ...toListItem(c),
     id: c.id,
     website: c.website,
+    contacts: c.contacts,
   }));
 }
 

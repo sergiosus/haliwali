@@ -28,8 +28,9 @@ import {
   parsedImportSource,
   upsertExtractedDraftsWithMeta,
 } from "./serverCatalogImportPipeline";
+import { MAX_URLS_PER_BATCH } from "./catalogImportLimits";
 
-export const MAX_URLS_PER_BATCH = 20;
+export { MAX_URLS_PER_BATCH };
 
 export function parseUrlList(text: string): string[] {
   return text

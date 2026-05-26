@@ -21,8 +21,8 @@ export default async function AdminPage({
   return (
     <div className="min-h-full bg-white text-black">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <header className="flex items-center justify-between py-6">
-          <div className="leading-tight">
+        <header className="flex flex-wrap items-center justify-between gap-3 py-6">
+          <div className="min-w-0 leading-tight">
             <div className="font-semibold tracking-tight">Админка Haliwali</div>
             <div className="text-sm text-black/60">Модерация задач, услуг и товаров</div>
           </div>

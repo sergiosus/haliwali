@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PasswordChangeModal } from "../components/PasswordChangeModal";
 import {
   getPublicUserName,
   looksLikeTechnicalUserId,
@@ -148,8 +147,8 @@ function ListingCard({
   );
 }
 
-type AdminTab = "ads" | "reports" | "support" | "users" | "catalog";
-type ListingModerationTab = "pending" | "published" | "rejected";
+type AdminTab = "ads" | "support" | "users" | "catalog";
+type ListingModerationTab = "pending" | "published" | "rejected" | "reports";
 
 const supportCategoryRu: Record<string, string> = {
   listing_problem: "Проблема с объявлением",
@@ -312,7 +311,6 @@ function Tabs({
 }) {
   const tabs: Array<{ key: AdminTab; label: string; counter?: number }> = [
     { key: "ads", label: "Объявления" },
-    { key: "reports", label: "Жалобы", counter: counts.reports },
     { key: "support", label: "Обращения", counter: counts.support },
     { key: "users", label: "Пользователи", counter: counts.users },
     { key: "catalog", label: "Каталоги компаний" },
@@ -333,9 +331,7 @@ function Tabs({
             ].join(" ")}
           >
             {t.label}{" "}
-            {t.key === "reports" ? (
-              <span className="text-black/50">({t.counter ?? 0})</span>
-            ) : t.key === "users" ? (
+            {t.key === "users" ? (
               <span className="text-black/50">({t.counter ?? 0})</span>
             ) : t.key === "support" ? (
               <span className="text-black/50">({t.counter ?? 0})</span>
@@ -472,6 +468,16 @@ export default function AdminClient() {
     if (listingTab === "published") return sorted.filter((l) => l.status === "auto" || l.status === "approved");
     return [];
   }, [sorted, tab, listingTab]);
+
+  const listingModerationTabs = useMemo(
+    (): Array<{ key: ListingModerationTab; label: string; count: number }> => [
+      { key: "pending", label: "На проверке", count: counts.pending },
+      { key: "published", label: "Опубликованные", count: counts.published },
+      { key: "rejected", label: "Отклонённые", count: counts.rejected },
+      { key: "reports", label: "Жалобы", count: counts.reports },
+    ],
+    [counts.pending, counts.published, counts.rejected, counts.reports],
+  );
 
   const bumpReports = useCallback(() => setReportsReload((n) => n + 1), []);
 
@@ -840,7 +846,6 @@ export default function AdminClient() {
 
   return (
     <div className="space-y-4">
-      <PasswordChangeModal apiPath="/api/admin/change-password" dialogTitle="Смена пароля администратора" />
       <Tabs value={tab} onChange={setTab} counts={counts} />
 
       {tab === "users" ? (
@@ -1463,8 +1468,29 @@ export default function AdminClient() {
             </div>
           ) : null}
         </div>
-      ) : tab === "reports" ? (
-        <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 md:grid-cols-2">
+      ) : tab === "ads" && listingTab === "reports" ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {listingModerationTabs.map(({ key, label, count }) => {
+              const active = listingTab === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setListingTab(key)}
+                  className={[
+                    "h-9 rounded-2xl border px-4 text-sm font-semibold transition-colors",
+                    active ?
+                      "border-black/15 bg-black/5 text-black"
+                    : "border-black/10 bg-white text-black/70 hover:bg-black/5",
+                  ].join(" ")}
+                >
+                  {label} <span className="text-black/50">({count})</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 md:grid-cols-2">
           {reports
             .slice()
             .sort((a, b) => b.createdAt - a.createdAt)
@@ -1615,17 +1641,12 @@ export default function AdminClient() {
               <div className="text-sm text-black/70">Пока нет жалоб.</div>
             </div>
           ) : null}
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ["pending", "На проверке", counts.pending],
-                ["published", "Опубликованные", counts.published],
-                ["rejected", "Отклонённые", counts.rejected],
-              ] as const
-            ).map(([key, label, count]) => {
+            {listingModerationTabs.map(({ key, label, count }) => {
               const active = listingTab === key;
               return (
                 <button

@@ -340,6 +340,46 @@ export async function pgGetRelatedCompanies(
   return items.filter((c) => c.slug !== excludeSlug).slice(0, limit);
 }
 
+export async function pgListCatalogCompaniesSitemap(): Promise<CatalogCompanyListItem[]> {
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    slug: string;
+    name: string;
+    category_slug: string;
+    category_title: string;
+    city: string;
+    service_cities: unknown;
+    address: string;
+    description: string;
+    logo_url: string | null;
+    website: string | null;
+    phone: string | null;
+    origin: string | null;
+    profile_status: string | null;
+    rating: string | null;
+    latitude: number | null;
+    longitude: number | null;
+  }>(`
+    SELECT co.slug, co.name, co.category_slug, cat.title AS category_title,
+           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.origin, co.profile_status, co.rating,
+           loc.latitude, loc.longitude,
+           (
+             SELECT cc.value
+             FROM catalog_company_contacts cc
+             WHERE cc.company_id = co.id AND cc.contact_type = 'phone'
+             ORDER BY cc.sort_order ASC, cc.id ASC
+             LIMIT 1
+           ) AS phone
+    FROM catalog_companies co
+    JOIN catalog_categories cat ON cat.slug = co.category_slug
+    LEFT JOIN catalog_company_locations loc ON loc.company_id = co.id
+    WHERE co.is_published = TRUE
+    ORDER BY co.updated_at DESC, co.id DESC
+    LIMIT 50000
+  `);
+  return rows.map((row) => toCompanyListItem(row));
+}
+
 export async function pgEnsureCategoriesSeeded(): Promise<void> {
   const pool = getPool();
   await pool.query(`

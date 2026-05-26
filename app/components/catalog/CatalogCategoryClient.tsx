@@ -134,7 +134,12 @@ export function CatalogCategoryClient({
 
       {companies.length === 0 ?
         <div className="rounded-2xl border border-black/[0.06] bg-white px-4 py-10 text-center">
-          <p className="text-sm text-black/50">Пока нет компаний в этой категории</p>
+          <p className="text-base font-semibold text-black/75">Категория «{category.title}» пока формируется</p>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-black/50">
+            Здесь будут компании направления «{category.title}»: контакты, сайты, телефоны и адреса.
+            {category.subtitle ? ` ${category.subtitle}.` : ""} Если вы представляете компанию из этой сферы,
+            отправьте карточку на модерацию.
+          </p>
           <div className="mt-5">{addCompanyForm}</div>
         </div>
       : view === "map" ?

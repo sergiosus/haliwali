@@ -59,6 +59,13 @@ export async function getRelatedCatalogCompanies(
   );
 }
 
+export async function listCatalogCompaniesSitemap(): Promise<CatalogCompanyListItem[]> {
+  return withPg(
+    () => pg.pgListCatalogCompaniesSitemap(),
+    () => json.jsonListCatalogCompaniesSitemap(),
+  );
+}
+
 export async function requestCatalogCompanyClaim(input: {
   slug: string;
   userId: string;

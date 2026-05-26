@@ -201,6 +201,14 @@ export async function jsonGetRelatedCompanies(
   return items.filter((c) => c.slug !== excludeSlug).slice(0, limit);
 }
 
+export async function jsonListCatalogCompaniesSitemap(): Promise<CatalogCompanyListItem[]> {
+  const store = await readStore();
+  return store.companies
+    .filter((c) => c.isPublished !== false)
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"))
+    .map((c) => toListItem(c, ""));
+}
+
 export async function jsonRequestCatalogCompanyClaim(input: {
   slug: string;
   userId: string;

@@ -6,7 +6,11 @@ import {
   getCatalogCompanyBySlug,
   getRelatedCatalogCompanies,
 } from "../../../lib/serverCatalogStore";
-import { siteUrl } from "../../../lib/siteUrl";
+import {
+  catalogCompanySeoDescription,
+  catalogCompanySeoTitle,
+  catalogCompanyUrl,
+} from "../../../lib/catalogSeo";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +20,12 @@ export async function generateMetadata(props: {
   const { category, slug } = await props.params;
   await ensureCatalogReady();
   const company = await getCatalogCompanyBySlug(slug);
-  if (!company || company.categorySlug !== category) return { title: "Компания — Haliwali" };
-  const url = `${siteUrl()}/catalogs/${encodeURIComponent(category)}/${encodeURIComponent(slug)}`;
-  const title = `${company.name} — ${company.city} | Haliwali`;
-  const description =
-    company.description.slice(0, 160) || `${company.name}, ${company.categoryTitle}, ${company.city}`;
+  if (!company || company.categorySlug !== category) {
+    return { title: "Компания — Haliwali", robots: { index: false, follow: false } };
+  }
+  const url = catalogCompanyUrl(company);
+  const title = catalogCompanySeoTitle(company);
+  const description = catalogCompanySeoDescription(company);
   return {
     title,
     description,
@@ -42,7 +47,7 @@ export default async function CatalogCategoryCompanyPage(props: {
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-b from-[#fff8f3] via-white to-white">
       <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
-        <CatalogCompanyProfileView company={company} related={related} />
+        <CatalogCompanyProfileView company={company} related={related} canonicalUrl={catalogCompanyUrl(company)} />
       </div>
     </div>
   );

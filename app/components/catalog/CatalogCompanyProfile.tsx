@@ -54,9 +54,11 @@ const PROOF_METHOD_LABELS: Record<ClaimFormState["proofMethod"], string> = {
 export function CatalogCompanyProfileView({
   company,
   related,
+  canonicalUrl,
 }: {
   company: CatalogCompanyProfile;
   related: CatalogCompanyListItem[];
+  canonicalUrl: string;
 }) {
   const router = useRouter();
   const visual = catalogCategoryVisual(company.categorySlug);
@@ -115,13 +117,15 @@ export function CatalogCompanyProfileView({
     "@type": "LocalBusiness",
     name: company.name,
     description: company.description,
+    url: canonicalUrl,
     address: {
       "@type": "PostalAddress",
-      streetAddress: company.address,
-      addressLocality: company.city,
+      ...(company.address ? { streetAddress: company.address } : {}),
+      ...(company.city ? { addressLocality: company.city } : {}),
+      addressCountry: "RU",
     },
-    url: company.website ?? undefined,
-    telephone: phone,
+    ...(phone ? { telephone: phone } : {}),
+    ...(company.website ? { sameAs: company.website } : {}),
   };
 
   return (

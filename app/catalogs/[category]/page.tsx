@@ -8,7 +8,11 @@ import {
   listCatalogCategories,
   searchCatalogCompanies,
 } from "../../lib/serverCatalogStore";
-import { siteUrl } from "../../lib/siteUrl";
+import {
+  catalogCategorySeoDescription,
+  catalogCategorySeoTitle,
+  catalogCategoryUrl,
+} from "../../lib/catalogSeo";
 import { getUserIdFromSessionCookie } from "../../lib/serverSession";
 
 export const dynamic = "force-dynamic";
@@ -20,9 +24,9 @@ export async function generateMetadata(props: {
   await ensureCatalogReady();
   const cat = await getCatalogCategory(slug);
   if (!cat) return { title: "Каталог — Haliwali" };
-  const url = `${siteUrl()}/catalogs/${encodeURIComponent(slug)}`;
-  const title = `${cat.title} — каталог компаний | Haliwali`;
-  const description = `${cat.subtitle}. Компании в категории «${cat.title}» на Haliwali.`;
+  const url = catalogCategoryUrl(slug);
+  const title = catalogCategorySeoTitle(cat);
+  const description = catalogCategorySeoDescription(cat);
   return {
     title,
     description,

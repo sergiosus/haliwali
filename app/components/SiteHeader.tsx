@@ -482,22 +482,6 @@ export function SiteHeader() {
             {chatUnreadTotal > 0 ? `Сообщения (${chatUnreadTotal})` : "Сообщения"}
           </Link>
           <Link
-            href="/account?tab=workspace"
-            onClick={(e) => {
-              if (isAccountMenuDebugOn()) {
-                console.log("[ACCOUNT_MENU_ITEM_CLICK]", {
-                  label: "Рабочее пространство",
-                  href: "/account?tab=workspace",
-                  defaultPrevented: e.defaultPrevented,
-                });
-              }
-              queueMicrotask(() => closeAccountMenu());
-            }}
-            className="flex h-10 w-full items-center rounded-lg px-3 text-left text-sm text-black/80 hover:bg-black/[0.04]"
-          >
-            Рабочее пространство
-          </Link>
-          <Link
             href="/account?tab=profile"
             onClick={(e) => {
               if (isAccountMenuDebugOn()) {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   type ChangeEvent,
   type ReactNode,
@@ -31,7 +31,6 @@ import { getSiteIdentityLabel, USER_DISPLAY_FALLBACK } from "../lib/userDisplayN
 import { formatListingCardAuthor } from "../lib/listingCardAuthorDisplay";
 import { normalizeListingId } from "../lib/listingId";
 import { appendReturnUrlQuery } from "../lib/returnNavigation";
-import { AccountWorkspacePanel } from "../components/account/AccountWorkspacePanel";
 import { SupportCabinetPanel } from "../support/page";
 
 /** Центрированная колонка для сетки объявлений (max ~900px, на узких экранах — с боковым отступом). */
@@ -68,7 +67,7 @@ const favoritesBottomSectionClass =
   "mt-auto flex flex-col gap-2 border-t border-black/[0.06] pt-3 max-md:gap-2";
 
 type StatusTab = "all" | "pending" | "published" | "rejected" | "trash" | "archive";
-type MainTab = "ads" | "favorites" | "profile" | "messages" | "workspace" | "settings" | "support";
+type MainTab = "ads" | "favorites" | "profile" | "messages" | "settings" | "support";
 
 type ChatConversationSummary = {
   conversationId: string;
@@ -256,15 +255,18 @@ export default function AccountPage() {
 
 function AccountPageInner() {
   const auth = useAuth();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab");
+  const [workspaceMovedNotice, setWorkspaceMovedNotice] = useState(
+    () => initialTab === "workspace",
+  );
   const [mainTab, setMainTab] = useState<MainTab>(() => {
     if (initialTab === "favorites") return "favorites";
     if (initialTab === "profile") return "profile";
-    if (initialTab === "messages") return "messages";
+    if (initialTab === "messages" || initialTab === "workspace") return "messages";
     if (initialTab === "settings") return "settings";
     if (initialTab === "support") return "support";
-    if (initialTab === "workspace") return "workspace";
     return "ads";
   });
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
@@ -373,13 +375,18 @@ function AccountPageInner() {
 
   useEffect(() => {
     const t = searchParams.get("tab");
+    if (t === "workspace") {
+      setMainTab("messages");
+      setWorkspaceMovedNotice(true);
+      router.replace("/account?tab=messages", { scroll: false });
+      return;
+    }
     if (t === "favorites") setMainTab("favorites");
     else if (t === "profile") setMainTab("profile");
     else if (t === "messages") setMainTab("messages");
     else if (t === "settings") setMainTab("settings");
     else if (t === "support") setMainTab("support");
-    else if (t === "workspace") setMainTab("workspace");
-  }, [searchParams]);
+  }, [searchParams, router]);
 
   useEffect(() => {
     if (auth.status !== "ready" || !auth.userId) {
@@ -778,7 +785,6 @@ function AccountPageInner() {
                 active={mainTab === "messages"}
                 onClick={() => setMainTab("messages")}
               />
-              <TabButton label="Рабочее пространство" active={mainTab === "workspace"} onClick={() => setMainTab("workspace")} />
               <TabButton label="Профиль" active={mainTab === "profile"} onClick={() => setMainTab("profile")} />
               <TabButton label="Поддержка" active={mainTab === "support"} onClick={() => setMainTab("support")} />
               <TabButton label="Настройки" active={mainTab === "settings"} onClick={() => setMainTab("settings")} />
@@ -1054,12 +1060,13 @@ function AccountPageInner() {
                     <div className="text-sm text-red-700">{deleteActionError}</div>
                   ) : null}
                 </div>
-              ) : mainTab === "workspace" ? (
-                <div className="pwa-workspace-focus">
-                  <AccountWorkspacePanel authed={auth.status === "ready" && Boolean(auth.userId?.trim())} />
-                </div>
               ) : mainTab === "messages" ? (
-                <div className="pwa-workspace-focus">
+                <div className="pwa-messages-focus">
+                {workspaceMovedNotice ? (
+                  <div className="mb-3 rounded-2xl border border-orange-100 bg-orange-50/80 px-3 py-2.5 text-sm text-orange-950">
+                    Функция перенесена в сообщения. Откройте чат — статус, заметки и AI summary внутри переписки.
+                  </div>
+                ) : null}
                 {chatsLoading && chatRows.length === 0 ? (
                   <div className="text-sm text-black/60">Загрузка…</div>
                 ) : chatRows.length === 0 ? (

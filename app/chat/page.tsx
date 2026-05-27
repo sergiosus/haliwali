@@ -2739,7 +2739,7 @@ function ChatInner() {
                 aria-expanded={crmOpen}
               >
                 <div className="min-w-0">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-black/40">CRM</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-black/40">По чату</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-black/55">
                     {aiCrmIntel && hasChatAiCrmSummaryContent(aiCrmIntel) ? (
                       <span className="rounded-full border border-orange-100 bg-orange-50 px-2 py-0.5 font-medium text-orange-900">
@@ -2768,7 +2768,7 @@ function ChatInner() {
                 <div className="border-t border-black/10 px-4 py-3">
                   <div className="mb-4 rounded-2xl border border-orange-100/80 bg-orange-50/40 px-3 py-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-orange-900/80">
-                      AI CRM
+                      AI summary
                     </div>
                     {aiCrmIntelLoading ? (
                       <div className="mt-2 text-sm text-black/50">Загрузка аналитики…</div>
@@ -2812,13 +2812,13 @@ function ChatInner() {
                       </dl>
                     ) : (
                       <p className="mt-2 text-sm text-black/50">
-                        Запустите AI summary в меню чата, чтобы обновить CRM-аналитику.
+                        Запустите AI summary в меню чата, чтобы обновить краткий итог переписки.
                       </p>
                     )}
                   </div>
                   <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
                     <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
-                      Статус
+                      Статус клиента
                       <select
                         value={crmState.status}
                         disabled={crmLoading || crmSaving}
@@ -2857,10 +2857,19 @@ function ChatInner() {
                         className="mt-1.5 w-full resize-y rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm font-normal normal-case leading-relaxed tracking-normal text-black/80 outline-none placeholder:text-black/35 focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:opacity-60"
                       />
                     </label>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45 md:col-span-2">
+                      Напомнить позже
+                      <input
+                        type="text"
+                        disabled
+                        placeholder="Скоро — напоминание по этому чату"
+                        className="mt-1.5 h-10 w-full cursor-not-allowed rounded-xl border border-black/10 bg-black/[0.02] px-3 text-sm font-medium normal-case tracking-normal text-black/45 outline-none placeholder:text-black/35"
+                      />
+                    </label>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs text-black/45">
-                      {crmError ? <span className="text-red-700">{crmError}</span> : "CRM-поля приватны для вашего аккаунта."}
+                      {crmError ? <span className="text-red-700">{crmError}</span> : "Видно только вам, внутри этого чата."}
                       {crmSavedFlash ? <span className="ml-2 text-green-700">Сохранено</span> : null}
                     </div>
                     <button
@@ -2877,7 +2886,7 @@ function ChatInner() {
                       }
                       className="inline-flex h-9 items-center justify-center rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black/80 hover:bg-black/[0.04] disabled:opacity-60"
                     >
-                      {crmSaving ? "Сохранение…" : "Сохранить CRM"}
+                      {crmSaving ? "Сохранение…" : "Сохранить"}
                     </button>
                   </div>
                 </div>

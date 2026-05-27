@@ -9,10 +9,10 @@
   --site-header-height: 57px;
 }
 
-/* Installed PWA: more vertical room for chat/workspace; footer hidden only on focus routes. */
+/* Installed PWA: more vertical room for chat/messages; footer hidden only on focus routes. */
 @media (display-mode: standalone) {
   body:has(.pwa-chat-focus) footer,
-  body:has(.pwa-workspace-focus) footer {
+  body:has(.pwa-messages-focus) footer {
     display: none;
   }
 }

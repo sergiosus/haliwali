@@ -51,6 +51,8 @@ export type CatalogCompanyListItem = {
 export type CatalogCompanyAdminItem = CatalogCompanyListItem & {
   id: number;
   contacts?: CatalogCompanyContact[];
+  /** ISO timestamp when ownership was verified (admin only). */
+  verifiedAt?: string | null;
 };
 
 export type CatalogCompanyProfile = CatalogCompanyListItem & {

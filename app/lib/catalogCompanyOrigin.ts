@@ -75,6 +75,19 @@ export function catalogCompanyOriginLabel(view: CatalogCompanyOriginView): strin
   return "Публичный каталог";
 }
 
+/** Admin panel: short ownership labels (no CRM wording). */
+export function adminCatalogOwnershipBadgeLabel(input: {
+  origin?: CatalogCompanyOrigin | null;
+  profileStatus?: CatalogCompanyProfileStatus | null;
+  hasPendingClaim?: boolean;
+}): string {
+  const status = catalogCompanyOwnershipStatus(input);
+  if (status === "verified_owner") return "Подтверждённый владелец";
+  if (status === "owner_submitted") return "Добавил компанию";
+  if (status === "claim_pending") return "Заявка на подтверждение";
+  return "";
+}
+
 export function catalogCompanyOriginBadgeClass(view: CatalogCompanyOriginView): string {
   if (view === "verified_owner") return "bg-emerald-50 text-emerald-800";
   if (view === "owner_submitted" || view === "user_submitted") return "bg-sky-50 text-sky-800";

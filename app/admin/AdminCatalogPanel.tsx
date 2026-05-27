@@ -7,6 +7,7 @@ import { AdminCatalogClaimsSection } from "./AdminCatalogClaimsSection";
 import { AdminCatalogImportCandidatesSection } from "./catalogs/AdminCatalogImportCandidatesSection";
 import { AdminCatalogDraftsPanel } from "./catalogs/import/AdminCatalogDraftsPanel";
 import {
+  adminCatalogOwnershipBadgeLabel,
   catalogCompanyOriginBadgeClass,
   catalogCompanyOriginLabel,
   catalogCompanyOriginView,
@@ -273,6 +274,11 @@ export function AdminCatalogPanel() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{co.name}</span>
+                  {adminCatalogOwnershipBadgeLabel(co) ? (
+                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900">
+                      {adminCatalogOwnershipBadgeLabel(co)}
+                    </span>
+                  ) : null}
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${catalogCompanyOriginBadgeClass(catalogCompanyOriginView(co))}`}
                   >
@@ -357,6 +363,7 @@ export function AdminCatalogPanel() {
 
       {tab === "reports" ?
         <div className="space-y-2">
+          <p className="text-sm text-black/55">Жалобы на компании в каталоге (отдельно от жалоб на объявления).</p>
           {reports.length === 0 ?
             <p className="text-sm text-black/50">Жалоб пока нет</p>
           : reports.map((r) => (

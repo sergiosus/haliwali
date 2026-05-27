@@ -38,10 +38,10 @@ export function ChatAiTasksModal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Создать задачи"
+        aria-label="Напомнить"
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
-          <div className="text-base font-semibold text-black/90">Создать задачи</div>
+          <div className="text-base font-semibold text-black/90">Напомнить</div>
           <button
             type="button"
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-lg text-black/50 hover:bg-black/[0.05]"

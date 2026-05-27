@@ -896,13 +896,14 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     origin: string | null;
     profile_status: string | null;
     claimed_by_user_id: string | null;
+    verified_at: Date | null;
     rating: string | null;
     latitude: number | null;
     longitude: number | null;
     contacts: unknown;
   }>(`
     SELECT co.id, co.slug, co.name, co.category_slug, cat.title AS category_title,
-           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.origin, co.profile_status, co.claimed_by_user_id, co.rating,
+           co.city, co.service_cities, co.address, co.description, co.logo_url, co.website, co.origin, co.profile_status, co.claimed_by_user_id, co.verified_at, co.rating,
            loc.latitude, loc.longitude,
            COALESCE(
              jsonb_agg(jsonb_build_object('type', cc.contact_type, 'value', cc.value) ORDER BY cc.sort_order, cc.id)
@@ -921,6 +922,7 @@ export async function pgListAllCompaniesAdmin(): Promise<CatalogCompanyAdminItem
     ...toCompanyListItem(r),
     id: r.id,
     contacts: rowContacts(r.contacts),
+    verifiedAt: r.verified_at ? r.verified_at.toISOString() : null,
   }));
 }
 

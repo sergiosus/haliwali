@@ -31,6 +31,15 @@ import { getSiteIdentityLabel, USER_DISPLAY_FALLBACK } from "../lib/userDisplayN
 import { formatListingCardAuthor } from "../lib/listingCardAuthorDisplay";
 import { normalizeListingId } from "../lib/listingId";
 import { appendReturnUrlQuery } from "../lib/returnNavigation";
+import { ClientToolsSuggestionBanner } from "../components/account/ClientToolsSuggestionBanner";
+import { isEligibleForClientToolsSuggestion } from "../lib/clientToolsEligibility";
+import {
+  dismissClientToolsSuggestion,
+  getClientToolsEnabled,
+  getClientToolsSuggestionDismissed,
+  setClientToolsEnabled,
+  subscribeClientToolsPrefs,
+} from "../lib/clientToolsPrefs";
 import { SupportCabinetPanel } from "../support/page";
 
 /** Центрированная колонка для сетки объявлений (max ~900px, на узких экранах — с боковым отступом). */
@@ -306,6 +315,8 @@ function AccountPageInner() {
   const [chatRows, setChatRows] = useState<ChatConversationSummary[]>([]);
   const [chatsUnreadTotal, setChatsUnreadTotal] = useState(0);
   const [chatsLoading, setChatsLoading] = useState(false);
+  const [clientToolsEnabled, setClientToolsEnabledState] = useState(false);
+  const [clientToolsSuggestionDismissed, setClientToolsSuggestionDismissedState] = useState(false);
   /** `identityLabel` из GET /api/users/.../public (имя → email-префикс → ник). */
   const [peerPublicLabels, setPeerPublicLabels] = useState<Record<string, string>>({});
   const peerPublicFetchDoneRef = useRef<Set<string>>(new Set());
@@ -372,6 +383,41 @@ function AccountPageInner() {
       setChatsLoading(false);
     }
   }, [auth.status, auth.userId]);
+
+  const uid = auth.userId?.trim() ?? "";
+
+  useEffect(() => {
+    if (!uid) {
+      setClientToolsEnabledState(false);
+      setClientToolsSuggestionDismissedState(false);
+      return;
+    }
+    const sync = () => {
+      setClientToolsEnabledState(getClientToolsEnabled(uid));
+      setClientToolsSuggestionDismissedState(getClientToolsSuggestionDismissed(uid));
+    };
+    sync();
+    return subscribeClientToolsPrefs(sync);
+  }, [uid]);
+
+  const clientToolsEligible = useMemo(() => {
+    if (!uid) return false;
+    const serviceListingCount = listings.filter(
+      (l) => l.ownerId === uid && l.type === "service" && isListingPubliclyListed(l),
+    ).length;
+    const hasCompanyChat = chatRows.some((c) => c.chatType === "company");
+    return isEligibleForClientToolsSuggestion({
+      activeChatCount: chatRows.length,
+      serviceListingCount,
+      hasCompanyChat,
+    });
+  }, [uid, listings, chatRows]);
+
+  const showClientToolsSuggestion =
+    Boolean(uid) &&
+    clientToolsEligible &&
+    !clientToolsEnabled &&
+    !clientToolsSuggestionDismissed;
 
   useEffect(() => {
     const t = searchParams.get("tab");
@@ -1009,6 +1055,40 @@ function AccountPageInner() {
                 <SupportCabinetPanel />
               ) : mainTab === "settings" ? (
                 <div className="max-w-md grid gap-5">
+                  {showClientToolsSuggestion ? (
+                    <ClientToolsSuggestionBanner
+                      onEnable={() => {
+                        setClientToolsEnabled(uid, true);
+                        setClientToolsEnabledState(true);
+                      }}
+                      onDismiss={() => {
+                        dismissClientToolsSuggestion(uid);
+                        setClientToolsSuggestionDismissedState(true);
+                      }}
+                    />
+                  ) : null}
+                  <section className="rounded-2xl border border-black/10 bg-white p-4">
+                    <div className="text-sm font-semibold text-black/90">Инструменты для работы с клиентами</div>
+                    <p className="mt-1 text-sm text-black/55">
+                      Статусы, метки, личные заметки и краткий итог переписки — только внутри чатов. По умолчанию
+                      выключено.
+                    </p>
+                    <label className="mt-3 flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-black/20 text-orange-500 focus:ring-orange-500/30"
+                        checked={clientToolsEnabled}
+                        disabled={!uid}
+                        onChange={(e) => {
+                          if (!uid) return;
+                          const next = e.target.checked;
+                          setClientToolsEnabled(uid, next);
+                          setClientToolsEnabledState(next);
+                        }}
+                      />
+                      <span className="text-sm text-black/80">Включить инструменты для работы с клиентами</span>
+                    </label>
+                  </section>
                   {me?.ok && me.user.deletionStatus === "pending_deletion" && typeof me.user.deleteScheduledAt === "number" ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-black/80">
                       <div>
@@ -1062,9 +1142,23 @@ function AccountPageInner() {
                 </div>
               ) : mainTab === "messages" ? (
                 <div className="pwa-messages-focus">
+                {showClientToolsSuggestion ? (
+                  <div className="mb-3">
+                    <ClientToolsSuggestionBanner
+                      onEnable={() => {
+                        setClientToolsEnabled(uid, true);
+                        setClientToolsEnabledState(true);
+                      }}
+                      onDismiss={() => {
+                        dismissClientToolsSuggestion(uid);
+                        setClientToolsSuggestionDismissedState(true);
+                      }}
+                    />
+                  </div>
+                ) : null}
                 {workspaceMovedNotice ? (
                   <div className="mb-3 rounded-2xl border border-orange-100 bg-orange-50/80 px-3 py-2.5 text-sm text-orange-950">
-                    Функция перенесена в сообщения. Откройте чат — статус, заметки и AI summary внутри переписки.
+                    Функция перенесена в сообщения. Включите инструменты для работы в настройках — они появятся внутри чатов.
                   </div>
                 ) : null}
                 {chatsLoading && chatRows.length === 0 ? (

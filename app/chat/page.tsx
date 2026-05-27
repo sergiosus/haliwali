@@ -31,6 +31,10 @@ import {
   normalizeChatAiDealStage,
 } from "../lib/chatAiCrmSummary";
 import {
+  getClientToolsEnabled,
+  subscribeClientToolsPrefs,
+} from "../lib/clientToolsPrefs";
+import {
   chatUploadExtFromFileName,
   isVoiceChatFileName,
   normalizeChatUploadExt,
@@ -446,6 +450,17 @@ function ChatInner() {
   );
   const currentUserId = auth.userId ?? "";
 
+  useEffect(() => {
+    const uid = currentUserId.trim();
+    if (!uid) {
+      setClientToolsEnabled(false);
+      return;
+    }
+    const sync = () => setClientToolsEnabled(getClientToolsEnabled(uid));
+    sync();
+    return subscribeClientToolsPrefs(sync);
+  }, [currentUserId]);
+
   const [ad, setAd] = useState<{
     id: string;
     title: string;
@@ -629,7 +644,8 @@ function ChatInner() {
   const [aiTasks, setAiTasks] = useState<ChatAiTaskUi[]>([]);
   const [aiTasksSaveBusy, setAiTasksSaveBusy] = useState(false);
   const [aiTasksSaveDone, setAiTasksSaveDone] = useState(false);
-  const [crmOpen, setCrmOpen] = useState(false);
+  const [clientToolsEnabled, setClientToolsEnabled] = useState(false);
+  const [clientToolsOpen, setClientToolsOpen] = useState(false);
   const [crmLoading, setCrmLoading] = useState(false);
   const [crmSaving, setCrmSaving] = useState(false);
   const [crmError, setCrmError] = useState<string | null>(null);
@@ -929,6 +945,10 @@ function ChatInner() {
     if (!listingId) return "";
     return `${listingId}::${ownerId}::${buyer}`;
   }, [isCompanyChat, companyId, listingId, listingOwnerId, buyerIdResolved]);
+
+  useEffect(() => {
+    setClientToolsOpen(false);
+  }, [chatId, clientToolsEnabled]);
 
   useEffect(() => {
     setSafetyWarning(analyzeChatComposerSafety(text));
@@ -1314,7 +1334,7 @@ function ChatInner() {
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; crm?: unknown };
         if (!res.ok || !data.ok) {
-          setCrmError("Не удалось сохранить CRM-поля.");
+          setCrmError("Не удалось сохранить заметки.");
           return false;
         }
         applyCrmFromApi(data.crm);
@@ -1324,7 +1344,7 @@ function ChatInner() {
         }
         return true;
       } catch {
-        setCrmError("Не удалось сохранить CRM-поля.");
+        setCrmError("Не удалось сохранить заметки.");
         return false;
       } finally {
         setCrmSaving(false);
@@ -1334,7 +1354,7 @@ function ChatInner() {
   );
 
   useEffect(() => {
-    if (!chatId || showOwnerPeerPicker) {
+    if (!clientToolsEnabled || !chatId || showOwnerPeerPicker) {
       setAiCrmIntel(null);
       setAiCrmIntelLoading(false);
       return;
@@ -1364,10 +1384,10 @@ function ChatInner() {
     return () => {
       cancelled = true;
     };
-  }, [chatId, showOwnerPeerPicker]);
+  }, [chatId, showOwnerPeerPicker, clientToolsEnabled]);
 
   useEffect(() => {
-    if (!chatId || showOwnerPeerPicker) {
+    if (!clientToolsEnabled || !chatId || showOwnerPeerPicker) {
       setCrmState({ status: "new", privateNote: "", tags: [] });
       setCrmNoteDraft("");
       setCrmTagsDraft("");
@@ -1389,7 +1409,7 @@ function ChatInner() {
         applyCrmFromApi(crm);
       })
       .catch(() => {
-        if (!cancelled) setCrmError("Не удалось загрузить CRM-поля.");
+        if (!cancelled) setCrmError("Не удалось загрузить заметки.");
       })
       .finally(() => {
         if (!cancelled) setCrmLoading(false);
@@ -1397,7 +1417,7 @@ function ChatInner() {
     return () => {
       cancelled = true;
     };
-  }, [applyCrmFromApi, chatId, showOwnerPeerPicker]);
+  }, [applyCrmFromApi, chatId, showOwnerPeerPicker, clientToolsEnabled]);
 
   useEffect(() => {
     if (!chatId || showOwnerPeerPicker) {
@@ -2730,167 +2750,175 @@ function ChatInner() {
             </div>
           ) : null}
 
-          {chatId && !showOwnerPeerPicker ? (
-            <div className="mb-3 shrink-0 overflow-hidden rounded-3xl border border-black/10 bg-white md:mb-4">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/[0.02]"
-                onClick={() => setCrmOpen((open) => !open)}
-                aria-expanded={crmOpen}
-              >
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-black/40">По чату</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-black/55">
-                    {aiCrmIntel && hasChatAiCrmSummaryContent(aiCrmIntel) ? (
-                      <span className="rounded-full border border-orange-100 bg-orange-50 px-2 py-0.5 font-medium text-orange-900">
-                        {CHAT_AI_DEAL_STAGE_LABELS[normalizeChatAiDealStage(aiCrmIntel.dealStage)]}
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 font-medium text-black/70">
-                        {CHAT_CRM_STATUS_OPTIONS.find((x) => x.value === crmState.status)?.label ?? "Новый"}
-                      </span>
-                    )}
-                    {crmState.tags.length > 0 ? (
-                      crmState.tags.slice(0, 4).map((tag) => (
-                        <span key={tag} className="rounded-full border border-orange-100 bg-orange-50 px-2 py-0.5 text-orange-800">
-                          {tag}
-                        </span>
-                      ))
-                    ) : (
-                      <span>личные заметки и теги</span>
-                    )}
-                  </div>
-                </div>
-                <span className="shrink-0 text-sm font-semibold text-black/45">{crmOpen ? "Скрыть" : "Открыть"}</span>
-              </button>
-
-              {crmOpen ? (
-                <div className="border-t border-black/10 px-4 py-3">
-                  <div className="mb-4 rounded-2xl border border-orange-100/80 bg-orange-50/40 px-3 py-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-orange-900/80">
-                      AI summary
-                    </div>
-                    {aiCrmIntelLoading ? (
-                      <div className="mt-2 text-sm text-black/50">Загрузка аналитики…</div>
-                    ) : aiCrmIntel && hasChatAiCrmSummaryContent(aiCrmIntel) ? (
-                      <dl className="mt-2 grid gap-2 text-sm text-black/80">
-                        <div>
-                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Цель клиента</dt>
-                          <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.clientGoal || "—"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Срочность</dt>
-                          <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.urgency || "—"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Стадия сделки</dt>
-                          <dd className="mt-0.5 font-medium">
-                            {CHAT_AI_DEAL_STAGE_LABELS[normalizeChatAiDealStage(aiCrmIntel.dealStage)]}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Следующий шаг</dt>
-                          <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.nextStep || "—"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Теги</dt>
-                          <dd className="mt-1 flex flex-wrap gap-1.5">
-                            {aiCrmIntel.tags.length > 0 ? (
-                              aiCrmIntel.tags.map((tag) => (
-                                <span
-                                  key={tag}
-                                  className="rounded-full border border-orange-100 bg-white px-2 py-0.5 text-xs text-orange-800"
-                                >
-                                  {tag}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-black/45">—</span>
-                            )}
-                          </dd>
-                        </div>
-                      </dl>
-                    ) : (
-                      <p className="mt-2 text-sm text-black/50">
-                        Запустите AI summary в меню чата, чтобы обновить краткий итог переписки.
-                      </p>
-                    )}
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
-                      Статус клиента
-                      <select
-                        value={crmState.status}
-                        disabled={crmLoading || crmSaving}
-                        onChange={(e) => {
-                          const status = normalizeChatCrmStatusClient(e.target.value);
-                          setCrmState((prev) => ({ ...prev, status }));
-                          void saveCrmPatch({ status });
-                        }}
-                        className="mt-1.5 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm font-medium normal-case tracking-normal text-black/80 outline-none focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:opacity-60"
-                      >
-                        {CHAT_CRM_STATUS_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
-                      Теги
-                      <input
-                        value={crmTagsDraft}
-                        disabled={crmLoading || crmSaving}
-                        onChange={(e) => setCrmTagsDraft(e.target.value)}
-                        placeholder="например: доставка, торг"
-                        className="mt-1.5 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm font-medium normal-case tracking-normal text-black/80 outline-none placeholder:text-black/35 focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:opacity-60"
-                      />
-                    </label>
-                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45 md:col-span-2">
-                      Приватная заметка
-                      <textarea
-                        value={crmNoteDraft}
-                        disabled={crmLoading || crmSaving}
-                        onChange={(e) => setCrmNoteDraft(e.target.value)}
-                        rows={3}
-                        placeholder="Видно только вам. Собеседник не увидит эту заметку."
-                        className="mt-1.5 w-full resize-y rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm font-normal normal-case leading-relaxed tracking-normal text-black/80 outline-none placeholder:text-black/35 focus:border-black/20 focus:ring-2 focus:ring-[rgba(255,122,0,0.18)] disabled:opacity-60"
-                      />
-                    </label>
-                    <label className="text-xs font-semibold uppercase tracking-wide text-black/45 md:col-span-2">
-                      Напомнить позже
-                      <input
-                        type="text"
-                        disabled
-                        placeholder="Скоро — напоминание по этому чату"
-                        className="mt-1.5 h-10 w-full cursor-not-allowed rounded-xl border border-black/10 bg-black/[0.02] px-3 text-sm font-medium normal-case tracking-normal text-black/45 outline-none placeholder:text-black/35"
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs text-black/45">
-                      {crmError ? <span className="text-red-700">{crmError}</span> : "Видно только вам, внутри этого чата."}
-                      {crmSavedFlash ? <span className="ml-2 text-green-700">Сохранено</span> : null}
-                    </div>
+          {clientToolsEnabled && chatId && !showOwnerPeerPicker ? (
+            <div className="mb-2 shrink-0 md:mb-3">
+              {!clientToolsOpen ? (
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/70 hover:bg-black/[0.03]"
+                  onClick={() => setClientToolsOpen(true)}
+                  aria-expanded={false}
+                >
+                  Для работы
+                </button>
+              ) : (
+                <div className="overflow-hidden rounded-2xl border border-black/10 bg-white">
+                  <div className="flex items-center justify-between gap-2 border-b border-black/10 px-3 py-2">
+                    <span className="text-xs font-semibold text-black/70">Инструменты для работы</span>
                     <button
                       type="button"
-                      disabled={crmLoading || crmSaving}
-                      onClick={() =>
-                        void saveCrmPatch(
-                          {
-                            privateNote: crmNoteDraft,
-                            tags: parseCrmTagsDraft(crmTagsDraft),
-                          },
-                          { flash: true },
-                        )
-                      }
-                      className="inline-flex h-9 items-center justify-center rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black/80 hover:bg-black/[0.04] disabled:opacity-60"
+                      className="text-xs font-semibold text-black/45 hover:text-black/70"
+                      onClick={() => setClientToolsOpen(false)}
+                      aria-expanded={true}
                     >
-                      {crmSaving ? "Сохранение…" : "Сохранить"}
+                      Свернуть
                     </button>
                   </div>
+                  <div className="px-3 py-3">
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="inline-flex h-8 items-center justify-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
+                        onClick={() => void requestAiSummary()}
+                        disabled={aiSummaryLoading}
+                      >
+                        Кратко о клиенте
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex h-8 items-center justify-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
+                        onClick={() => void requestAiTasks()}
+                        disabled={aiTasksLoading}
+                      >
+                        Напомнить
+                      </button>
+                    </div>
+                    <div className="mb-3 rounded-xl border border-orange-100/80 bg-orange-50/40 px-3 py-2.5">
+                      <div className="text-xs font-semibold text-orange-900/85">Кратко о клиенте</div>
+                      {aiCrmIntelLoading ? (
+                        <div className="mt-1.5 text-sm text-black/50">Загрузка…</div>
+                      ) : aiCrmIntel && hasChatAiCrmSummaryContent(aiCrmIntel) ? (
+                        <dl className="mt-2 grid gap-1.5 text-sm text-black/80">
+                          <div>
+                            <dt className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Цель</dt>
+                            <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.clientGoal || "—"}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Срочность</dt>
+                            <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.urgency || "—"}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Статус</dt>
+                            <dd className="mt-0.5 font-medium">
+                              {CHAT_AI_DEAL_STAGE_LABELS[normalizeChatAiDealStage(aiCrmIntel.dealStage)]}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[11px] font-semibold uppercase tracking-wide text-black/45">
+                              Что сделать дальше
+                            </dt>
+                            <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.nextStep || "—"}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-[11px] font-semibold uppercase tracking-wide text-black/45">Метки</dt>
+                            <dd className="mt-1 flex flex-wrap gap-1">
+                              {aiCrmIntel.tags.length > 0 ? (
+                                aiCrmIntel.tags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="rounded-full border border-orange-100 bg-white px-2 py-0.5 text-xs text-orange-800"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-black/45">—</span>
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                      ) : (
+                        <p className="mt-1.5 text-sm text-black/50">
+                          Нажмите «Кратко о клиенте», чтобы получить итог переписки.
+                        </p>
+                      )}
+                    </div>
+                    <div className="grid gap-2.5 sm:grid-cols-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
+                        Статус
+                        <select
+                          value={crmState.status}
+                          disabled={crmLoading || crmSaving}
+                          onChange={(e) => {
+                            const status = normalizeChatCrmStatusClient(e.target.value);
+                            setCrmState((prev) => ({ ...prev, status }));
+                            void saveCrmPatch({ status });
+                          }}
+                          className="mt-1 h-9 w-full rounded-xl border border-black/10 bg-white px-2.5 text-sm font-medium normal-case tracking-normal text-black/80 outline-none focus:border-black/20 disabled:opacity-60"
+                        >
+                          {CHAT_CRM_STATUS_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
+                        Метки
+                        <input
+                          value={crmTagsDraft}
+                          disabled={crmLoading || crmSaving}
+                          onChange={(e) => setCrmTagsDraft(e.target.value)}
+                          placeholder="доставка, торг"
+                          className="mt-1 h-9 w-full rounded-xl border border-black/10 bg-white px-2.5 text-sm font-medium normal-case tracking-normal text-black/80 outline-none placeholder:text-black/35 focus:border-black/20 disabled:opacity-60"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold uppercase tracking-wide text-black/45 sm:col-span-2">
+                        Личная заметка
+                        <textarea
+                          value={crmNoteDraft}
+                          disabled={crmLoading || crmSaving}
+                          onChange={(e) => setCrmNoteDraft(e.target.value)}
+                          rows={2}
+                          placeholder="Только для вас"
+                          className="mt-1 w-full resize-y rounded-xl border border-black/10 bg-white px-2.5 py-2 text-sm font-normal normal-case leading-relaxed tracking-normal text-black/80 outline-none placeholder:text-black/35 focus:border-black/20 disabled:opacity-60"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold uppercase tracking-wide text-black/45 sm:col-span-2">
+                        Напомнить позже
+                        <input
+                          type="text"
+                          disabled
+                          placeholder="Скоро"
+                          className="mt-1 h-9 w-full cursor-not-allowed rounded-xl border border-black/10 bg-black/[0.02] px-2.5 text-sm text-black/45 outline-none"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs text-black/45">
+                        {crmError ? <span className="text-red-700">{crmError}</span> : "Только вы видите эти поля."}
+                        {crmSavedFlash ? <span className="ml-2 text-green-700">Сохранено</span> : null}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={crmLoading || crmSaving}
+                        onClick={() =>
+                          void saveCrmPatch(
+                            {
+                              privateNote: crmNoteDraft,
+                              tags: parseCrmTagsDraft(crmTagsDraft),
+                            },
+                            { flash: true },
+                          )
+                        }
+                        className="inline-flex h-8 items-center justify-center rounded-xl border border-black/15 bg-white px-3 text-xs font-semibold text-black/80 hover:bg-black/[0.04] disabled:opacity-60"
+                      >
+                        {crmSaving ? "Сохранение…" : "Сохранить"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              ) : null}
+              )}
             </div>
           ) : null}
 
@@ -2902,28 +2930,6 @@ function ChatInner() {
                 <div className="mt-0.5 text-xs text-black/50">{opponentPresenceLabel}</div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {chatId && !showOwnerPeerPicker ? (
-                  <button
-                    type="button"
-                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
-                    onClick={() => void requestAiSummary()}
-                    disabled={aiSummaryLoading}
-                    aria-label="AI summary"
-                  >
-                    AI summary
-                  </button>
-                ) : null}
-                {chatId && !showOwnerPeerPicker ? (
-                  <button
-                    type="button"
-                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-black/75 hover:bg-black/[0.03] disabled:opacity-50"
-                    onClick={() => void requestAiTasks()}
-                    disabled={aiTasksLoading}
-                    aria-label="Создать задачи"
-                  >
-                    Создать задачи
-                  </button>
-                ) : null}
                 {opponent.id && !showOwnerPeerPicker && !chatIsBlocked ? (
                   <button
                     type="button"

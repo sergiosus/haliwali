@@ -8,12 +8,17 @@ import {
   isAdminUsersActiveRow,
   isAdminUsersTrashRow,
 } from "../../../lib/adminUserDto";
+import { buildAdminUserCatalogSummaryMap } from "../../../lib/adminUserCatalogSummary";
 import {
   buildListingOwnerMap,
   countListingsForOwner,
   filterReportsWithExistingListingTargets,
   reportsCountForUser,
 } from "../../../lib/adminUsersAggregate";
+import {
+  listCatalogCompaniesAdmin,
+  listCatalogCompanyClaimsAdmin,
+} from "../../../lib/serverCatalogStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../lib/serverAdminSession";
 import { listBootstrap } from "../../../lib/serverListingsStore";
 import { readAllReports } from "../../../lib/serverTrustStore";
@@ -45,16 +50,23 @@ export async function GET(req: Request) {
   );
   usersList.sort((a, b) => b.createdAt - a.createdAt);
 
-  const listings = await listBootstrap(null, true);
-  const reports = filterReportsWithExistingListingTargets(await readAllReports(5000), listings);
+  const [listings, allReports, catalogCompanies, catalogClaims] = await Promise.all([
+    listBootstrap(null, true),
+    readAllReports(5000),
+    listCatalogCompaniesAdmin(),
+    listCatalogCompanyClaimsAdmin(),
+  ]);
+  const reports = filterReportsWithExistingListingTargets(allReports, listings);
   const listingOwners = buildListingOwnerMap(listings);
   const blockedIds = await getAllModerationBlockedIds();
+  const catalogByUser = buildAdminUserCatalogSummaryMap(catalogCompanies, catalogClaims);
 
   const users = usersList.map((u) => {
     const uid = u.userId;
     const moderationBlocked = blockedIds.has(uid);
     const { total, active } = countListingsForOwner(listings, uid);
     const reportsCount = reportsCountForUser(uid, reports, listingOwners);
+    const catalog = catalogByUser.get(uid) ?? { companyCount: 0, ownershipLabel: "" };
 
     const profileName = (u.name ?? "").trim();
     const chosenDisplayName = (u.displayName ?? "").trim();
@@ -80,6 +92,8 @@ export async function GET(req: Request) {
       listingsCount: total,
       activeListingsCount: active,
       reportsCount,
+      catalogCompanyCount: catalog.companyCount,
+      catalogOwnershipLabel: catalog.ownershipLabel,
     };
   });
 

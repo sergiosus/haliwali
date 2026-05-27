@@ -406,6 +406,7 @@ export async function jsonListAllCompaniesAdmin(): Promise<CatalogCompanyAdminIt
     ...toListItem(c),
     id: c.id,
     contacts: c.contacts,
+    verifiedAt: c.verifiedAt ?? null,
   }));
 }
 

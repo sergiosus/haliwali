@@ -217,6 +217,8 @@ type AdminUserRow = {
   listingsCount: number;
   activeListingsCount: number;
   reportsCount: number;
+  catalogCompanyCount: number;
+  catalogOwnershipLabel: string;
   softDeletedAt?: number;
   purgeAfter?: number;
   purgedAt?: number;
@@ -349,6 +351,7 @@ export default function AdminClient() {
   const [listingTab, setListingTab] = useState<ListingModerationTab>("pending");
   const [reportsReload, setReportsReload] = useState(0);
   const [reports, setReports] = useState<AdminReportRow[]>([]);
+  const [listingReportsFilter, setListingReportsFilter] = useState<"all" | "listing" | "user">("all");
   const [adminUsers, setAdminUsers] = useState<AdminUserRow[]>([]);
   const [usersView, setUsersView] = useState<AdminUsersView>("active");
   const [usersLoading, setUsersLoading] = useState(false);
@@ -527,6 +530,9 @@ export default function AdminClient() {
               listingsCount: o.listingsCount,
               activeListingsCount: o.activeListingsCount,
               reportsCount: o.reportsCount,
+              catalogCompanyCount: typeof o.catalogCompanyCount === "number" ? o.catalogCompanyCount : 0,
+              catalogOwnershipLabel:
+                typeof o.catalogOwnershipLabel === "string" ? o.catalogOwnershipLabel.trim() : "",
               softDeletedAt: typeof o.softDeletedAt === "number" ? o.softDeletedAt : undefined,
               purgeAfter: typeof o.purgeAfter === "number" ? o.purgeAfter : undefined,
               purgedAt: typeof o.purgedAt === "number" ? o.purgedAt : undefined,
@@ -894,6 +900,8 @@ export default function AdminClient() {
                       <th className="whitespace-nowrap px-4 py-3 font-semibold">Регистрация</th>
                       <th className="whitespace-nowrap px-4 py-3 font-semibold">Статус</th>
                       <th className="whitespace-nowrap px-4 py-3 font-semibold">Объявления</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Компании</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Каталог</th>
                       <th className="whitespace-nowrap px-4 py-3 font-semibold">Жалобы</th>
                     </>
                   )}
@@ -952,6 +960,16 @@ export default function AdminClient() {
                         <td className="whitespace-nowrap px-4 py-3 text-black/70">{new Date(u.createdAt).toLocaleString("ru-RU")}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-black/80">{userStatusRu[u.status] ?? u.status}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-black/70">{u.listingsCount}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/70">{u.catalogCompanyCount}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-black/70">
+                          {u.catalogOwnershipLabel ? (
+                            <span className="inline-flex rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium text-black/75">
+                              {u.catalogOwnershipLabel}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-black/70">{u.reportsCount}</td>
                       </>
                     )}
@@ -1470,6 +1488,32 @@ export default function AdminClient() {
         </div>
       ) : tab === "ads" && listingTab === "reports" ? (
         <div className="space-y-4">
+          <p className="text-sm text-black/55">
+            Жалобы на объявления и пользователей. Жалобы на компании — во вкладке «Каталоги компаний» → «Жалобы».
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                { key: "all" as const, label: "Все" },
+                { key: "listing" as const, label: "На объявления" },
+                { key: "user" as const, label: "На пользователей" },
+              ] as const
+            ).map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setListingReportsFilter(f.key)}
+                className={[
+                  "h-8 rounded-full border px-3 text-xs font-semibold",
+                  listingReportsFilter === f.key ?
+                    "border-black/20 bg-black text-white"
+                  : "border-black/15 bg-white text-black/70 hover:bg-black/5",
+                ].join(" ")}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-2">
             {listingModerationTabs.map(({ key, label, count }) => {
               const active = listingTab === key;
@@ -1492,6 +1536,10 @@ export default function AdminClient() {
           </div>
           <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 md:grid-cols-2">
           {reports
+            .filter((r) => {
+              if (listingReportsFilter === "all") return true;
+              return r.targetType === listingReportsFilter;
+            })
             .slice()
             .sort((a, b) => b.createdAt - a.createdAt)
             .map((r) => {
@@ -1636,9 +1684,9 @@ export default function AdminClient() {
                 </div>
               );
             })}
-          {reports.length === 0 ? (
+          {reports.filter((r) => listingReportsFilter === "all" || r.targetType === listingReportsFilter).length === 0 ? (
             <div className="col-span-full rounded-3xl border border-dashed border-black/15 bg-white p-6">
-              <div className="text-sm text-black/70">Пока нет жалоб.</div>
+              <div className="text-sm text-black/70">Пока нет жалоб по выбранному фильтру.</div>
             </div>
           ) : null}
           </div>

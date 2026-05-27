@@ -8,7 +8,7 @@ import {
   catalogCompanyOriginView,
 } from "../../lib/catalogCompanyOrigin";
 import { catalogYandexMapsHref } from "../../lib/catalogMapLinks";
-import { catalogCompanyPath } from "../../lib/catalogSeo";
+import { companyPublicPath } from "../../lib/seoRoutes";
 import { catalogCategoryVisual } from "../../lib/catalogVisual";
 
 function Stars({ rating }: { rating: number | null }) {
@@ -33,7 +33,7 @@ export function CatalogCompanyCard({ company }: { company: CatalogCompanyListIte
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
       <Link
-        href={catalogCompanyPath(company)}
+        href={companyPublicPath(company.slug)}
         className="flex min-w-0 flex-1 gap-3 p-4"
       >
         {company.logoUrl ?

@@ -13,6 +13,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchSuggestItem } from "../lib/globalSearchTypes";
 import { HeroMarketplaceEntry } from "./HeroMarketplaceEntry";
+import { OftenSearchedLinks } from "./seo/OftenSearchedLinks";
 import { MarketplaceSuggestRow } from "./MarketplaceSuggestRow";
 import type { MarketplaceDisplayCard } from "../lib/marketplaceDisplay";
 import {
@@ -775,6 +776,7 @@ export function GlobalHeaderSearch({
             </div>
             {suggestPanel}
           </div>
+          <OftenSearchedLinks className="mt-2 px-1" />
         </div>
         {showSubmitValidation ?
           <p className="mt-2 text-center text-sm text-[#c2410c]" role="status">

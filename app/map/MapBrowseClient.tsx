@@ -1,7 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CatalogCompanyListItem } from "../lib/catalogTypes";
+import { hasCatalogCoordinates } from "../lib/catalogMapLinks";
+import { companyPublicPath } from "../lib/seoRoutes";
 import { CompactListingCard } from "../components/CompactListingCard";
 import { MapListingPreviewModal } from "../components/map/MapListingPreviewModal";
 import { MapRegionSettlementSelectors } from "../components/map/MapRegionSettlementSelectors";
@@ -146,12 +150,39 @@ function mapViewFromScope(scope: SearchScopeLocation): { center: MapCenter; zoom
 }
 
 export default function MapBrowseClient() {
+  const router = useRouter();
   const { loaded, listings } = useListingsStore();
   const [mapScope, setMapScope] = useState<SearchScopeLocation>({ ...DEFAULT_SEARCH_SCOPE });
+  const [mapCompanies, setMapCompanies] = useState<CatalogCompanyListItem[]>([]);
 
   useEffect(() => {
     setMapScope(resolveSelectedBrowseLocationScope());
   }, []);
+
+  const mapCityQuery = useMemo(() => {
+    const s = normalizeSearchScope(mapScope);
+    if (s.type === "city" || s.type === "settlement") return (s.label ?? "").trim();
+    return "";
+  }, [mapScope]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams();
+    if (mapCityQuery) params.set("city", mapCityQuery);
+    fetch(`/api/catalogs/companies?${params.toString()}`, { credentials: "same-origin" })
+      .then((r) => r.json())
+      .then((data: { companies?: CatalogCompanyListItem[] }) => {
+        if (cancelled) return;
+        const rows = (data.companies ?? []).filter((c) => hasCatalogCoordinates(c));
+        setMapCompanies(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setMapCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapCityQuery]);
 
   const [listingKind, setListingKind] = useState<KindFilter>("all");
   const [categorySlug, setCategorySlug] = useState<string>("all");
@@ -308,8 +339,21 @@ export default function MapBrowseClient() {
 
       // Keep marker pipeline silent in production (and avoid repeating per-marker logs on desktop).
     }
+    for (const co of mapCompanies) {
+      if (!hasCatalogCoordinates(co)) continue;
+      out.push({
+        id: `co:${co.slug}`,
+        lat: co.latitude,
+        lng: co.longitude,
+        isSelected: selectedId === `co:${co.slug}`,
+        previewTitle: co.name.slice(0, 120),
+        previewType: "Компания",
+        previewCity: co.city || co.locationContext || "",
+        ...(co.logoUrl ? { previewImage: co.logoUrl } : {}),
+      });
+    }
     return out;
-  }, [baseFiltered, selectedId]);
+  }, [baseFiltered, selectedId, mapCompanies]);
 
   useEffect(() => {
     if (!selectedId || !listRef.current) return;
@@ -529,7 +573,7 @@ export default function MapBrowseClient() {
             </div>
 
             <div className="min-w-0 break-words text-xs text-black/50">
-              Локация: {scopeLabel}. На карте — по координатам или центру города из справочника; иначе только в списке.
+              Локация: {scopeLabel}. На карте — объявления и компании с координатами; без точки — только в списке.
             </div>
           </div>
 
@@ -593,7 +637,8 @@ export default function MapBrowseClient() {
       <div className="relative order-1 min-h-0 w-full min-w-0 flex-1 overflow-hidden md:order-2 md:h-full md:flex-1">
         <div className="absolute inset-x-0 top-0 z-10 flex flex-wrap items-center gap-2 bg-gradient-to-b from-white/95 to-transparent px-3 py-2 md:px-4">
           <span className="text-xs text-black/50">
-            {listingMarkers.length} на карте · {visibleListings.length} в списке
+            {listingMarkers.length} на карте · {visibleListings.length} объявлений
+            {mapCompanies.length > 0 ? ` · ${mapCompanies.length} компаний` : ""}
           </span>
         </div>
 
@@ -607,6 +652,10 @@ export default function MapBrowseClient() {
             settlementMarkers={[]}
             listingMarkers={listingMarkers}
             onListingMarkerClick={(id) => {
+              if (id.startsWith("co:")) {
+                router.push(companyPublicPath(id.slice(3)));
+                return;
+              }
               setSelectedId(id);
               setPreviewId(id);
             }}

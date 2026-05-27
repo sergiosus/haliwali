@@ -543,6 +543,12 @@ function ChatInner() {
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const messageContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const forceScrollToBottomRef = useRef(false);
+  const lastScrollChatIdRef = useRef<string>("");
+  const lastVisibleLenRef = useRef(0);
+  const [newMessagesPending, setNewMessagesPending] = useState(false);
   /** Один проброс localStorage→сервер на chatId за сессию (пустой GET, есть локальные сообщения). */
   const hydrateLocalToServerRef = useRef<Set<string>>(new Set());
   /** Prevents double-submit before `isUploading` state commits (mobile double-tap). */
@@ -2356,6 +2362,74 @@ function ChatInner() {
     });
   }, [listingId]);
 
+  function isNearBottom(thresholdPx = 110): boolean {
+    const el = messageContainerRef.current;
+    if (!el) return true;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    return dist <= thresholdPx;
+  }
+
+  function scrollToBottom(behavior: ScrollBehavior = "auto") {
+    const el = messageContainerRef.current;
+    if (!el) return;
+    // Use container scroll, never window.
+    try {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } catch {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  // Track user scrolling: clear "new messages" once user returns to bottom.
+  useEffect(() => {
+    const el = messageContainerRef.current;
+    if (!el) return;
+    function onScroll() {
+      if (isNearBottom()) setNewMessagesPending(false);
+    }
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Initial open/load: always land at bottom once messages render.
+  useEffect(() => {
+    const cid = chatId ?? "";
+    if (!cid) return;
+    if (lastScrollChatIdRef.current !== cid) {
+      lastScrollChatIdRef.current = cid;
+      lastVisibleLenRef.current = 0;
+      forceScrollToBottomRef.current = true;
+      setNewMessagesPending(false);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scrollToBottom("auto"));
+      });
+    }
+  }, [chatId]);
+
+  // On new messages:
+  // - force scroll after own send or first render
+  // - auto-scroll only if user is near bottom
+  // - otherwise show "Новые сообщения"
+  useEffect(() => {
+    const cid = chatId ?? "";
+    if (!cid) return;
+    const len = visibleMsgs.length;
+    const prevLen = lastVisibleLenRef.current;
+    const grew = len > prevLen;
+    lastVisibleLenRef.current = len;
+    if (!grew) return;
+
+    const shouldForce = forceScrollToBottomRef.current || prevLen === 0;
+    const near = isNearBottom();
+    if (shouldForce || near) {
+      forceScrollToBottomRef.current = false;
+      setNewMessagesPending(false);
+      requestAnimationFrame(() => scrollToBottom(shouldForce ? "auto" : "auto"));
+      return;
+    }
+    setNewMessagesPending(true);
+  }, [chatId, visibleMsgs.length]);
+
   useEffect(() => {
     if (!isCompanyChat || !companyId || !auth.userId) return;
     let cancelled = false;
@@ -2906,7 +2980,10 @@ function ChatInner() {
               <div className="border-b border-black/5 px-4 py-1 text-xs text-black/45">печатает…</div>
             ) : null}
             </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
+            <div
+              className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-2 sm:px-4 sm:py-3"
+              ref={messageContainerRef}
+            >
               <div className="mt-auto flex flex-col gap-2 pb-0">
               {visibleMsgs.length > 0 ? (
                 visibleMsgs.map((m) => {
@@ -3119,6 +3196,22 @@ function ChatInner() {
                   Пока нет сообщений. Напишите первым.
                 </div>
               )}
+              {newMessagesPending ? (
+                <div className="sticky bottom-2 z-10 flex justify-center pt-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-9 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-black/80 shadow-sm hover:bg-black/[0.03]"
+                    onClick={() => {
+                      setNewMessagesPending(false);
+                      forceScrollToBottomRef.current = true;
+                      requestAnimationFrame(() => scrollToBottom("smooth"));
+                    }}
+                  >
+                    Новые сообщения
+                  </button>
+                </div>
+              ) : null}
+              <div ref={messagesEndRef} />
               </div>
             </div>
 
@@ -3382,7 +3475,9 @@ function ChatInner() {
                         nextMsgs = [...nextMsgs, nextMsg];
                         void registerOutboundMessage(nextMsg.id, nextMsg.createdAt);
                       }
+                      forceScrollToBottomRef.current = true;
                       persistMessages(nextMsgs);
+                      requestAnimationFrame(() => scrollToBottom("auto"));
                       void pingPresenceThrottled({ force: true });
                       if (typeof window !== "undefined") {
                         window.dispatchEvent(new CustomEvent("haliwali-chats-updated"));
@@ -3445,7 +3540,9 @@ function ChatInner() {
                     return;
                   }
                   const nextMsg = serverRowToChatMessage(data.message, chatId);
+                  forceScrollToBottomRef.current = true;
                   persistMessages([...msgs, nextMsg]);
+                  requestAnimationFrame(() => scrollToBottom("auto"));
                   void pingPresenceThrottled({ force: true });
                   void registerOutboundMessage(nextMsg.id, nextMsg.createdAt);
                   if (typeof window !== "undefined") {

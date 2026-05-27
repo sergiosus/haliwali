@@ -120,7 +120,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ chatId: string
     summaryJson: result.structured,
   });
   if (!persist.ok) {
-    console.error("[CHAT_AI_ERROR]", "auto_save_failed", { hasChatId: Boolean(chatId) });
+    console.error("[CHAT_AI_ERROR]", "auto_save_failed", {
+      hasChatId: Boolean(chatId),
+      pgCode: persist.diag?.pgCode ?? "",
+      constraint: persist.diag?.constraint ?? "",
+      column: persist.diag?.column ?? "",
+      message: persist.diag?.message ?? "",
+      operation: persist.diag?.operation ?? "",
+    });
   }
 
   return NextResponse.json({

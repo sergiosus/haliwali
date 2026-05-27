@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { CatalogCompanyListItem } from "./catalogTypes";
 import type { DirectoryItem } from "./categoryDirectory";
-import { findCityByName } from "./citiesData";
 import {
   seoCategoryIntroText,
   seoCategoryPageDescription,
@@ -117,13 +116,6 @@ export function metadataForSeoCategoryPage(data: SeoCategoryPageData): Metadata 
     openGraph: { title, description, type: "website", url, siteName: "Haliwali" },
     robots,
   };
-}
-
-export function mapCenterForSeoCity(cityName: string | null): { lat: number; lng: number } | null {
-  if (!cityName) return null;
-  const city = findCityByName(cityName);
-  if (!city) return null;
-  return { lat: city.lat, lng: city.lng };
 }
 
 export function introForSeoCategoryPage(data: SeoCategoryPageData): string {

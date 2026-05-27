@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { listingMatchesDirectoryCategorySlug } from "../lib/categoryLegacyMap";
+import { searchScopeFromMapCityParam } from "../lib/mapBrowseUrlScope";
+import { parseMapBrowseKind } from "../lib/seoMapBrowseHref";
 import type { CatalogCompanyListItem } from "../lib/catalogTypes";
 import { hasCatalogCoordinates } from "../lib/catalogMapLinks";
 import { companyPublicPath } from "../lib/seoRoutes";
@@ -151,13 +154,11 @@ function mapViewFromScope(scope: SearchScopeLocation): { center: MapCenter; zoom
 
 export default function MapBrowseClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { loaded, listings } = useListingsStore();
   const [mapScope, setMapScope] = useState<SearchScopeLocation>({ ...DEFAULT_SEARCH_SCOPE });
   const [mapCompanies, setMapCompanies] = useState<CatalogCompanyListItem[]>([]);
-
-  useEffect(() => {
-    setMapScope(resolveSelectedBrowseLocationScope());
-  }, []);
+  const urlFiltersAppliedRef = useRef(false);
 
   const mapCityQuery = useMemo(() => {
     const s = normalizeSearchScope(mapScope);
@@ -200,6 +201,31 @@ export default function MapBrowseClient() {
   const [taskUrgentOnly, setTaskUrgentOnly] = useState(false);
   const [taskRemoteOnly, setTaskRemoteOnly] = useState(false);
 
+  useEffect(() => {
+    const city = searchParams.get("city");
+    const category = searchParams.get("category");
+    const kind = searchParams.get("kind");
+    const hasUrlFilters = Boolean(city?.trim() || category?.trim() || kind?.trim());
+
+    if (hasUrlFilters && !urlFiltersAppliedRef.current) {
+      urlFiltersAppliedRef.current = true;
+      if (city?.trim()) {
+        const scope = searchScopeFromMapCityParam(city);
+        setMapScope(scope);
+        persistBrowseLocationScope(scope);
+      } else {
+        setMapScope(resolveSelectedBrowseLocationScope());
+      }
+      if (category?.trim()) setCategorySlug(category.trim());
+      if (kind?.trim()) setListingKind(parseMapBrowseKind(kind));
+      return;
+    }
+
+    if (!urlFiltersAppliedRef.current) {
+      setMapScope(resolveSelectedBrowseLocationScope());
+    }
+  }, [searchParams]);
+
   const mapView = useMemo(() => mapViewFromScope(mapScope), [mapScope]);
   const mapInstanceKey = mapKeyFromScope(mapScope);
 
@@ -230,7 +256,9 @@ export default function MapBrowseClient() {
     let rows = dedupeListingsById(listings).filter((l) => isListingPubliclyListed(l));
     rows = rows.filter((l) => listingMatchesSearchScope(l, mapScope));
     rows = rows.filter((l) => matchesKindFilter(l, listingKind));
-    if (categorySlug !== "all") rows = rows.filter((l) => l.categorySlug === categorySlug);
+    if (categorySlug !== "all") {
+      rows = rows.filter((l) => listingMatchesDirectoryCategorySlug(l, categorySlug));
+    }
     if (onlyWithPhoto) rows = rows.filter((l) => (l.photos?.length ?? 0) > 0);
     if (onlyWithPrice) rows = rows.filter((l) => productPriceOrNull(l) != null);
     rows = rows.filter((l) => listingMatchesDatePreset(l, datePreset));

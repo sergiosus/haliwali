@@ -23,6 +23,7 @@ export function CompactListingCard({
   publicAuthor,
   distanceLabel,
   variant = "link",
+  interactiveChrome = false,
 }: {
   listing: Listing;
   href: string;
@@ -37,6 +38,8 @@ export function CompactListingCard({
   distanceLabel?: string | null;
   /** `plain` — no in-card links; parent handles navigation (e.g. map modal). */
   variant?: "link" | "plain";
+  /** Favorite control stays clickable when parent uses a full-card overlay link. */
+  interactiveChrome?: boolean;
 }) {
   const auth = useAuth();
   const currentUserId = auth.status === "ready" ? (auth.userId ?? "").trim() : "";
@@ -102,7 +105,10 @@ export function CompactListingCard({
                 {title}
               </Link>
             : <div className={`${titleClass} cursor-default`}>{title}</div>}
-            <div className="mt-0.5 shrink-0 self-start" onClick={(e) => e.stopPropagation()}>
+            <div
+              className={`mt-0.5 shrink-0 self-start ${interactiveChrome ? "pointer-events-auto relative z-[2]" : ""}`}
+              onClick={(e) => e.stopPropagation()}
+            >
               <ListingFavoriteButton listingId={listing.id} />
             </div>
           </div>

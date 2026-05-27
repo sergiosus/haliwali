@@ -71,7 +71,9 @@ export function ListingFavoriteButton({
   return (
     <button
       type="button"
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
         if (!isLoggedIn()) {
           const next =
             typeof window !== "undefined"

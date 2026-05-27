@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { CompactListingCard } from "../CompactListingCard";
-import { listingPath } from "../../lib/seo";
 import type { Listing } from "../../lib/listingModel";
+import { SeoListingCard } from "./SeoListingCard";
 
 export function SeoListingGrid({ listings }: { listings: Listing[] }) {
   if (listings.length === 0) {
@@ -15,7 +14,7 @@ export function SeoListingGrid({ listings }: { listings: Listing[] }) {
     <ul className="grid gap-3 sm:grid-cols-2">
       {listings.map((listing) => (
         <li key={listing.id}>
-          <CompactListingCard listing={listing} href={listingPath(listing.id, listing.title)} />
+          <SeoListingCard listing={listing} />
         </li>
       ))}
     </ul>

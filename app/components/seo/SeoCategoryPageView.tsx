@@ -1,16 +1,12 @@
 import Link from "next/link";
 import type { SeoCategoryPageData } from "../../lib/seoCategoryPageData";
-import { introForSeoCategoryPage, mapCenterForSeoCity } from "../../lib/seoCategoryPageData";
+import { introForSeoCategoryPage } from "../../lib/seoCategoryPageData";
+import { buildMapBrowseHref, mapKindFromSeoSegment } from "../../lib/seoMapBrowseHref";
 import { seoCategoryBreadcrumbs } from "../../lib/seoSchema";
-import { listingMarkerPlacemarkCoordinates } from "../../lib/searchScopeLocation";
-import { listingPath } from "../../lib/seo";
-import { companyPublicPath } from "../../lib/seoRoutes";
-import { hasCatalogCoordinates } from "../../lib/catalogMapLinks";
 import { JsonLdScript } from "./JsonLdScript";
 import { SeoBreadcrumbs } from "./SeoBreadcrumbs";
 import { SeoCompanyList } from "./SeoCompanyList";
 import { SeoListingGrid } from "./SeoListingGrid";
-import { SeoMapSectionClient } from "./SeoMapSectionClient";
 
 export function SeoCategoryPageView({ data }: { data: SeoCategoryPageData }) {
   const intro = introForSeoCategoryPage(data);
@@ -22,38 +18,11 @@ export function SeoCategoryPageView({ data }: { data: SeoCategoryPageData }) {
     data.citySlug,
   );
 
-  const mapCenter = mapCenterForSeoCity(data.cityName) ?? { lat: 55.7558, lng: 37.6173 };
-  const mapMarkers = [
-    ...data.listings.flatMap((l) => {
-      const c = listingMarkerPlacemarkCoordinates(l);
-      if (!c) return [];
-      return [
-        {
-          id: `l-${l.id}`,
-          lat: c.lat,
-          lng: c.lng,
-          previewTitle: l.title,
-          previewType: l.type === "task" ? "Задача" : l.type === "service" ? "Услуга" : "Товар",
-          previewCity: l.city ?? "",
-          href: listingPath(l.id, l.title),
-        },
-      ];
-    }),
-    ...data.companies.flatMap((co) => {
-      if (!hasCatalogCoordinates(co)) return [];
-      return [
-        {
-          id: `c-${co.slug}`,
-          lat: co.latitude as number,
-          lng: co.longitude as number,
-          previewTitle: co.name,
-          previewType: "Компания",
-          previewCity: co.city ?? "",
-          href: companyPublicPath(co.slug),
-        },
-      ];
-    }),
-  ];
+  const mapHref = buildMapBrowseHref({
+    categorySlug: data.item.slug,
+    cityName: data.cityName,
+    kind: mapKindFromSeoSegment(data.segment),
+  });
 
   const cityLink =
     data.citySlug && data.cityName ?
@@ -75,7 +44,7 @@ export function SeoCategoryPageView({ data }: { data: SeoCategoryPageData }) {
               {data.cityName ? ` в ${data.cityName}` : ""}
             </h1>
             <Link
-              href="/map"
+              href={mapHref}
               className="inline-flex items-center rounded-full border border-black/10 px-3 py-1 text-xs font-medium text-gray-800 hover:bg-black/[0.03]"
             >
               На карте
@@ -93,12 +62,6 @@ export function SeoCategoryPageView({ data }: { data: SeoCategoryPageData }) {
         <div className="mt-8">
           <SeoCompanyList companies={data.companies} />
         </div>
-
-        {mapMarkers.length > 0 ?
-          <div className="mt-8">
-            <SeoMapSectionClient center={mapCenter} markers={mapMarkers} />
-          </div>
-        : null}
 
         {!data.citySlug ?
           <p className="mt-8 text-center text-xs text-black/40">

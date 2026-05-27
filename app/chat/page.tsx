@@ -24,6 +24,13 @@ import { formatChatPeerPresenceRu, CHAT_FAST_REPLY_HINT } from "../lib/chatPrese
 import type { ChatDealStatus } from "../lib/chatDealStatus";
 import { normalizeChatDealStatus } from "../lib/chatDealStatus";
 import {
+  CHAT_AI_DEAL_STAGE_LABELS,
+  type ChatAiCrmSummaryJson,
+  hasChatAiCrmSummaryContent,
+  normalizeChatAiCrmSummaryJson,
+  normalizeChatAiDealStage,
+} from "../lib/chatAiCrmSummary";
+import {
   chatUploadExtFromFileName,
   isVoiceChatFileName,
   normalizeChatUploadExt,
@@ -604,6 +611,8 @@ function ChatInner() {
   const [aiSummaryText, setAiSummaryText] = useState<string | null>(null);
   const [aiSummarySaveBusy, setAiSummarySaveBusy] = useState(false);
   const [aiSummarySaveDone, setAiSummarySaveDone] = useState(false);
+  const [aiCrmIntel, setAiCrmIntel] = useState<ChatAiCrmSummaryJson | null>(null);
+  const [aiCrmIntelLoading, setAiCrmIntelLoading] = useState(false);
   const [aiQuickRepliesVisible, setAiQuickRepliesVisible] = useState(false);
   const [aiQuickRepliesLoading, setAiQuickRepliesLoading] = useState(false);
   const [aiQuickRepliesError, setAiQuickRepliesError] = useState<string | null>(null);
@@ -1034,6 +1043,16 @@ function ChatInner() {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [chatMenuOpen]);
 
+  const applyAiCrmIntelFromApi = useCallback((structured: unknown, summaryText?: string) => {
+    const normalized = normalizeChatAiCrmSummaryJson(structured);
+    if (hasChatAiCrmSummaryContent(normalized)) {
+      setAiCrmIntel(normalized);
+    }
+    if (typeof summaryText === "string" && summaryText.trim()) {
+      setAiSummaryText(summaryText.trim());
+    }
+  }, []);
+
   const requestAiSummary = useCallback(async () => {
     if (!chatId) return;
     setAiSummaryOpen(true);
@@ -1050,10 +1069,23 @@ function ChatInner() {
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         summary?: string;
+        structured?: unknown;
         message?: string;
+        fromSaved?: boolean;
+        persisted?: boolean;
       };
       if (res.ok && data.ok && typeof data.summary === "string") {
         setAiSummaryText(data.summary);
+        if (data.structured) applyAiCrmIntelFromApi(data.structured, data.summary);
+        if (data.persisted !== false) setAiSummarySaveDone(true);
+        return;
+      }
+      if (typeof data.summary === "string" && data.summary.trim() && data.fromSaved) {
+        setAiSummaryText(data.summary.trim());
+        if (data.structured) applyAiCrmIntelFromApi(data.structured, data.summary);
+        setAiSummaryError(
+          `${typeof data.message === "string" && data.message.trim() ? data.message.trim() : "Не удалось сформировать новый итог."} Показан сохранённый итог.`,
+        );
         return;
       }
       setAiSummaryError(
@@ -1066,7 +1098,7 @@ function ChatInner() {
     } finally {
       setAiSummaryLoading(false);
     }
-  }, [chatId]);
+  }, [applyAiCrmIntelFromApi, chatId]);
 
   const copyAiSummary = useCallback(async () => {
     if (!aiSummaryText) return;
@@ -1086,7 +1118,11 @@ function ChatInner() {
         credentials: "include",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ save: true, summaryText: aiSummaryText }),
+        body: JSON.stringify({
+          save: true,
+          summaryText: aiSummaryText,
+          structured: aiCrmIntel ?? undefined,
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
       if (res.ok && data.ok) {
@@ -1103,7 +1139,7 @@ function ChatInner() {
     } finally {
       setAiSummarySaveBusy(false);
     }
-  }, [aiSummaryText, aiSummarySaveBusy, chatId]);
+  }, [aiCrmIntel, aiSummaryText, aiSummarySaveBusy, chatId]);
 
   const requestAiQuickReplies = useCallback(async () => {
     if (!chatId) return;
@@ -1290,6 +1326,39 @@ function ChatInner() {
     },
     [applyCrmFromApi, chatId, crmSaving],
   );
+
+  useEffect(() => {
+    if (!chatId || showOwnerPeerPicker) {
+      setAiCrmIntel(null);
+      setAiCrmIntelLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAiCrmIntelLoading(true);
+    void fetch(`/api/chats/${encodeURIComponent(chatId)}/ai-summary`, {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: unknown) => {
+        if (cancelled || !data || typeof data !== "object") return;
+        const saved = (data as { saved?: { structured?: unknown; summary?: string } | null }).saved;
+        if (!saved?.structured) return;
+        const normalized = normalizeChatAiCrmSummaryJson(saved.structured);
+        if (hasChatAiCrmSummaryContent(normalized)) {
+          setAiCrmIntel(normalized);
+        }
+      })
+      .catch(() => {
+        // CRM intel is optional; ignore load errors
+      })
+      .finally(() => {
+        if (!cancelled) setAiCrmIntelLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, showOwnerPeerPicker]);
 
   useEffect(() => {
     if (!chatId || showOwnerPeerPicker) {
@@ -2598,9 +2667,15 @@ function ChatInner() {
                 <div className="min-w-0">
                   <div className="text-xs font-semibold uppercase tracking-wide text-black/40">CRM</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-black/55">
-                    <span className="rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 font-medium text-black/70">
-                      {CHAT_CRM_STATUS_OPTIONS.find((x) => x.value === crmState.status)?.label ?? "Новый"}
-                    </span>
+                    {aiCrmIntel && hasChatAiCrmSummaryContent(aiCrmIntel) ? (
+                      <span className="rounded-full border border-orange-100 bg-orange-50 px-2 py-0.5 font-medium text-orange-900">
+                        {CHAT_AI_DEAL_STAGE_LABELS[normalizeChatAiDealStage(aiCrmIntel.dealStage)]}
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 font-medium text-black/70">
+                        {CHAT_CRM_STATUS_OPTIONS.find((x) => x.value === crmState.status)?.label ?? "Новый"}
+                      </span>
+                    )}
                     {crmState.tags.length > 0 ? (
                       crmState.tags.slice(0, 4).map((tag) => (
                         <span key={tag} className="rounded-full border border-orange-100 bg-orange-50 px-2 py-0.5 text-orange-800">
@@ -2617,6 +2692,56 @@ function ChatInner() {
 
               {crmOpen ? (
                 <div className="border-t border-black/10 px-4 py-3">
+                  <div className="mb-4 rounded-2xl border border-orange-100/80 bg-orange-50/40 px-3 py-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-orange-900/80">
+                      AI CRM
+                    </div>
+                    {aiCrmIntelLoading ? (
+                      <div className="mt-2 text-sm text-black/50">Загрузка аналитики…</div>
+                    ) : aiCrmIntel && hasChatAiCrmSummaryContent(aiCrmIntel) ? (
+                      <dl className="mt-2 grid gap-2 text-sm text-black/80">
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Цель клиента</dt>
+                          <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.clientGoal || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Срочность</dt>
+                          <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.urgency || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Стадия сделки</dt>
+                          <dd className="mt-0.5 font-medium">
+                            {CHAT_AI_DEAL_STAGE_LABELS[normalizeChatAiDealStage(aiCrmIntel.dealStage)]}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Следующий шаг</dt>
+                          <dd className="mt-0.5 leading-relaxed">{aiCrmIntel.nextStep || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wide text-black/45">Теги</dt>
+                          <dd className="mt-1 flex flex-wrap gap-1.5">
+                            {aiCrmIntel.tags.length > 0 ? (
+                              aiCrmIntel.tags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="rounded-full border border-orange-100 bg-white px-2 py-0.5 text-xs text-orange-800"
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-black/45">—</span>
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                    ) : (
+                      <p className="mt-2 text-sm text-black/50">
+                        Запустите AI summary в меню чата, чтобы обновить CRM-аналитику.
+                      </p>
+                    )}
+                  </div>
                   <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
                     <label className="text-xs font-semibold uppercase tracking-wide text-black/45">
                       Статус

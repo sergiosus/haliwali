@@ -2,6 +2,12 @@
  * Server-only AI chat summary helper. Does not log message text or prompts.
  */
 
+import {
+  type ChatAiCrmSummaryJson,
+  formatChatAiCrmSummaryForDisplay,
+  hasChatAiCrmSummaryContent,
+  normalizeChatAiCrmSummaryJson,
+} from "./chatAiCrmSummary";
 import { callOpenAiChatCompletion } from "./serverChatAiOpenAi";
 
 const INSUFFICIENT_RU = "Недостаточно данных для краткого итога.";
@@ -19,8 +25,8 @@ export type ChatSummarySourceMessage = {
 };
 
 export type ChatAiSummaryResult =
-  | { ok: true; summary: string }
-  | { ok: false; code: "INSUFFICIENT" | "UNCONFIGURED" | "UPSTREAM"; message: string };
+  | { ok: true; summary: string; structured: ChatAiCrmSummaryJson }
+  | { ok: false; code: "INSUFFICIENT" | "UNCONFIGURED" | "UPSTREAM" | "PARSE"; message: string };
 
 export function buildSummaryTranscript(messages: ChatSummarySourceMessage[]): string[] {
   const sorted = [...messages]
@@ -58,48 +64,91 @@ function hasEnoughContext(lines: string[]): boolean {
   return chars >= MIN_CHARS;
 }
 
-const SYSTEM_PROMPT = `Ты помощник для краткого итога переписки между покупателем и продавцом на маркетплейсе.
+const SYSTEM_PROMPT = `Ты CRM-аналитик переписки между покупателем и продавцом на маркетплейсе.
 Используй ТОЛЬКО факты из сообщений. Не выдумывай детали, цены, договорённости или имена, которых нет в переписке.
-Если данных недостаточно для честного итога, ответь ровно одной строкой: INSUFFICIENT_DATA
+Если данных недостаточно для честного анализа, ответь ровно: {"insufficient":true}
 
-Иначе ответь на русском языке строго в формате:
+Иначе ответь ТОЛЬКО валидным JSON-объектом без markdown и без пояснений, строго с ключами:
+{
+  "clientGoal": "цель или запрос клиента",
+  "problem": "проблема или суть запроса",
+  "budget": "бюджет или цена, если упоминались, иначе пустая строка",
+  "urgency": "срочность, если видна из переписки",
+  "agreement": "о чём договорились или пустая строка",
+  "nextStep": "рекомендуемый следующий шаг",
+  "dealStage": "одно из: new, discussion, agreed, completed, canceled",
+  "tags": ["короткие теги на русском или латинице, до 12 штук"]
+}`;
 
-Основной вопрос:
-<1–3 коротких предложения>
-
-О чём договорились:
-<пункты или «не зафиксировано», если в переписке этого нет>
-
-Открытые вопросы:
-<пункты или «нет»>
-
-Рекомендуемый следующий шаг:
-<одно конкретное действие на основе переписки>`;
+function extractJsonObject(raw: string): unknown | null {
+  const text = raw.trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(text.slice(start, end + 1)) as unknown;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
 
 function parseModelContent(raw: string): ChatAiSummaryResult {
-  const text = raw.trim();
-  if (!text || text === "INSUFFICIENT_DATA" || text.startsWith("INSUFFICIENT_DATA")) {
+  const parsed = extractJsonObject(raw);
+  if (!parsed || typeof parsed !== "object") {
+    console.error("[CHAT_AI_PARSE]", "invalid_json", { contentLength: raw.trim().length });
+    return { ok: false, code: "PARSE", message: "Не удалось разобрать ответ AI." };
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  if (obj.insufficient === true) {
     return { ok: false, code: "INSUFFICIENT", message: INSUFFICIENT_RU };
   }
-  return { ok: true, summary: text };
+
+  const structured = normalizeChatAiCrmSummaryJson(parsed);
+  if (!hasChatAiCrmSummaryContent(structured)) {
+    return { ok: false, code: "INSUFFICIENT", message: INSUFFICIENT_RU };
+  }
+
+  console.error("[CHAT_AI_PARSE]", "ok", {
+    dealStage: structured.dealStage,
+    tagCount: structured.tags.length,
+  });
+
+  return {
+    ok: true,
+    structured,
+    summary: formatChatAiCrmSummaryForDisplay(structured),
+  };
 }
 
 export async function generateChatAiSummary(messages: ChatSummarySourceMessage[]): Promise<ChatAiSummaryResult> {
   const lines = buildSummaryTranscript(messages);
   if (!hasEnoughContext(lines)) {
+    console.error("[CHAT_AI]", "insufficient_context", { lineCount: lines.length });
     return { ok: false, code: "INSUFFICIENT", message: INSUFFICIENT_RU };
   }
 
   const transcript = lines.join("\n");
+  console.error("[CHAT_AI]", "request_start", { lineCount: lines.length });
+
   const ai = await callOpenAiChatCompletion({
     feature: "summary",
     system: SYSTEM_PROMPT,
     user: `Переписка:\n\n${transcript}`,
-    maxTokens: 700,
+    maxTokens: 900,
     temperature: 0.2,
+    jsonObject: true,
   });
 
   if (!ai.ok) {
+    console.error("[CHAT_AI_ERROR]", "upstream", { code: ai.code });
     return {
       ok: false,
       code: ai.code,

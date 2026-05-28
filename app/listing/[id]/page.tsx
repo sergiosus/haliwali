@@ -350,6 +350,17 @@ function ListingDetail({
                   <span className="inline-flex items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium text-black/70">
                     {dealStatusLabel(dealStatus)}
                   </span>
+                  {typeof listing.latitude === "number" &&
+                  Number.isFinite(listing.latitude) &&
+                  typeof listing.longitude === "number" &&
+                  Number.isFinite(listing.longitude) ? (
+                    <Link
+                      href={`/map?listingId=${encodeURIComponent(listing.id)}`}
+                      className="inline-flex items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium text-black/70 hover:bg-black/[0.05]"
+                    >
+                      На карте
+                    </Link>
+                  ) : null}
                   {isUrgent ? (
                     <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-600">СРОЧНО</span>
                   ) : null}

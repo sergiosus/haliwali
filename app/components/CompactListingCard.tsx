@@ -16,12 +16,6 @@ import { ListingFavoriteButton } from "./ListingFavoriteButton";
 import { ListingTypeBadge } from "./ListingTypeBadge";
 import { ListingAttributesCompactLine } from "./ListingAttributesSummary";
 
-function hasListingCoordinates(listing: Listing): boolean {
-  const lat = (listing as unknown as { latitude?: unknown }).latitude;
-  const lng = (listing as unknown as { longitude?: unknown }).longitude;
-  return typeof lat === "number" && Number.isFinite(lat) && typeof lng === "number" && Number.isFinite(lng);
-}
-
 export function CompactListingCard({
   listing,
   href,
@@ -61,8 +55,6 @@ export function CompactListingCard({
   const category = (listing.categoryName ?? "").trim();
   const statusB = listingDealStatusBadgeRu(listing);
   const price = listingPriceSnippet(listing);
-  const showMapButton = variant === "link" && hasListingCoordinates(listing);
-  const mapHref = showMapButton ? `/map?listingId=${encodeURIComponent(listing.id)}` : "";
 
   const legacyAuthor = (listing as unknown as { authorName?: string }).authorName;
   const storedAuthor =
@@ -124,17 +116,6 @@ export function CompactListingCard({
             <ListingTypeBadge type={listing.type} />
             <span className="text-black/30">·</span>
             <span>{statusB}</span>
-            {showMapButton ? (
-              <Link
-                href={mapHref}
-                className="pointer-events-auto inline-flex shrink-0 items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium leading-snug text-black/70 hover:bg-black/[0.05]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                На карте
-              </Link>
-            ) : null}
             {isUrgent ? (
               <>
                 <span className="text-black/30">·</span>

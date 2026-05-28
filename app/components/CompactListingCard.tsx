@@ -16,6 +16,12 @@ import { ListingFavoriteButton } from "./ListingFavoriteButton";
 import { ListingTypeBadge } from "./ListingTypeBadge";
 import { ListingAttributesCompactLine } from "./ListingAttributesSummary";
 
+function hasListingCoordinates(listing: Listing): boolean {
+  const lat = (listing as unknown as { latitude?: unknown }).latitude;
+  const lng = (listing as unknown as { longitude?: unknown }).longitude;
+  return typeof lat === "number" && Number.isFinite(lat) && typeof lng === "number" && Number.isFinite(lng);
+}
+
 export function CompactListingCard({
   listing,
   href,
@@ -55,6 +61,8 @@ export function CompactListingCard({
   const category = (listing.categoryName ?? "").trim();
   const statusB = listingDealStatusBadgeRu(listing);
   const price = listingPriceSnippet(listing);
+  const showMapButton = variant === "link" && hasListingCoordinates(listing);
+  const mapHref = showMapButton ? `/map?listingId=${encodeURIComponent(listing.id)}` : "";
 
   const legacyAuthor = (listing as unknown as { authorName?: string }).authorName;
   const storedAuthor =
@@ -90,23 +98,22 @@ export function CompactListingCard({
       </div>;
 
   return (
-    <div className="max-w-full min-w-0 overflow-hidden rounded-2xl border border-black/10 bg-white p-3 shadow-sm sm:p-4">
-      <div className="flex min-w-0 max-w-full gap-3">
-        {variant === "link" ?
-          <Link href={href} className={thumbClass}>
-            {thumbnail}
-          </Link>
-        : <div className={thumbClass}>{thumbnail}</div>}
+    <div className="relative max-w-full min-w-0 overflow-hidden rounded-2xl border border-black/10 bg-white p-3 shadow-sm transition-shadow hover:shadow-md sm:p-4">
+      {variant === "link" ? (
+        <Link href={href} className="absolute inset-0 z-0 rounded-2xl" aria-label={title} />
+      ) : null}
+
+      <div className="relative z-[1] pointer-events-none flex min-w-0 max-w-full gap-3">
+        <div className={thumbClass}>{thumbnail}</div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            {variant === "link" ?
-              <Link href={href} className={`${titleClass} hover:underline`}>
-                {title}
-              </Link>
-            : <div className={`${titleClass} cursor-default`}>{title}</div>}
+            <div className={variant === "link" ? titleClass : `${titleClass} cursor-default`}>{title}</div>
             <div
-              className={`mt-0.5 shrink-0 self-start ${interactiveChrome ? "pointer-events-auto relative z-[2]" : ""}`}
+              className={[
+                "mt-0.5 shrink-0 self-start pointer-events-auto relative z-[2]",
+                interactiveChrome ? "pointer-events-auto" : "",
+              ].join(" ")}
               onClick={(e) => e.stopPropagation()}
             >
               <ListingFavoriteButton listingId={listing.id} />
@@ -163,6 +170,20 @@ export function CompactListingCard({
           </div>
         </div>
       </div>
+
+      {showMapButton ? (
+        <div className="relative z-[2] mt-2 flex justify-end">
+          <Link
+            href={mapHref}
+            className="pointer-events-auto inline-flex h-8 items-center rounded-full border border-black/15 bg-white px-3 text-xs font-medium text-black/70 hover:bg-black/[0.03]"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            На карте
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }

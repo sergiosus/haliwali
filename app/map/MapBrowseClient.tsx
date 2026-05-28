@@ -141,6 +141,9 @@ function mapKeyFromScope(scope: SearchScopeLocation): string {
 function mapViewFromScope(scope: SearchScopeLocation): { center: MapCenter; zoom: number } {
   const s = normalizeSearchScope(scope);
   if (s.type === "country") return mapCenterZoomForRussiaWide();
+  if (s.type === "point" && typeof s.lat === "number" && typeof s.lng === "number") {
+    return mapCenterZoomForCity(s.lat, s.lng);
+  }
   if (s.type === "region" || s.type === "federal_district") {
     const lab = (s.region ?? s.label ?? "").trim();
     if (!lab) return mapCenterZoomForRussiaWide();
@@ -159,6 +162,7 @@ export default function MapBrowseClient() {
   const [mapScope, setMapScope] = useState<SearchScopeLocation>({ ...DEFAULT_SEARCH_SCOPE });
   const [mapCompanies, setMapCompanies] = useState<CatalogCompanyListItem[]>([]);
   const urlFiltersAppliedRef = useRef(false);
+  const listingFocusAppliedRef = useRef(false);
 
   const mapCityQuery = useMemo(() => {
     const s = normalizeSearchScope(mapScope);
@@ -225,6 +229,26 @@ export default function MapBrowseClient() {
       setMapScope(resolveSelectedBrowseLocationScope());
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!loaded || listingFocusAppliedRef.current) return;
+    const listingId = (searchParams.get("listingId") ?? "").trim();
+    if (!listingId) return;
+    const listing = listings.find((l) => l.id === listingId && isListingPubliclyListed(l));
+    if (!listing) return;
+    const coords = listingCoordinatesForMap(listing);
+    if (!coords) return;
+    listingFocusAppliedRef.current = true;
+    setSelectedId(listing.id);
+    setPreviewId(listing.id);
+    setMapScope({
+      type: "point",
+      label: (listing.city ?? "").trim() || "Точка на карте",
+      lat: coords.lat,
+      lng: coords.lng,
+      radiusKm: 5,
+    });
+  }, [loaded, listings, searchParams]);
 
   const mapView = useMemo(() => mapViewFromScope(mapScope), [mapScope]);
   const mapInstanceKey = mapKeyFromScope(mapScope);

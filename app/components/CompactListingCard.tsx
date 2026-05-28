@@ -148,42 +148,37 @@ export function CompactListingCard({
 
           <ListingAttributesCompactLine listing={listing} className="mt-1 line-clamp-1 text-[12px] text-black/50" />
 
-          <div className="mt-1.5 truncate text-[12px] text-black/50">
-            <span>{metaTailParts.join(" · ")}</span>
-            <span aria-hidden className="text-black/35">
-              {" "}
-              ·{" "}
-            </span>
-            <ListingAuthorLine
-              ownerId={listing.ownerId}
-              currentUserId={currentUserId}
-              publicApi={publicAuthor ?? null}
-              storedAuthorName={storedAuthor}
-              nameClassName="font-medium text-black/65"
-              linkClassName="font-medium text-orange-600 hover:text-orange-700 hover:underline"
-              debugListingMeta={{
-                id: listing.id,
-                ownerId: listing.ownerId,
-                authorPublicName: listing.authorPublicName,
-              }}
-            />
+          <div className="mt-1.5 flex min-w-0 items-center justify-between gap-2 text-[12px] text-black/50">
+            <span className="min-w-0 truncate">{metaTailParts.join(" · ")}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <ListingAuthorLine
+                ownerId={listing.ownerId}
+                currentUserId={currentUserId}
+                publicApi={publicAuthor ?? null}
+                storedAuthorName={storedAuthor}
+                nameClassName="font-medium text-black/65"
+                linkClassName="font-medium text-orange-600 hover:text-orange-700 hover:underline"
+                debugListingMeta={{
+                  id: listing.id,
+                  ownerId: listing.ownerId,
+                  authorPublicName: listing.authorPublicName,
+                }}
+              />
+              {showMapButton ? (
+                <Link
+                  href={mapHref}
+                  className="pointer-events-auto inline-flex h-7 items-center rounded-full border border-black/15 bg-white px-2.5 text-[11px] font-medium text-black/70 hover:bg-black/[0.03]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  На карте
+                </Link>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>
-
-      {showMapButton ? (
-        <div className="relative z-[2] mt-2 flex justify-end">
-          <Link
-            href={mapHref}
-            className="pointer-events-auto inline-flex h-8 items-center rounded-full border border-black/15 bg-white px-3 text-xs font-medium text-black/70 hover:bg-black/[0.03]"
-            onClick={(e) => {
-              e.stopPropagation();
-            }}
-          >
-            На карте
-          </Link>
-        </div>
-      ) : null}
     </div>
   );
 }

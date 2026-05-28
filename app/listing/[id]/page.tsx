@@ -350,17 +350,42 @@ function ListingDetail({
                   <span className="inline-flex items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium text-black/70">
                     {dealStatusLabel(dealStatus)}
                   </span>
-                  {typeof listing.latitude === "number" &&
-                  Number.isFinite(listing.latitude) &&
-                  typeof listing.longitude === "number" &&
-                  Number.isFinite(listing.longitude) ? (
-                    <Link
-                      href={`/map?listingId=${encodeURIComponent(listing.id)}`}
-                      className="inline-flex items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium text-black/70 hover:bg-black/[0.05]"
-                    >
-                      На карте
-                    </Link>
-                  ) : null}
+                  {(() => {
+                    const city = (listing.city ?? "").trim();
+                    const loc = listing.location;
+                    const hasResolvablePlace =
+                      Boolean(city) ||
+                      Boolean((loc?.city ?? "").trim()) ||
+                      Boolean((loc?.region ?? "").trim()) ||
+                      Boolean((loc?.displayName ?? "").trim()) ||
+                      (typeof loc?.lat === "number" && Number.isFinite(loc.lat)) ||
+                      (typeof loc?.lng === "number" && Number.isFinite(loc.lng));
+                    if (!hasResolvablePlace) return null;
+
+                    const hasExactCoords =
+                      typeof listing.latitude === "number" &&
+                      Number.isFinite(listing.latitude) &&
+                      typeof listing.longitude === "number" &&
+                      Number.isFinite(listing.longitude);
+
+                    const kind =
+                      listing.type === "task" ? "task"
+                      : listing.type === "service" ? "service"
+                      : "product";
+
+                    const href = hasExactCoords
+                      ? `/map?listingId=${encodeURIComponent(listing.id)}`
+                      : `/map?city=${encodeURIComponent(city || loc?.city || loc?.displayName || "")}&category=${encodeURIComponent(listing.categorySlug)}&kind=${encodeURIComponent(kind)}`;
+
+                    return (
+                      <Link
+                        href={href}
+                        className="inline-flex items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium text-black/70 hover:bg-black/[0.05]"
+                      >
+                        На карте
+                      </Link>
+                    );
+                  })()}
                   {isUrgent ? (
                     <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-600">СРОЧНО</span>
                   ) : null}

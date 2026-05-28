@@ -79,6 +79,7 @@ export function SiteHeader() {
     pathname === "/marketplaces" ||
     pathname === "/search" ||
     pathname.startsWith("/category/") ||
+    pathname.startsWith("/listing/") ||
     pathname.startsWith("/catalogs") ||
     pathname.startsWith("/admin");
   const showSiteModeNav = !suppressUserChromeForAdmin;

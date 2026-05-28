@@ -124,6 +124,17 @@ export function CompactListingCard({
             <ListingTypeBadge type={listing.type} />
             <span className="text-black/30">·</span>
             <span>{statusB}</span>
+            {showMapButton ? (
+              <Link
+                href={mapHref}
+                className="pointer-events-auto inline-flex shrink-0 items-center rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-xs font-medium leading-snug text-black/70 hover:bg-black/[0.05]"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                На карте
+              </Link>
+            ) : null}
             {isUrgent ? (
               <>
                 <span className="text-black/30">·</span>
@@ -164,17 +175,6 @@ export function CompactListingCard({
                   authorPublicName: listing.authorPublicName,
                 }}
               />
-              {showMapButton ? (
-                <Link
-                  href={mapHref}
-                  className="pointer-events-auto inline-flex h-7 items-center rounded-full border border-black/15 bg-white px-2.5 text-[11px] font-medium text-black/70 hover:bg-black/[0.03]"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  На карте
-                </Link>
-              ) : null}
             </div>
           </div>
         </div>

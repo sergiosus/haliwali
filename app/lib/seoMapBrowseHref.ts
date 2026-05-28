@@ -8,7 +8,7 @@ export function mapKindFromSeoSegment(segment: SeoSegment): MapBrowseKind {
   return "product";
 }
 
-/** Link to `/map` with filters from SEO category/city pages. */
+/** Link to `/map` with filters from SEO category/city pages (top «На карте» button only). */
 export function buildMapBrowseHref(opts: {
   categorySlug?: string;
   cityName?: string | null;
@@ -28,23 +28,4 @@ export function parseMapBrowseKind(raw: string | null): MapBrowseKind {
   const v = (raw ?? "").trim().toLowerCase();
   if (v === "task" || v === "service" || v === "product") return v;
   return "all";
-}
-
-/** Exact stored coordinates — used to show «На карте» on SEO cards. */
-export function buildMapListingFocusHref(listingId: string): string {
-  const id = listingId.trim();
-  return `/map?listingId=${encodeURIComponent(id)}`;
-}
-
-export function buildMapCompanyFocusHref(companySlug: string): string {
-  const slug = companySlug.trim();
-  return `/map?company=${encodeURIComponent(slug)}`;
-}
-
-export function mapListingMarkerId(listingId: string): string {
-  return listingId.trim();
-}
-
-export function mapCompanyMarkerId(companySlug: string): string {
-  return `co:${companySlug.trim()}`;
 }

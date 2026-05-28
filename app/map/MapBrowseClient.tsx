@@ -9,7 +9,6 @@ import { parseMapBrowseKind } from "../lib/seoMapBrowseHref";
 import type { CatalogCompanyListItem } from "../lib/catalogTypes";
 import { hasCatalogCoordinates } from "../lib/catalogMapLinks";
 import { companyPublicPath } from "../lib/seoRoutes";
-import { mapCompanyMarkerId } from "../lib/seoMapBrowseHref";
 import { CompactListingCard } from "../components/CompactListingCard";
 import { MapListingPreviewModal } from "../components/map/MapListingPreviewModal";
 import { MapRegionSettlementSelectors } from "../components/map/MapRegionSettlementSelectors";
@@ -159,14 +158,7 @@ export default function MapBrowseClient() {
   const { loaded, listings } = useListingsStore();
   const [mapScope, setMapScope] = useState<SearchScopeLocation>({ ...DEFAULT_SEARCH_SCOPE });
   const [mapCompanies, setMapCompanies] = useState<CatalogCompanyListItem[]>([]);
-  const [focusCompany, setFocusCompany] = useState<CatalogCompanyListItem | null>(null);
-  const [recenterTick, setRecenterTick] = useState(0);
-  const [recenterTarget, setRecenterTarget] = useState<MapCenter | null>(null);
   const urlFiltersAppliedRef = useRef(false);
-  const mapFocusAppliedRef = useRef(false);
-
-  const focusListingId = (searchParams.get("listingId") ?? "").trim();
-  const focusCompanySlug = (searchParams.get("company") ?? "").trim();
 
   const mapCityQuery = useMemo(() => {
     const s = normalizeSearchScope(mapScope);
@@ -192,27 +184,6 @@ export default function MapBrowseClient() {
       cancelled = true;
     };
   }, [mapCityQuery]);
-
-  useEffect(() => {
-    if (!focusCompanySlug) {
-      setFocusCompany(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/catalogs/companies/${encodeURIComponent(focusCompanySlug)}`, { credentials: "same-origin" })
-      .then((r) => r.json())
-      .then((data: { ok?: boolean; company?: CatalogCompanyListItem }) => {
-        if (cancelled) return;
-        if (data.ok && data.company) setFocusCompany(data.company);
-        else setFocusCompany(null);
-      })
-      .catch(() => {
-        if (!cancelled) setFocusCompany(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [focusCompanySlug]);
 
   const [listingKind, setListingKind] = useState<KindFilter>("all");
   const [categorySlug, setCategorySlug] = useState<string>("all");
@@ -357,66 +328,9 @@ export default function MapBrowseClient() {
     }
   }, [listingKind]);
 
-  const mapListingsSource = useMemo(() => {
-    if (!focusListingId || !loaded) return baseFiltered;
-    const focused = listings.find((l) => l.id === focusListingId && isListingPubliclyListed(l));
-    if (!focused) return baseFiltered;
-    if (baseFiltered.some((l) => l.id === focusListingId)) return baseFiltered;
-    return [focused, ...baseFiltered];
-  }, [baseFiltered, focusListingId, loaded, listings]);
-
-  const mapCompaniesSource = useMemo(() => {
-    if (!focusCompany || !hasCatalogCoordinates(focusCompany)) return mapCompanies;
-    if (mapCompanies.some((c) => c.slug === focusCompany.slug)) return mapCompanies;
-    return [focusCompany, ...mapCompanies];
-  }, [mapCompanies, focusCompany]);
-
-  const visibleListings = mapListingsSource;
+  const visibleListings = baseFiltered;
 
   const { viewCounts, publicByUserId } = useCompactListingEnrichment(visibleListings);
-
-  useEffect(() => {
-    if (!loaded || mapFocusAppliedRef.current) return;
-
-    if (focusListingId) {
-      const listing = listings.find((l) => l.id === focusListingId && isListingPubliclyListed(l));
-      const coords = listing ? listingMarkerPlacemarkCoordinates(listing) : null;
-      if (listing && coords) {
-        mapFocusAppliedRef.current = true;
-        setSelectedId(listing.id);
-        setPreviewId(listing.id);
-        setMapScope({
-          label: (listing.city ?? "").trim() || "Точка на карте",
-          type: "point",
-          lat: coords.lat,
-          lng: coords.lng,
-          radiusKm: 5,
-        });
-        setRecenterTarget({ lat: coords.lat, lng: coords.lng });
-        setRecenterTick((t) => t + 1);
-      }
-      return;
-    }
-
-    if (focusCompanySlug && focusCompany && hasCatalogCoordinates(focusCompany)) {
-      mapFocusAppliedRef.current = true;
-      const markerId = mapCompanyMarkerId(focusCompany.slug);
-      setSelectedId(markerId);
-      setPreviewId(null);
-      setMapScope({
-        label: (focusCompany.city ?? "").trim() || focusCompany.name,
-        type: "point",
-        lat: focusCompany.latitude as number,
-        lng: focusCompany.longitude as number,
-        radiusKm: 5,
-      });
-      setRecenterTarget({
-        lat: focusCompany.latitude as number,
-        lng: focusCompany.longitude as number,
-      });
-      setRecenterTick((t) => t + 1);
-    }
-  }, [loaded, focusListingId, focusCompanySlug, focusCompany, listings]);
 
   const previewListing = useMemo(() => {
     if (!previewId) return null;
@@ -467,7 +381,7 @@ export default function MapBrowseClient() {
       });
     }
     return out;
-  }, [mapListingsSource, selectedId, mapCompaniesSource]);
+  }, [baseFiltered, selectedId, mapCompanies]);
 
   useEffect(() => {
     if (!selectedId || !listRef.current) return;
@@ -765,8 +679,6 @@ export default function MapBrowseClient() {
             showGeolocationButton
             settlementMarkers={[]}
             listingMarkers={listingMarkers}
-            recenterTick={recenterTick}
-            recenterTarget={recenterTarget}
             onListingMarkerClick={(id) => {
               if (id.startsWith("co:")) {
                 router.push(companyPublicPath(id.slice(3)));

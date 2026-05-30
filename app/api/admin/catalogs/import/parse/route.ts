@@ -2,10 +2,11 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import {
   parseUrlList,
+  processCompanyUrlBatch,
   processCsvInput,
   processTextInput,
-  processUrlBatch,
 } from "../../../../../lib/catalogExtractionService";
+import { partitionImportUrls, processSourceOfferUrlBatch } from "../../../../../lib/catalogSourceOfferExtractionService";
 import { recordCatalogImportSession } from "../../../../../lib/serverCatalogImportSessionStore";
 import type { CatalogImportParseKind } from "../../../../../lib/catalogImportTypes";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
@@ -85,18 +86,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "URL_REQUIRED" }, { status: 400 });
     }
 
-    const { drafts, errors } = await processUrlBatch(urls, defaults);
+    const { companyUrls, sourceOfferUrls } = partitionImportUrls(urls);
+    const [companyBatch, offerBatch] = await Promise.all([
+      companyUrls.length > 0 ? processCompanyUrlBatch(companyUrls, defaults) : Promise.resolve({ drafts: [], errors: [], upsert: { drafts: [], createdIds: [], updatedIds: [], sourcesCreated: 0 } }),
+      sourceOfferUrls.length > 0 ? processSourceOfferUrlBatch(sourceOfferUrls, defaults) : Promise.resolve({ drafts: [], errors: [], upsert: { drafts: [], createdIds: [], updatedIds: [] } }),
+    ]);
     await recordCatalogImportSession({
       query: urls.join("\n").slice(0, 2000),
       city,
       categorySlug,
-      resultCount: drafts.length,
+      resultCount: companyBatch.drafts.length + offerBatch.drafts.length,
     });
     return NextResponse.json({
       ok: true,
-      drafts,
-      count: drafts.length,
-      errors,
+      drafts: companyBatch.drafts,
+      sourceOfferDrafts: offerBatch.drafts,
+      count: companyBatch.drafts.length + offerBatch.drafts.length,
+      errors: [...companyBatch.errors, ...offerBatch.errors],
+      sourceOfferImportUrl: "/admin/catalogs/import/drafts?panel=source-offers",
     });
   }
 

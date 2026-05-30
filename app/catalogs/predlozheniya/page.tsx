@@ -1,19 +1,16 @@
 import type { Metadata } from "next";
-import { CatalogSectionPlaceholder } from "../../components/catalog/CatalogSectionPlaceholder";
+import { CatalogSourceOffersClient } from "../../components/catalog/CatalogSourceOffersClient";
 import { siteUrl } from "../../lib/siteUrl";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
-  title: "Предложения — Каталог предложений — Haliwali",
-  description: "Внешние предложения с площадок и сайтов компаний. Раздел в разработке.",
+  title: "Объявления из источников — Каталог предложений — Haliwali",
+  description:
+    "Индекс внешних предложений с Avito, Drom, VK и сайтов компаний. Ссылка на оригинальный источник.",
   alternates: { canonical: `${siteUrl()}/catalogs/predlozheniya` },
-  robots: { index: false, follow: true },
 };
 
-export default function CatalogOffersPlaceholderPage() {
-  return (
-    <CatalogSectionPlaceholder
-      title="Предложения"
-      lead="Здесь будут предложения, импортированные с Avito, Drom, VK и сайтов компаний — отдельно от объявлений пользователей."
-    />
-  );
+export default function CatalogSourceOffersPage() {
+  return <CatalogSourceOffersClient />;
 }

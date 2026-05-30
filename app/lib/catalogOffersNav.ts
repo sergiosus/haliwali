@@ -8,7 +8,11 @@ export const CATALOG_RESERVED_SEGMENTS = [
 
 export const CATALOG_OFFERS_SECTIONS = [
   { slug: "companies", href: "/catalogs/companies", label: "Компании" },
-  { slug: "predlozheniya", href: "/catalogs/predlozheniya", label: "Предложения" },
+  {
+    slug: "predlozheniya",
+    href: "/catalogs/predlozheniya",
+    label: "Объявления из источников",
+  },
   {
     slug: "poisk-postavshchikov",
     href: "/catalogs/poisk-postavshchikov",

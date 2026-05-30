@@ -20,6 +20,8 @@ import {
   type PersistedImportCandidate,
 } from "../../lib/catalogImportCandidateTypes";
 import { CATALOG_CATEGORY_SEED } from "../../lib/catalogTypes";
+import { classifySourceUrl } from "../../lib/catalogSourceClassifier";
+import { catalogSourceNameFromUrl, catalogSourceNameLabel } from "../../lib/catalogSourceName";
 
 const IMPORT_CANDIDATES_STATE_KEY = "haliwali_admin_import_candidates_state_v1";
 const RECENT_KEYWORDS_KEY = "haliwali_admin_import_recent_keywords";
@@ -138,6 +140,14 @@ async function readApiJson<T extends Record<string, unknown>>(response: Response
     return JSON.parse(text) as T;
   } catch {
     return { message: text.slice(0, 300) } as unknown as T;
+  }
+}
+
+function isListingSourceUrl(url: string): boolean {
+  try {
+    return classifySourceUrl(new URL(url.startsWith("http") ? url : `https://${url}`)) === "listing";
+  } catch {
+    return false;
   }
 }
 
@@ -898,6 +908,18 @@ export function AdminCatalogImportCandidatesSection({
                             : null}
                           </div>
                           <p className="line-clamp-2 text-black/55">{c.snippet}</p>
+                          {isListingSourceUrl(c.url) ?
+                            <div className="mt-2 rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2 text-xs text-violet-950">
+                              <p className="font-medium">Объявление из источника</p>
+                              <p className="mt-0.5">
+                                Источник: {catalogSourceNameLabel(catalogSourceNameFromUrl(c.url))} · город:{" "}
+                                {session?.city || "—"} · категория: {session?.categorySlug || "—"}
+                              </p>
+                              <p className="mt-0.5 line-clamp-2 text-violet-950/70">
+                                Сниппет: {c.snippet || "—"}
+                              </p>
+                            </div>
+                          : null}
                           {c.existingCompany ?
                             <div className="mt-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-950">
                               <p className="font-medium">В каталоге: {c.existingCompany.name}</p>

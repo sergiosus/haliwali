@@ -2,7 +2,11 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { logAdminCatalogImport, logCatalogDiscover, logCatalogImport } from "../../../../../lib/catalogCatalogLog";
 import { normalizeImportDomain } from "../../../../../lib/catalogImportDomain";
-import { MAX_URLS_PER_BATCH, processUrlBatch } from "../../../../../lib/catalogExtractionService";
+import { MAX_URLS_PER_BATCH, processCompanyUrlBatch } from "../../../../../lib/catalogExtractionService";
+import {
+  partitionImportUrls,
+  processSourceOfferUrlBatch,
+} from "../../../../../lib/catalogSourceOfferExtractionService";
 import type { CatalogImportDraft } from "../../../../../lib/catalogImportTypes";
 import type { ImportCandidateResultStatus, PersistedImportCandidate } from "../../../../../lib/catalogImportCandidateTypes";
 import {
@@ -148,23 +152,38 @@ export async function POST(req: Request) {
     }
   }
 
-  const { drafts, errors, upsert } =
-    importableUrls.length > 0 ?
-      await processUrlBatch(importableUrls, { categorySlug, city })
-    : { drafts: [], errors: [], upsert: { drafts: [], createdIds: [], updatedIds: [], sourcesCreated: 0 } };
+  const { companyUrls, sourceOfferUrls } = partitionImportUrls(importableUrls);
+  const emptyCompany = {
+    drafts: [] as CatalogImportDraft[],
+    errors: [] as { url: string; error: string }[],
+    upsert: { drafts: [], createdIds: [], updatedIds: [], sourcesCreated: 0 },
+  };
+  const [companyBatch, offerBatch] = await Promise.all([
+    companyUrls.length > 0 ?
+      processCompanyUrlBatch(companyUrls, { categorySlug, city })
+    : Promise.resolve(emptyCompany),
+    sourceOfferUrls.length > 0 ?
+      processSourceOfferUrlBatch(sourceOfferUrls, { categorySlug, city })
+    : Promise.resolve({ drafts: [], errors: [], upsert: { drafts: [], createdIds: [], updatedIds: [] } }),
+  ]);
+  const drafts = companyBatch.drafts;
+  const errors = [...companyBatch.errors, ...offerBatch.errors];
+  const upsert = companyBatch.upsert;
+  const sourceOfferDrafts = offerBatch.drafts;
 
   logCatalogImport("inserted_sources_count", { count: upsert.sourcesCreated });
   logCatalogImport("inserted_drafts_count", {
     count: drafts.length,
     created: upsert.createdIds.length,
     updated: upsert.updatedIds.length,
+    sourceOffers: sourceOfferDrafts.length,
   });
 
   await recordCatalogImportSession({
     query: searchQuery || rawUrls.slice(0, 5).join("\n"),
     city,
     categorySlug,
-    resultCount: drafts.length,
+    resultCount: drafts.length + sourceOfferDrafts.length,
   });
 
   const dbDraftCount = await countCatalogImportDraftsInDb();
@@ -177,13 +196,16 @@ export async function POST(req: Request) {
     const domain = draftDomain(draft);
     if (domain) draftsByDomain.set(domain, draft);
   }
+  const offerDraftByUrl = new Map(
+    sourceOfferDrafts.map((d) => [d.sourceUrl.trim().toLowerCase(), d]),
+  );
   const errorsByDomain = new Map<string, string>();
   for (const err of errors) {
     const domain = resultDomain(err.url, candidatesByUrl.get(err.url));
     if (domain) errorsByDomain.set(domain, err.error);
   }
   const urlsByDomain = new Map<string, string[]>();
-  for (const url of importableUrls) {
+  for (const url of companyUrls) {
     const domain = resultDomain(url, candidatesByUrl.get(url));
     const list = urlsByDomain.get(domain) ?? [];
     list.push(url);
@@ -191,6 +213,32 @@ export async function POST(req: Request) {
   }
 
   const results: CandidateImportResult[] = [...preliminaryResults];
+
+  for (const url of sourceOfferUrls) {
+    const domain = resultDomain(url, candidatesByUrl.get(url));
+    const draft = offerDraftByUrl.get(url.trim().toLowerCase());
+    const err = errors.find((e) => e.url === url)?.error;
+    if (err || !draft) {
+      results.push({
+        url,
+        domain,
+        status: invalidStatus(err ?? "NO_RESULT"),
+        reason: err ?? "NO_RESULT",
+      });
+      continue;
+    }
+    const isDup = draft.status === "duplicate" || offerBatch.upsert.updatedIds.includes(draft.id);
+    results.push({
+      url,
+      domain,
+      status: isDup ? "skipped_duplicate" : "imported",
+      reason: isDup ? "SOURCE_OFFER_DUPLICATE" : "SOURCE_OFFER_DRAFT_CREATED",
+      draftId: draft.id,
+      duplicateHref: draft.duplicateOfOfferId ? `/catalogs/predlozheniya#offer-${draft.duplicateOfOfferId}` : null,
+      duplicateName: draft.duplicateHint,
+    });
+  }
+
   for (const [domain, domainUrls] of urlsByDomain) {
     const draft = draftsByDomain.get(domain);
     const error = errorsByDomain.get(domain);
@@ -270,5 +318,7 @@ export async function POST(req: Request) {
     processedLimit: MAX_URLS_PER_BATCH,
     truncated,
     importUrl: "/admin/catalogs/import/drafts",
+    sourceOfferDrafts,
+    sourceOfferImportUrl: "/admin/catalogs/import/drafts?panel=source-offers",
   });
 }

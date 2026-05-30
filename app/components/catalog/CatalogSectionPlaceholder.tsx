@@ -16,7 +16,7 @@ export function CatalogSectionPlaceholder({
         <div className="mt-8 rounded-2xl border border-dashed border-black/[0.12] bg-white px-5 py-10 text-center shadow-sm">
           <p className="text-sm font-medium text-black/70">Раздел готовится</p>
           <p className="mx-auto mt-2 max-w-md text-sm text-black/45">
-            Скоро здесь появится функциональность. Пока вы можете перейти в раздел «Компании».
+            Скоро здесь появится больше функций. Опубликованные предложения — в разделе «Объявления из источников».
           </p>
           <Link
             href={CATALOG_OFFERS_HUB_HREF}

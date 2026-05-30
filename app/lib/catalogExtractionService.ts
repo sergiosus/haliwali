@@ -106,7 +106,11 @@ async function extractCompanyForDomain(
   const url = new URL(primaryUrl.startsWith("http") ? primaryUrl : `https://${primaryUrl}`);
   const sourceType = classifySourceUrl(url);
 
-  if (sourceType === "vk" || sourceType === "listing") {
+  if (sourceType === "listing") {
+    return { sourceId: 0, draft: null, error: "LISTING_USE_SOURCE_OFFER_IMPORT" };
+  }
+
+  if (sourceType === "vk") {
     const { sourceId, drafts } = await extractFromUrl(primaryUrl, defaults);
     const d = drafts[0];
     if (d) attachDomainMeta(d, domain);
@@ -182,7 +186,8 @@ function mapExtractionError(e: unknown): string {
   return code;
 }
 
-export async function processUrlBatch(
+/** Company-site / VK / directory URLs only — marketplace listings use `processSourceOfferUrlBatch`. */
+export async function processCompanyUrlBatch(
   urls: string[],
   defaults: ExtractionDefaults,
 ): Promise<{

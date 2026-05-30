@@ -23,7 +23,15 @@ const TABS: CatalogSourceOfferDraftStatus[] = [
   "rejected",
 ];
 
-export function AdminCatalogSourceOfferDraftsPanel({ onChanged }: { onChanged?: () => void }) {
+export function AdminCatalogSourceOfferDraftsPanel({
+  onChanged,
+  embedded = false,
+  refreshSignal,
+}: {
+  onChanged?: () => void;
+  embedded?: boolean;
+  refreshSignal?: number;
+}) {
   const [tab, setTab] = useState<CatalogSourceOfferDraftStatus>("draft");
   const [drafts, setDrafts] = useState<CatalogSourceOfferDraft[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -55,7 +63,7 @@ export function AdminCatalogSourceOfferDraftsPanel({ onChanged }: { onChanged?: 
   useEffect(() => {
     if (!tablesReady) return;
     void load(tab);
-  }, [tab, load, tablesReady]);
+  }, [tab, load, tablesReady, refreshSignal]);
 
   const filtered = useMemo(() => drafts, [drafts]);
 
@@ -95,12 +103,14 @@ export function AdminCatalogSourceOfferDraftsPanel({ onChanged }: { onChanged?: 
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Импорт предложений</h2>
-        <p className="mt-1 text-sm text-black/55">
-          Объявления с Avito, Drom и других площадок. Не смешиваются с компаниями и объявлениями пользователей.
-        </p>
-      </div>
+      {!embedded ?
+        <div>
+          <h2 className="text-lg font-semibold">Импорт предложений</h2>
+          <p className="mt-1 text-sm text-black/55">
+            Объявления с Avito, Drom и других площадок. Не смешиваются с компаниями и объявлениями пользователей.
+          </p>
+        </div>
+      : null}
 
       <div className="flex flex-wrap gap-2">
         {TABS.map((id) => (

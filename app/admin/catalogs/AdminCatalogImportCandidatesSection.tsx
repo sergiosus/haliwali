@@ -152,6 +152,35 @@ function isListingSourceUrl(url: string): boolean {
   }
 }
 
+type OfferSourceFilter = "all" | "avito" | "drom" | "vk" | "other";
+
+const OFFER_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[] = [
+  { value: "all", label: "Все источники" },
+  { value: "avito", label: "Avito" },
+  { value: "drom", label: "Drom / Auto.ru" },
+  { value: "vk", label: "VK" },
+  { value: "other", label: "Другие" },
+];
+
+function matchesOfferSourceFilter(url: string, filter: OfferSourceFilter): boolean {
+  if (filter === "all") return true;
+  const lower = url.toLowerCase();
+  if (filter === "avito") return lower.includes("avito.ru");
+  if (filter === "drom") return lower.includes("drom.ru") || lower.includes("auto.ru");
+  if (filter === "vk") return lower.includes("vk.com") || lower.includes("vk.ru");
+  return (
+    !lower.includes("avito.ru") &&
+    !lower.includes("drom.ru") &&
+    !lower.includes("auto.ru") &&
+    !lower.includes("vk.com") &&
+    !lower.includes("vk.ru")
+  );
+}
+
+function isOfferCandidate(c: PersistedImportCandidate): boolean {
+  return c.discoverySourceType === "listing" || isListingSourceUrl(c.url);
+}
+
 function apiErrorMessage(status: number, data: { message?: string; error?: string }, fallback: string): string {
   const message = data.message?.trim();
   const error = data.error?.trim();
@@ -220,13 +249,17 @@ function addRecentKeyword(keywords: string[], keyword: string): string[] {
 export function AdminCatalogImportCandidatesSection({
   compact = false,
   hideShell = false,
+  offerOnly = false,
   onChanged,
   onOpenOfferImport,
+  onGoToDrafts,
 }: {
   compact?: boolean;
   hideShell?: boolean;
+  offerOnly?: boolean;
   onChanged?: () => void;
   onOpenOfferImport?: () => void;
+  onGoToDrafts?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
@@ -238,6 +271,7 @@ export function AdminCatalogImportCandidatesSection({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [sourceOfferDraftCount, setSourceOfferDraftCount] = useState(0);
+  const [sourceFilter, setSourceFilter] = useState<OfferSourceFilter>("all");
   const [queriesUsed, setQueriesUsed] = useState<string[]>([]);
   const [recentKeywords, setRecentKeywords] = useState<string[]>([]);
   const [keywordFocused, setKeywordFocused] = useState(false);
@@ -314,7 +348,11 @@ export function AdminCatalogImportCandidatesSection({
   }, [initialSessionId, loadSession, loadHistory]);
 
   const cityLabel = catalogDiscoverCityLabel(location);
-  const candidates = session?.candidates ?? [];
+  const rawCandidates = session?.candidates ?? [];
+  const candidates = useMemo(() => {
+    if (!offerOnly) return rawCandidates;
+    return rawCandidates.filter((c) => isOfferCandidate(c) && matchesOfferSourceFilter(c.url, sourceFilter));
+  }, [rawCandidates, offerOnly, sourceFilter]);
   const isCurrentSearchResult = searchResultMatchesInput(session, query, cityLabel, categorySlug);
   const showPreviousResultsLabel = Boolean(session && !isCurrentSearchResult);
 
@@ -499,7 +537,10 @@ export function AdminCatalogImportCandidatesSection({
   async function sendToImport() {
     const selectedCandidates = selectedCandidatesByRelevance(candidates);
     const requestedUrlCount = selectedCandidates.length;
-    const urls = selectedCandidates.slice(0, MAX_URLS_PER_BATCH).map((c) => c.url);
+    const urls = selectedCandidates
+      .slice(0, MAX_URLS_PER_BATCH)
+      .map((c) => c.url)
+      .filter((url) => !offerOnly || isListingSourceUrl(url));
     if (urls.length === 0) return;
     setBusy(true);
     setSourceOfferDraftCount(0);
@@ -647,13 +688,17 @@ export function AdminCatalogImportCandidatesSection({
       >
         {!hideShell ?
           <>
-            <h2 className="text-lg font-semibold">Поиск источников</h2>
+            <h2 className="text-lg font-semibold">{offerOnly ? "Найти предложения" : "Поиск источников"}</h2>
             {!compact ?
               <p className="mt-1 text-sm text-black/55">
-                Результаты сохраняются в очередь кандидатов (переживают перезагрузку и «В импорт»).
+                {offerOnly ?
+                  "Поиск объявлений на Avito, Drom и других площадках. Выбранные ссылки попадут в кандидаты предложений."
+                : "Результаты сохраняются в очередь кандидатов (переживают перезагрузку и «В импорт»)."}
               </p>
             : null}
           </>
+        : offerOnly ?
+          <h3 className="text-base font-semibold">Найти предложения</h3>
         : null}
 
         {history.length > 0 ?
@@ -753,6 +798,22 @@ export function AdminCatalogImportCandidatesSection({
               ))}
             </select>
           </label>
+          {offerOnly ?
+            <label className="block text-sm">
+              <span className="text-black/60">Источник</span>
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value as OfferSourceFilter)}
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+              >
+                {OFFER_SOURCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          : null}
         </div>
 
         <button
@@ -761,13 +822,30 @@ export function AdminCatalogImportCandidatesSection({
           onClick={() => void runSearch()}
           className="mt-4 rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {busy ? "Поиск…" : "Найти кандидатов"}
+          {busy ? "Поиск…" : offerOnly ? "Найти предложения" : "Найти кандидатов"}
         </button>
 
         {message ?
           <p className="mt-3 text-sm font-medium text-black/70">{message}</p>
         : null}
-        <AdminCatalogOfferImportSuccessBanner count={sourceOfferDraftCount} onOpenImport={onOpenOfferImport} />
+        <AdminCatalogOfferImportSuccessBanner
+          count={offerOnly ? 0 : sourceOfferDraftCount}
+          onOpenImport={offerOnly ? onGoToDrafts : onOpenOfferImport}
+        />
+        {offerOnly && sourceOfferDraftCount > 0 ?
+          <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
+            <p className="font-medium">Найденные объявления добавлены в кандидаты предложений.</p>
+            {onGoToDrafts ?
+              <button
+                type="button"
+                onClick={onGoToDrafts}
+                className="mt-2 rounded-full bg-violet-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-800"
+              >
+                Открыть кандидаты предложений
+              </button>
+            : null}
+          </div>
+        : null}
 
         {isCurrentSearchResult ?
           <p className="mt-3 text-sm text-black/55">
@@ -818,7 +896,7 @@ export function AdminCatalogImportCandidatesSection({
                 onClick={() => void sendToImport()}
                 className="inline-flex w-full items-center justify-center rounded-full bg-black px-4 py-2 text-xs font-semibold text-white disabled:opacity-40 sm:w-auto sm:text-sm"
               >
-                Импортировать выбранные ({selectedCount})
+                {offerOnly ? "Создать кандидатов предложений" : "Импортировать выбранные"} ({selectedCount})
               </button>
               <button
                 type="button"

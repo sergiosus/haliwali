@@ -13,7 +13,7 @@ import { listingDealStatusBadgeRu } from "../lib/listingCardMeta";
 import type { Listing, ListingStatus } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { inferredSupportSenderType, supportMessageLabelAdminPanel } from "../lib/supportUiLabels";
-import { AdminCatalogPanel, type CatalogAdminTab } from "./AdminCatalogPanel";
+import { AdminCatalogPanel, type CatalogAdminTab, type CompanySubTab } from "./AdminCatalogPanel";
 
 const statusLabel: Record<ListingStatus, string> = {
   pending: "На проверке",
@@ -345,20 +345,30 @@ function Tabs({
   );
 }
 
-function normalizeCatalogTab(value: string | undefined): CatalogAdminTab | undefined {
-  if (
-    value === "companies" ||
-    value === "categories" ||
-    value === "import" ||
-    value === "offers" ||
-    value === "offer-import" ||
-    value === "supplier-search" ||
-    value === "claims" ||
-    value === "reports"
-  ) {
-    return value;
+function normalizeCatalogNav(catalogTab?: string): {
+  main: CatalogAdminTab;
+  companySub?: CompanySubTab;
+} {
+  switch (catalogTab) {
+    case "offers":
+      return { main: "offers" };
+    case "offer-import":
+      return { main: "offer-import" };
+    case "supplier-search":
+      return { main: "supplier-search" };
+    case "categories":
+      return { main: "companies", companySub: "categories" };
+    case "import":
+      return { main: "companies", companySub: "import" };
+    case "claims":
+      return { main: "companies", companySub: "claims" };
+    case "reports":
+      return { main: "companies", companySub: "reports" };
+    case "companies":
+      return { main: "companies", companySub: "database" };
+    default:
+      return { main: "companies", companySub: "database" };
   }
-  return undefined;
 }
 
 export default function AdminClient({
@@ -370,7 +380,7 @@ export default function AdminClient({
 }) {
   const { loaded, listings, setStatus, deleteListing, refreshListings } = useListingsStore();
   const [tab, setTab] = useState<AdminTab>(initialSection ?? "ads");
-  const catalogSubTab = normalizeCatalogTab(initialCatalogTab);
+  const catalogNav = normalizeCatalogNav(initialCatalogTab);
   const [listingTab, setListingTab] = useState<ListingModerationTab>("pending");
   const [reportsReload, setReportsReload] = useState(0);
   const [reports, setReports] = useState<AdminReportRow[]>([]);
@@ -1268,7 +1278,7 @@ export default function AdminClient({
           ) : null}
         </div>
       ) : tab === "catalog" ? (
-        <AdminCatalogPanel initialTab={catalogSubTab} />
+        <AdminCatalogPanel initialTab={catalogNav.main} initialCompanySubTab={catalogNav.companySub} />
       ) : tab === "support" ? (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1 space-y-3">

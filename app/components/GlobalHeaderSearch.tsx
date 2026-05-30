@@ -12,7 +12,6 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { globalSearchScopeToQueryParams } from "../lib/globalSearchScopeParams";
 import type { GlobalSearchSuggestItem } from "../lib/globalSearchTypes";
-import { HeroMarketplaceEntry } from "./HeroMarketplaceEntry";
 import { OftenSearchedLinks } from "./seo/OftenSearchedLinks";
 import { MarketplaceSuggestRow } from "./MarketplaceSuggestRow";
 import type { MarketplaceDisplayCard } from "../lib/marketplaceDisplay";
@@ -738,9 +737,6 @@ export function GlobalHeaderSearch({
     return (
       <div ref={wrapRef} className={`relative w-full ${className}`}>
         <div className="flex flex-col items-center gap-3">
-          <div className="flex w-full justify-center">
-            <HeroMarketplaceEntry className="w-auto" />
-          </div>
           <div className="relative w-full min-w-0 max-w-[1000px]">
             <div className="overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_4px_20px_rgba(0,0,0,0.06)] ring-1 ring-black/[0.06] transition-shadow focus-within:border-[rgba(255,122,0,0.35)] focus-within:shadow-[0_8px_28px_rgba(255,122,0,0.1)] focus-within:ring-2 focus-within:ring-[rgba(255,122,0,0.22)]">
               <div className="flex flex-col sm:flex-row sm:items-stretch">

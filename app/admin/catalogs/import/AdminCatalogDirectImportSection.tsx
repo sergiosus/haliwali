@@ -17,11 +17,13 @@ export function AdminCatalogDirectImportSection({
   onChanged,
   onSuccess,
   onOpenOfferImport,
+  offerOnly = false,
   hideShell = false,
 }: {
   onChanged?: () => void;
   onSuccess?: () => void;
   onOpenOfferImport?: () => void;
+  offerOnly?: boolean;
   hideShell?: boolean;
 }) {
   const [kind, setKind] = useState<InputKind>("urls");
@@ -84,11 +86,20 @@ export function AdminCatalogDirectImportSection({
         }
         setParseErrors(d.errors ?? []);
         const errN = d.errors?.length ?? 0;
-        const companyCount = Math.max(0, (d.count ?? 0) - (d.sourceOfferDrafts?.length ?? 0));
-        setSourceOfferDraftCount(d.sourceOfferDrafts?.length ?? 0);
-        setMessage(`Создано кандидатов: ${companyCount}${errN > 0 ? `, ошибок: ${errN}` : ""}`);
+        const offerCount = d.sourceOfferDrafts?.length ?? 0;
+        setSourceOfferDraftCount(offerCount);
+        if (offerOnly) {
+          setMessage(`Создано кандидатов предложений: ${offerCount}${errN > 0 ? `, ошибок: ${errN}` : ""}`);
+        } else {
+          const companyCount = Math.max(0, (d.count ?? 0) - offerCount);
+          setMessage(`Создано кандидатов: ${companyCount}${errN > 0 ? `, ошибок: ${errN}` : ""}`);
+        }
         onChanged?.();
-        onSuccess?.();
+        if (offerOnly) {
+          if (offerCount > 0) onSuccess?.();
+        } else {
+          onSuccess?.();
+        }
       } catch {
         setMessage("Ошибка сети");
       } finally {
@@ -99,6 +110,7 @@ export function AdminCatalogDirectImportSection({
       categorySlug,
       cityLabel,
       kind,
+      offerOnly,
       onChanged,
       onSuccess,
       pastedText,
@@ -110,9 +122,13 @@ export function AdminCatalogDirectImportSection({
 
   const body = (
     <>
-      <h3 className="text-base font-semibold">Извлечение по URL / CSV / тексту</h3>
+      <h3 className="text-base font-semibold">
+        {offerOnly ? "Создать кандидатов предложений" : "Извлечение по URL / CSV / тексту"}
+      </h3>
       <p className="mt-1 text-sm text-black/55">
-        Сайты компаний, справочники, VK, текст, CSV. Создаёт кандидатов в списке ниже.
+        {offerOnly ?
+          "Ссылки на Avito, Drom, VK и сайты компаний. Объявления попадут в «Кандидаты предложений»."
+        : "Сайты компаний, справочники, VK, текст, CSV. Создаёт кандидатов в списке ниже."}
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -184,7 +200,7 @@ export function AdminCatalogDirectImportSection({
           value={urlsText}
           onChange={(e) => setUrlsText(e.target.value)}
           rows={5}
-          placeholder={"https://example.ru\nhttps://vk.com/group"}
+          placeholder={"https://www.avito.ru/...\nhttps://auto.drom.ru/..."}
           className="mt-4 w-full rounded-xl border border-black/15 px-3 py-2 font-mono text-sm"
         />
       : null}
@@ -227,7 +243,24 @@ export function AdminCatalogDirectImportSection({
       {message ?
         <p className="mt-3 text-sm font-medium text-black/70">{message}</p>
       : null}
-      <AdminCatalogOfferImportSuccessBanner count={sourceOfferDraftCount} onOpenImport={onOpenOfferImport} />
+      <AdminCatalogOfferImportSuccessBanner
+        count={offerOnly ? 0 : sourceOfferDraftCount}
+        onOpenImport={offerOnly ? onSuccess : onOpenOfferImport}
+      />
+      {offerOnly && sourceOfferDraftCount > 0 ?
+        <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
+          <p className="font-medium">Кандидаты предложений созданы.</p>
+          {onSuccess ?
+            <button
+              type="button"
+              onClick={onSuccess}
+              className="mt-2 rounded-full bg-violet-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-800"
+            >
+              Открыть кандидаты предложений
+            </button>
+          : null}
+        </div>
+      : null}
       {parseErrors.length > 0 ?
         <ul className="mt-2 list-inside list-disc text-xs text-red-700">
           {parseErrors.map((e) => (

@@ -68,7 +68,7 @@ export function CatalogCategoryClient({
     <div className="space-y-5">
       <header>
         <Link
-          href="/catalogs"
+          href="/catalogs/companies"
           className="mb-3 inline-flex h-9 w-fit items-center justify-center rounded-full border border-black/15 bg-white px-3 text-sm font-medium text-black/70 shadow-sm transition-colors hover:bg-black/[0.03]"
         >
           ← К категориям

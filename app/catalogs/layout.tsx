@@ -1,19 +1,26 @@
 import type { Metadata } from "next";
+import { CatalogOffersNav } from "../components/catalog/CatalogOffersNav";
 import { siteUrl } from "../lib/siteUrl";
 
 export const metadata: Metadata = {
-  title: "Каталоги компаний — Haliwali",
-  description: "Каталог компаний по отраслям: авто, строительство, ремонт, перевозки и другие.",
-  alternates: { canonical: `${siteUrl()}/catalogs` },
+  title: "Каталог предложений — Haliwali",
+  description:
+    "Компании, внешние предложения и поиск поставщиков — отдельно от объявлений пользователей.",
+  alternates: { canonical: `${siteUrl()}/catalogs/companies` },
   openGraph: {
-    title: "Каталоги компаний — Haliwali",
-    description: "Найдите компании по категориям и городам России.",
+    title: "Каталог предложений — Haliwali",
+    description: "Компании по отраслям, предложения с площадок и поиск поставщиков.",
     type: "website",
-    url: `${siteUrl()}/catalogs`,
+    url: `${siteUrl()}/catalogs/companies`,
     siteName: "Haliwali",
   },
 };
 
 export default function CatalogsLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return (
+    <>
+      <CatalogOffersNav />
+      {children}
+    </>
+  );
 }

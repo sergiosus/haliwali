@@ -45,9 +45,9 @@ export function CatalogsHomeClient({
       <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
-            <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">Каталоги компаний</h1>
+            <h1 className="text-2xl font-extrabold tracking-tight text-black sm:text-3xl">Компании</h1>
             <p className="mt-2 text-sm text-black/55 sm:text-base">
-              Компании по отраслям — отдельно от объявлений Haliwali
+              Каталог компаний по отраслям — отдельно от объявлений Haliwali
             </p>
           </div>
           <CatalogCompanySubmissionForm categories={categories} initialLoggedIn={initialLoggedIn} />

@@ -1,18 +1,7 @@
-import { CatalogsHomeClient } from "../components/catalog/CatalogsHomeClient";
-import {
-  categoriesFromSeed,
-  ensureCatalogReady,
-  listCatalogCategories,
-} from "../lib/serverCatalogStore";
-import { getUserIdFromSessionCookie } from "../lib/serverSession";
+import { redirect } from "next/navigation";
+import { CATALOG_OFFERS_HUB_HREF } from "../lib/catalogOffersNav";
 
-export const dynamic = "force-dynamic";
-
-export default async function CatalogsHomePage() {
-  await ensureCatalogReady();
-  let categories = await listCatalogCategories();
-  if (categories.length === 0) categories = categoriesFromSeed();
-  const initialLoggedIn = Boolean(await getUserIdFromSessionCookie());
-
-  return <CatalogsHomeClient categories={categories} initialLoggedIn={initialLoggedIn} />;
+/** Legacy `/catalogs` → companies section (current catalog home). */
+export default function CatalogsRootPage() {
+  redirect(CATALOG_OFFERS_HUB_HREF);
 }

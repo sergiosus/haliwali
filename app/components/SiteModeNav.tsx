@@ -22,7 +22,7 @@ export function SiteModeNav() {
         Объявления
       </Link>
       <Link href="/catalogs" className={`${base} ${isCatalog ? active : idle}`}>
-        Каталоги компаний
+        Каталог предложений
       </Link>
     </nav>
   );

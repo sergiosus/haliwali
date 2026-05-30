@@ -11,6 +11,7 @@ import {
   catalogCompanySeoTitle,
   catalogCompanyUrl,
 } from "../../../lib/catalogSeo";
+import { CATALOG_RESERVED_SEGMENTS } from "../../../lib/catalogOffersNav";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,9 @@ export async function generateMetadata(props: {
   params: Promise<{ category: string; slug: string }>;
 }): Promise<Metadata> {
   const { category, slug } = await props.params;
+  if ((CATALOG_RESERVED_SEGMENTS as readonly string[]).includes(category)) {
+    return { title: "Компания — Haliwali", robots: { index: false, follow: false } };
+  }
   await ensureCatalogReady();
   const company = await getCatalogCompanyBySlug(slug);
   if (!company || company.categorySlug !== category) {
@@ -38,6 +42,7 @@ export default async function CatalogCategoryCompanyPage(props: {
   params: Promise<{ category: string; slug: string }>;
 }) {
   const { category, slug } = await props.params;
+  if ((CATALOG_RESERVED_SEGMENTS as readonly string[]).includes(category)) notFound();
   await ensureCatalogReady();
   const company = await getCatalogCompanyBySlug(slug);
   if (!company || company.categorySlug !== category) notFound();

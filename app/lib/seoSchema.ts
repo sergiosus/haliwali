@@ -115,7 +115,7 @@ export function companyBreadcrumbs(company: Pick<CatalogCompanyProfile, "name" |
 }[] {
   return [
     { name: "Haliwali", path: "/" },
-    { name: "Компании", path: "/catalogs" },
+    { name: "Компании", path: "/catalogs/companies" },
     { name: company.name, path: companyPublicPath(company.slug) },
   ];
 }

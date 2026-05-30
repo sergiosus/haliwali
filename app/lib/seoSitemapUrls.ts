@@ -1,6 +1,6 @@
 import { directoryColumns } from "./categoryDirectory";
 import { cities } from "./citiesData";
-import { catalogCategoryUrl, catalogCompanyPath, catalogRootUrl } from "./catalogSeo";
+import { catalogCategoryUrl, catalogCompaniesSectionUrl, catalogCompanyPath } from "./catalogSeo";
 import { listingPath } from "./seo";
 import {
   companyPublicPath,
@@ -22,7 +22,9 @@ const STATIC_PATHS = [
   "/services",
   "/products",
   "/map",
-  "/catalogs",
+  "/catalogs/companies",
+  "/catalogs/predlozheniya",
+  "/catalogs/poisk-postavshchikov",
   "/privacy",
   "/terms",
   "/about",
@@ -118,7 +120,7 @@ export function buildSitemapIndexEntries(): { loc: string }[] {
 }
 
 export function catalogSitemapUrls(categories: CatalogCategory[], companies: CatalogCompanyListItem[]): string[] {
-  const urls = new Set<string>([catalogRootUrl()]);
+  const urls = new Set<string>([catalogCompaniesSectionUrl()]);
   for (const c of categories) urls.add(catalogCategoryUrl(c.slug));
   for (const co of companies) urls.add(`${siteUrl()}${catalogCompanyPath(co)}`);
   return [...urls];

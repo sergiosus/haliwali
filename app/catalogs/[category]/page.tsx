@@ -14,6 +14,7 @@ import {
   catalogCategoryUrl,
 } from "../../lib/catalogSeo";
 import { getUserIdFromSessionCookie } from "../../lib/serverSession";
+import { CATALOG_RESERVED_SEGMENTS } from "../../lib/catalogOffersNav";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,9 @@ export async function generateMetadata(props: {
   params: Promise<{ category: string }>;
 }): Promise<Metadata> {
   const { category: slug } = await props.params;
+  if ((CATALOG_RESERVED_SEGMENTS as readonly string[]).includes(slug)) {
+    return { title: "Каталог — Haliwali" };
+  }
   await ensureCatalogReady();
   const cat = await getCatalogCategory(slug);
   if (!cat) return { title: "Каталог — Haliwali" };
@@ -39,6 +43,7 @@ export default async function CatalogCategoryPage(props: {
   params: Promise<{ category: string }>;
 }) {
   const { category: slug } = await props.params;
+  if ((CATALOG_RESERVED_SEGMENTS as readonly string[]).includes(slug)) notFound();
   await ensureCatalogReady();
   const category = await getCatalogCategory(slug);
   if (!category) notFound();

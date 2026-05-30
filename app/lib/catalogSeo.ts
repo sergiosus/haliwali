@@ -20,6 +20,10 @@ export function catalogRootUrl(): string {
   return `${siteUrl()}/catalogs`;
 }
 
+export function catalogCompaniesSectionUrl(): string {
+  return `${siteUrl()}/catalogs/companies`;
+}
+
 export function catalogCategoryUrl(slug: string): string {
   return `${catalogRootUrl()}/${encodePathPart(slug)}`;
 }

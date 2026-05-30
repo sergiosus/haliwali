@@ -144,8 +144,8 @@ export function CatalogCompanyProfileView({
       </Link>
 
       <nav className="text-sm text-black/45">
-        <Link href="/catalogs" className="hover:text-black/70">
-          Каталоги компаний
+        <Link href="/catalogs/companies" className="hover:text-black/70">
+          Каталог предложений
         </Link>
         <span className="mx-1.5">/</span>
         <Link href={`/catalogs/${company.categorySlug}`} className="hover:text-black/70">

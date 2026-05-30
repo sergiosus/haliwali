@@ -71,12 +71,7 @@ export function AdminCatalogCompanyImportClient({ onChanged }: { onChanged?: () 
 
       <div className="w-full min-w-0 overflow-visible rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
         {mode === "find" ?
-          <AdminCatalogImportCandidatesSection
-            compact
-            hideShell
-            onChanged={bump}
-            onScrollToCompanyDrafts={goToDrafts}
-          />
+          <AdminCatalogImportCandidatesSection compact hideShell onChanged={bump} />
         : null}
 
         {mode === "create" ?

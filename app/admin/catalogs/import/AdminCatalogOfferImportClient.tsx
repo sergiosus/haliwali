@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { CatalogSourceOfferDraftStatus } from "../../../lib/catalogSourceOfferTypes";
-import { AdminCatalogImportCandidatesSection } from "../AdminCatalogImportCandidatesSection";
-import { AdminCatalogDirectImportSection } from "./AdminCatalogDirectImportSection";
+import { AdminCatalogOfferCsvImportSection } from "./AdminCatalogOfferCsvImportSection";
+import { AdminCatalogOfferLinksImportSection } from "./AdminCatalogOfferLinksImportSection";
+import { AdminCatalogOfferSearchImportSection } from "./AdminCatalogOfferSearchImportSection";
+import { AdminCatalogOfferTextImportSection } from "./AdminCatalogOfferTextImportSection";
 import { AdminCatalogSourceOfferDraftsPanel } from "./AdminCatalogSourceOfferDraftsPanel";
 
-type OfferImportMode = "find" | "create" | "drafts";
+type OfferImportMode = "links" | "search" | "text" | "csv" | "drafts";
 
 const ACTIONABLE_STATUSES: CatalogSourceOfferDraftStatus[] = [
   "draft",
@@ -28,9 +30,9 @@ function countActiveOfferDrafts(drafts: { status?: string }[]): number {
   }).length;
 }
 
-/** Offer import: search / parse URLs / review drafts — separate from company import. */
+/** Offer import UI — external listings only, not companies. */
 export function AdminCatalogOfferImportClient({ onChanged }: { onChanged?: () => void }) {
-  const [mode, setMode] = useState<OfferImportMode>("find");
+  const [mode, setMode] = useState<OfferImportMode>("links");
   const [draftRefresh, setDraftRefresh] = useState(0);
   const [draftCount, setDraftCount] = useState(0);
 
@@ -79,6 +81,9 @@ export function AdminCatalogOfferImportClient({ onChanged }: { onChanged?: () =>
         aria-pressed={active}
       >
         {label}
+        {id === "drafts" && draftCount > 0 ?
+          <span className={active ? "text-white/75" : "text-black/45"}> ({draftCount})</span>
+        : null}
       </button>
     );
   };
@@ -88,34 +93,34 @@ export function AdminCatalogOfferImportClient({ onChanged }: { onChanged?: () =>
       <div>
         <h2 className="text-lg font-semibold">Импорт предложений</h2>
         <p className="mt-1 text-sm text-black/55">
-          Avito, Drom, VK и сайты компаний. Объявления попадают в кандидаты, затем в «Предложения» на сайте.
+          Импорт объявлений с Avito, Drom, Youla, VK и сайтов компаний. Не смешивается с каталогом компаний и
+          объявлениями пользователей Haliwali.
         </p>
       </div>
 
       <div className="flex min-w-0 flex-wrap gap-2">
-        {modeBtn("find", "Найти предложения")}
-        {modeBtn("create", "Создать кандидатов")}
-        {modeBtn("drafts", `Кандидаты предложений (${draftCount})`)}
+        {modeBtn("links", "По ссылкам")}
+        {modeBtn("search", "По поисковому запросу")}
+        {modeBtn("text", "Из текста / VK")}
+        {modeBtn("csv", "CSV")}
+        {modeBtn("drafts", "Кандидаты предложений")}
       </div>
 
       <div className="w-full min-w-0 overflow-visible rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
-        {mode === "find" ?
-          <AdminCatalogImportCandidatesSection
-            compact
-            hideShell
-            offerOnly
-            onChanged={bump}
-            onGoToDrafts={goToDrafts}
-          />
+        {mode === "links" ?
+          <AdminCatalogOfferLinksImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
         : null}
 
-        {mode === "create" ?
-          <AdminCatalogDirectImportSection
-            hideShell
-            offerOnly
-            onChanged={bump}
-            onSuccess={goToDrafts}
-          />
+        {mode === "search" ?
+          <AdminCatalogOfferSearchImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
+        : null}
+
+        {mode === "text" ?
+          <AdminCatalogOfferTextImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
+        : null}
+
+        {mode === "csv" ?
+          <AdminCatalogOfferCsvImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
         : null}
 
         {mode === "drafts" ?

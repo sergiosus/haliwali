@@ -23,6 +23,7 @@ import { CATALOG_CATEGORY_SEED } from "../../lib/catalogTypes";
 import { classifySourceUrl } from "../../lib/catalogSourceClassifier";
 import { catalogSourceNameFromUrl, catalogSourceNameLabel } from "../../lib/catalogSourceName";
 import { AdminCatalogOfferImportSuccessBanner } from "./AdminCatalogOfferImportSuccessBanner";
+import type { OfferSourceFilter } from "./import/offerImportUi";
 
 const IMPORT_CANDIDATES_STATE_KEY = "haliwali_admin_import_candidates_state_v1";
 const RECENT_KEYWORDS_KEY = "haliwali_admin_import_recent_keywords";
@@ -152,26 +153,40 @@ function isListingSourceUrl(url: string): boolean {
   }
 }
 
-type OfferSourceFilter = "all" | "avito" | "drom" | "vk" | "other";
+type OfferSourceFilterLocal = OfferSourceFilter;
 
-const OFFER_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[] = [
+const OFFER_SOURCE_OPTIONS: { value: OfferSourceFilterLocal; label: string }[] = [
   { value: "all", label: "Все источники" },
   { value: "avito", label: "Avito" },
   { value: "drom", label: "Drom / Auto.ru" },
+  { value: "youla", label: "Youla" },
   { value: "vk", label: "VK" },
-  { value: "other", label: "Другие" },
+  { value: "company_site", label: "Сайт компании" },
+  { value: "other", label: "Другое" },
 ];
 
-function matchesOfferSourceFilter(url: string, filter: OfferSourceFilter): boolean {
+function matchesOfferSourceFilter(url: string, filter: OfferSourceFilterLocal): boolean {
   if (filter === "all") return true;
   const lower = url.toLowerCase();
   if (filter === "avito") return lower.includes("avito.ru");
   if (filter === "drom") return lower.includes("drom.ru") || lower.includes("auto.ru");
+  if (filter === "youla") return lower.includes("youla.ru");
   if (filter === "vk") return lower.includes("vk.com") || lower.includes("vk.ru");
+  if (filter === "company_site") {
+    return (
+      !lower.includes("avito.ru") &&
+      !lower.includes("drom.ru") &&
+      !lower.includes("auto.ru") &&
+      !lower.includes("youla.ru") &&
+      !lower.includes("vk.com") &&
+      !lower.includes("vk.ru")
+    );
+  }
   return (
     !lower.includes("avito.ru") &&
     !lower.includes("drom.ru") &&
     !lower.includes("auto.ru") &&
+    !lower.includes("youla.ru") &&
     !lower.includes("vk.com") &&
     !lower.includes("vk.ru")
   );
@@ -250,6 +265,9 @@ export function AdminCatalogImportCandidatesSection({
   compact = false,
   hideShell = false,
   offerOnly = false,
+  offerSourceFilter: offerSourceFilterProp,
+  offerPriceMin: _offerPriceMin,
+  offerPriceMax: _offerPriceMax,
   onChanged,
   onOpenOfferImport,
   onGoToDrafts,
@@ -257,6 +275,9 @@ export function AdminCatalogImportCandidatesSection({
   compact?: boolean;
   hideShell?: boolean;
   offerOnly?: boolean;
+  offerSourceFilter?: OfferSourceFilter;
+  offerPriceMin?: number;
+  offerPriceMax?: number;
   onChanged?: () => void;
   onOpenOfferImport?: () => void;
   onGoToDrafts?: () => void;
@@ -271,7 +292,8 @@ export function AdminCatalogImportCandidatesSection({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [sourceOfferDraftCount, setSourceOfferDraftCount] = useState(0);
-  const [sourceFilter, setSourceFilter] = useState<OfferSourceFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<OfferSourceFilterLocal>("all");
+  const effectiveSourceFilter = offerSourceFilterProp ?? sourceFilter;
   const [queriesUsed, setQueriesUsed] = useState<string[]>([]);
   const [recentKeywords, setRecentKeywords] = useState<string[]>([]);
   const [keywordFocused, setKeywordFocused] = useState(false);
@@ -351,8 +373,10 @@ export function AdminCatalogImportCandidatesSection({
   const rawCandidates = session?.candidates ?? [];
   const candidates = useMemo(() => {
     if (!offerOnly) return rawCandidates;
-    return rawCandidates.filter((c) => isOfferCandidate(c) && matchesOfferSourceFilter(c.url, sourceFilter));
-  }, [rawCandidates, offerOnly, sourceFilter]);
+    return rawCandidates.filter(
+      (c) => isOfferCandidate(c) && matchesOfferSourceFilter(c.url, effectiveSourceFilter),
+    );
+  }, [rawCandidates, offerOnly, effectiveSourceFilter]);
   const isCurrentSearchResult = searchResultMatchesInput(session, query, cityLabel, categorySlug);
   const showPreviousResultsLabel = Boolean(session && !isCurrentSearchResult);
 
@@ -727,7 +751,7 @@ export function AdminCatalogImportCandidatesSection({
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="relative block text-sm sm:col-span-2">
-            <span className="text-black/60">Ключевые слова</span>
+            <span className="text-black/60">{offerOnly ? "Что ищем" : "Ключевые слова"}</span>
             <input
               value={query}
               onFocus={() => setKeywordFocused(true)}
@@ -736,7 +760,7 @@ export function AdminCatalogImportCandidatesSection({
                 setQuery(e.target.value);
                 setKeywordFocused(true);
               }}
-              placeholder="авторазборка"
+              placeholder={offerOnly ? "запчасти toyota camry" : "авторазборка"}
               className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
             />
             {showRecentKeywordDropdown ?
@@ -798,12 +822,12 @@ export function AdminCatalogImportCandidatesSection({
               ))}
             </select>
           </label>
-          {offerOnly ?
+          {offerOnly && offerSourceFilterProp === undefined ?
             <label className="block text-sm">
               <span className="text-black/60">Источник</span>
               <select
                 value={sourceFilter}
-                onChange={(e) => setSourceFilter(e.target.value as OfferSourceFilter)}
+                onChange={(e) => setSourceFilter(e.target.value as OfferSourceFilterLocal)}
                 className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
               >
                 {OFFER_SOURCE_OPTIONS.map((o) => (
@@ -849,8 +873,15 @@ export function AdminCatalogImportCandidatesSection({
 
         {isCurrentSearchResult ?
           <p className="mt-3 text-sm text-black/55">
-            Найдено: {candidateCounts.found} · Новые: {candidateCounts.new} · Уже в каталоге:{" "}
-            {candidateCounts.already} · Похожие: {candidateCounts.possible} · Скрыто: {candidateCounts.hidden}
+            {offerOnly ?
+              <>
+                Найдено объявлений: {candidateCounts.found} · Новые: {candidateCounts.new} · Уже импортировано:{" "}
+                {candidateCounts.already} · Похожие: {candidateCounts.possible} · Скрыто: {candidateCounts.hidden}
+              </>
+            : <>
+                Найдено: {candidateCounts.found} · Новые: {candidateCounts.new} · Уже в каталоге:{" "}
+                {candidateCounts.already} · Похожие: {candidateCounts.possible} · Скрыто: {candidateCounts.hidden}
+              </>}
           </p>
         : null}
       </section>
@@ -868,7 +899,7 @@ export function AdminCatalogImportCandidatesSection({
 
           <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-base font-semibold">Результаты поиска</h3>
+              <h3 className="text-base font-semibold">{offerOnly ? "Найденные объявления" : "Результаты поиска"}</h3>
               {showPreviousResultsLabel ?
                 <p className="text-sm font-medium text-amber-800">Предыдущие результаты</p>
               : null}
@@ -912,8 +943,12 @@ export function AdminCatalogImportCandidatesSection({
           {isCurrentSearchResult ?
             <div className="flex flex-wrap gap-2">
               {[
-                { id: "new" as const, label: "Новые", count: candidateCounts.new },
-                { id: "already" as const, label: "Уже в каталоге", count: candidateCounts.already },
+                { id: "new" as const, label: offerOnly ? "Новые объявления" : "Новые", count: candidateCounts.new },
+                {
+                  id: "already" as const,
+                  label: offerOnly ? "Уже импортировано" : "Уже в каталоге",
+                  count: candidateCounts.already,
+                },
                 { id: "possible" as const, label: "Похожие", count: candidateCounts.possible },
                 { id: "hidden" as const, label: "Скрытые", count: candidateCounts.hidden },
               ].map((f) => (
@@ -973,14 +1008,16 @@ export function AdminCatalogImportCandidatesSection({
                                 {IMPORT_CANDIDATE_STATE_LABEL[c.state]}
                               </span>
                             }
-                            {c.state === "imported" || isLikelyBadCompanyName(c.title) ?
+                            {c.state === "imported" || (!offerOnly && isLikelyBadCompanyName(c.title)) ?
                               <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900">
                                 Можно редактировать
                               </span>
                             : null}
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${catalogMatchBadgeClass(c.catalogMatchStatus)}`}>
-                              {catalogMatchLabel(c.catalogMatchStatus)}
-                            </span>
+                            {offerOnly ? null : (
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${catalogMatchBadgeClass(c.catalogMatchStatus)}`}>
+                                {catalogMatchLabel(c.catalogMatchStatus)}
+                              </span>
+                            )}
                             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-900">
                               {c.relevanceScore}
                             </span>

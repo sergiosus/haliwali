@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
+import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 import type { CatalogSourceOfferDraft, CatalogSourceOfferDraftStatus } from "../../../lib/catalogSourceOfferTypes";
 import { AdminCatalogSourceOfferMigrationWarning } from "../AdminCatalogSourceOfferMigrationWarning";
 
@@ -22,6 +23,10 @@ const TABS: CatalogSourceOfferDraftStatus[] = [
   "duplicate",
   "rejected",
 ];
+
+function categoryTitle(slug: string): string {
+  return CATALOG_CATEGORY_SEED.find((c) => c.slug === slug)?.title ?? slug;
+}
 
 export function AdminCatalogSourceOfferDraftsPanel({
   onChanged,
@@ -110,7 +115,14 @@ export function AdminCatalogSourceOfferDraftsPanel({
             Объявления с Avito, Drom и других площадок. Не смешиваются с компаниями и объявлениями пользователей.
           </p>
         </div>
-      : null}
+      : (
+        <div>
+          <h3 className="text-base font-semibold">Кандидаты предложений</h3>
+          <p className="mt-1 text-sm text-black/55">
+            Проверьте поля объявления: название, цена, город, категория, продавец, источник, бренд, OEM.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {TABS.map((id) => (
@@ -193,15 +205,23 @@ export function AdminCatalogSourceOfferDraftsPanel({
                   <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-xs">{d.status}</span>
                 </div>
                 <p className="mt-1 text-black/55">
-                  {[d.companyName || d.sellerName, d.city, d.price].filter(Boolean).join(" · ")}
+                  {[d.price, d.city, categoryTitle(d.categorySlug)].filter(Boolean).join(" · ")}
                 </p>
+                {(d.companyName || d.sellerName) && (
+                  <p className="mt-1 text-xs text-black/50">
+                    {d.companyName ? `Компания: ${d.companyName}` : ""}
+                    {d.companyName && d.sellerName ? " · " : ""}
+                    {d.sellerName ? `Продавец: ${d.sellerName}` : ""}
+                  </p>
+                )}
                 {d.shortSnippet ?
                   <p className="mt-1 line-clamp-2 text-black/45">{d.shortSnippet}</p>
                 : null}
-                {(d.brand || d.oemCodes.length > 0) && (
+                {(d.brand || d.oemCodes.length > 0 || d.articleCodes.length > 0) && (
                   <p className="mt-1 text-xs text-black/40">
                     {d.brand ? `Бренд: ${d.brand}` : ""}
                     {d.oemCodes.length > 0 ? ` · OEM: ${d.oemCodes.join(", ")}` : ""}
+                    {d.articleCodes.length > 0 ? ` · Арт.: ${d.articleCodes.join(", ")}` : ""}
                   </p>
                 )}
                 <a
@@ -210,7 +230,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
                   rel="noopener noreferrer"
                   className="mt-2 inline-block text-xs font-medium text-[#c25a00] underline"
                 >
-                  Оригинал
+                  {d.sourceUrl}
                 </a>
                 {d.duplicateHint ?
                   <p className="mt-1 text-xs text-blue-800">

@@ -828,7 +828,7 @@ export function AdminCatalogImportCandidatesSection({
                   onClick={onScrollToCompanyDrafts}
                   className="col-span-2 inline-flex w-full items-center justify-center rounded-full border border-black/15 px-4 py-2 text-sm font-medium sm:col-span-1 sm:w-auto"
                 >
-                  К кандидатам компаний ↓
+                  К кандидатам компаний →
                 </button>
               : null}
             </div>

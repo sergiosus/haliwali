@@ -232,7 +232,7 @@ export function AdminCatalogDirectImportSection({
   );
 
   if (hideShell) {
-    return <div className="border-t border-black/10 pt-6">{body}</div>;
+    return <div className="w-full min-w-0 overflow-visible">{body}</div>;
   }
 
   return (

@@ -9,6 +9,7 @@ import {
   normalizeSourceOfferDraftStatus,
   sourceOfferDraftStatusDbValues,
 } from "./catalogSourceOfferTypes";
+import type { CatalogSourceOfferListQuery } from "./catalogSourceOfferQuery";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
 
 type DraftRow = {
@@ -346,12 +347,9 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
   return out;
 }
 
-export async function pgListPublishedSourceOffers(opts?: {
-  q?: string;
-  categorySlug?: string;
-  city?: string;
-  limit?: number;
-}): Promise<CatalogSourceOffer[]> {
+export async function pgListPublishedSourceOffers(
+  opts?: CatalogSourceOfferListQuery,
+): Promise<CatalogSourceOffer[]> {
   const pool = getPool();
   const limit = opts?.limit ?? 48;
   const params: unknown[] = [];
@@ -364,12 +362,29 @@ export async function pgListPublishedSourceOffers(opts?: {
     params.push(`%${opts.city.trim().toLowerCase()}%`);
     clauses.push(`(city_search LIKE $${params.length} OR lower(city) LIKE $${params.length})`);
   }
+  if (opts?.sourceName) {
+    params.push(opts.sourceName);
+    clauses.push(`source_name = $${params.length}`);
+  }
   if (opts?.q && opts.q.trim().length >= 2) {
     params.push(`%${opts.q.trim().toLowerCase()}%`);
     const i = params.length;
     clauses.push(
-      `(title_search LIKE $${i} OR company_search LIKE $${i} OR oem_search LIKE $${i} OR brand_search LIKE $${i})`,
+      `(title_search LIKE $${i} OR company_search LIKE $${i} OR oem_search LIKE $${i} OR brand_search LIKE $${i}
+        OR city_search LIKE $${i}
+        OR lower(short_snippet) LIKE $${i} OR lower(source_name) LIKE $${i}
+        OR lower(COALESCE(brand, '')) LIKE $${i}
+        OR oem_codes::text ILIKE $${i} OR article_codes::text ILIKE $${i})`,
     );
+  }
+  const priceExpr = `NULLIF(regexp_replace(COALESCE(price, ''), '[^0-9]', '', 'g'), '')::numeric`;
+  if (opts?.priceMin != null) {
+    params.push(opts.priceMin);
+    clauses.push(`(${priceExpr} IS NOT NULL AND ${priceExpr} >= $${params.length})`);
+  }
+  if (opts?.priceMax != null) {
+    params.push(opts.priceMax);
+    clauses.push(`(${priceExpr} IS NOT NULL AND ${priceExpr} <= $${params.length})`);
   }
   params.push(limit);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";

@@ -7,7 +7,16 @@ function norm(s: string): string {
 export function buildSourceOfferSearchFields(
   input: Pick<
     CatalogSourceOfferInput,
-    "title" | "brand" | "oemCodes" | "articleCodes" | "companyName" | "sellerName" | "city" | "region"
+    | "title"
+    | "shortSnippet"
+    | "brand"
+    | "oemCodes"
+    | "articleCodes"
+    | "companyName"
+    | "sellerName"
+    | "city"
+    | "region"
+    | "sourceName"
   >,
 ): {
   titleSearch: string;
@@ -19,10 +28,10 @@ export function buildSourceOfferSearchFields(
   const company = norm([input.companyName, input.sellerName].filter(Boolean).join(" "));
   const oem = norm([...input.oemCodes, ...input.articleCodes].join(" "));
   return {
-    titleSearch: norm(input.title),
+    titleSearch: norm([input.title, input.shortSnippet].filter(Boolean).join(" ")),
     brandSearch: norm(input.brand ?? ""),
     oemSearch: oem,
     companySearch: company,
-    citySearch: norm([input.city, input.region].filter(Boolean).join(" ")),
+    citySearch: norm([input.city, input.region, input.sourceName].filter(Boolean).join(" ")),
   };
 }

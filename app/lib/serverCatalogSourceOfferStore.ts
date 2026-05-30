@@ -1,3 +1,4 @@
+import type { CatalogSourceOfferListQuery } from "./catalogSourceOfferQuery";
 import { usesPostgres } from "./pgPool";
 import type {
   CatalogSourceOffer,
@@ -58,12 +59,9 @@ export async function publishSourceOfferDrafts(ids: number[]): Promise<CatalogSo
   );
 }
 
-export async function listPublishedSourceOffers(opts?: {
-  q?: string;
-  categorySlug?: string;
-  city?: string;
-  limit?: number;
-}): Promise<CatalogSourceOffer[]> {
+export async function listPublishedSourceOffers(
+  opts?: CatalogSourceOfferListQuery,
+): Promise<CatalogSourceOffer[]> {
   return withStore(
     () => pg.pgListPublishedSourceOffers(opts),
     () => json.jsonListPublishedSourceOffers(opts),

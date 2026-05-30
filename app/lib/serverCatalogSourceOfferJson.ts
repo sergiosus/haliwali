@@ -12,6 +12,10 @@ import {
   sourceOfferDraftStatusDbValues,
 } from "./catalogSourceOfferTypes";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
+import {
+  filterSourceOffersInMemory,
+  type CatalogSourceOfferListQuery,
+} from "./catalogSourceOfferQuery";
 
 const STORE_PATH = ".data/catalog-source-offers.json";
 
@@ -259,34 +263,11 @@ export async function jsonPublishSourceOfferDrafts(ids: number[]): Promise<Catal
   return out;
 }
 
-export async function jsonListPublishedSourceOffers(opts?: {
-  q?: string;
-  categorySlug?: string;
-  city?: string;
-  limit?: number;
-}): Promise<CatalogSourceOffer[]> {
+export async function jsonListPublishedSourceOffers(
+  opts?: CatalogSourceOfferListQuery,
+): Promise<CatalogSourceOffer[]> {
   const store = await readStore();
-  const q = (opts?.q ?? "").trim().toLowerCase();
-  const limit = opts?.limit ?? 48;
-  let list = store.offers.map(toOffer);
-  if (opts?.categorySlug) {
-    const cat = opts.categorySlug.trim().toLowerCase();
-    list = list.filter((o) => o.categorySlug === cat);
-  }
-  if (opts?.city) {
-    const c = opts.city.trim().toLowerCase();
-    list = list.filter((o) => o.citySearch.includes(c) || o.city.toLowerCase().includes(c));
-  }
-  if (q.length >= 2) {
-    list = list.filter(
-      (o) =>
-        o.titleSearch.includes(q) ||
-        o.companySearch.includes(q) ||
-        o.oemSearch.includes(q) ||
-        o.brandSearch.includes(q),
-    );
-  }
-  return list.slice(0, limit);
+  return filterSourceOffersInMemory(store.offers.map(toOffer), opts ?? {});
 }
 
 export async function jsonLoadSourceOfferDedupSeed(): Promise<{

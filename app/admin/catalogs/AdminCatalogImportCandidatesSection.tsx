@@ -216,16 +216,16 @@ function addRecentKeyword(keywords: string[], keyword: string): string[] {
   return [normalized, ...deduped].slice(0, MAX_RECENT_KEYWORDS);
 }
 
-function openDraftsInNewTab() {
-  window.open("/admin/catalogs/import/drafts", "_blank", "noopener,noreferrer");
-}
-
 export function AdminCatalogImportCandidatesSection({
   compact = false,
+  hideShell = false,
   onChanged,
+  onScrollToCompanyDrafts,
 }: {
   compact?: boolean;
+  hideShell?: boolean;
   onChanged?: () => void;
+  onScrollToCompanyDrafts?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
@@ -633,12 +633,22 @@ export function AdminCatalogImportCandidatesSection({
 
   return (
     <div className={compact ? "w-full min-w-0 space-y-4 overflow-visible" : "w-full min-w-0 space-y-8 overflow-visible"}>
-      <section className="w-full min-w-0 overflow-visible rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
-        <h2 className="text-lg font-semibold">Поиск источников</h2>
-        {!compact ?
-          <p className="mt-1 text-sm text-black/55">
-            Результаты сохраняются в очередь кандидатов (переживают перезагрузку и «В импорт»).
-          </p>
+      <section
+        className={
+          hideShell ?
+            "w-full min-w-0 overflow-visible"
+          : "w-full min-w-0 overflow-visible rounded-3xl border border-black/10 bg-white p-4 sm:p-5"
+        }
+      >
+        {!hideShell ?
+          <>
+            <h2 className="text-lg font-semibold">Поиск источников</h2>
+            {!compact ?
+              <p className="mt-1 text-sm text-black/55">
+                Результаты сохраняются в очередь кандидатов (переживают перезагрузку и «В импорт»).
+              </p>
+            : null}
+          </>
         : null}
 
         {history.length > 0 ?
@@ -774,7 +784,7 @@ export function AdminCatalogImportCandidatesSection({
 
           <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Кандидаты</h2>
+              <h3 className="text-base font-semibold">Результаты поиска</h3>
               {showPreviousResultsLabel ?
                 <p className="text-sm font-medium text-amber-800">Предыдущие результаты</p>
               : null}
@@ -812,13 +822,15 @@ export function AdminCatalogImportCandidatesSection({
               >
                 Удалить выбранные
               </button>
-              <button
-                type="button"
-                onClick={openDraftsInNewTab}
-                className="col-span-2 inline-flex w-full items-center justify-center rounded-full border border-black/15 px-4 py-2 text-sm font-medium sm:col-span-1 sm:w-auto"
-              >
-                Открыть кандидатов
-              </button>
+              {onScrollToCompanyDrafts ?
+                <button
+                  type="button"
+                  onClick={onScrollToCompanyDrafts}
+                  className="col-span-2 inline-flex w-full items-center justify-center rounded-full border border-black/15 px-4 py-2 text-sm font-medium sm:col-span-1 sm:w-auto"
+                >
+                  К кандидатам компаний ↓
+                </button>
+              : null}
             </div>
           </div>
 

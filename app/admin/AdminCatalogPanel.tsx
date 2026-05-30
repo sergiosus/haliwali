@@ -1,11 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminCatalogCompanyEditModal } from "./AdminCatalogCompanyEditModal";
 import { AdminCatalogClaimsSection } from "./AdminCatalogClaimsSection";
-import { AdminCatalogImportCandidatesSection } from "./catalogs/AdminCatalogImportCandidatesSection";
-import { AdminCatalogDraftsPanel } from "./catalogs/import/AdminCatalogDraftsPanel";
+import { AdminCatalogCompanyImportClient } from "./catalogs/import/AdminCatalogCompanyImportClient";
 import {
   adminCatalogOwnershipBadgeLabel,
   catalogCompanyOriginBadgeClass,
@@ -113,7 +111,7 @@ export function AdminCatalogPanel() {
   const subTabs: { key: CatalogAdminTab; label: string; count: number }[] = [
     { key: "companies", label: "Компании в базе", count: companies.length },
     { key: "categories", label: "Категории", count: CATALOG_CATEGORY_SEED.length },
-    { key: "import", label: "Импорт", count: importActionCount },
+    { key: "import", label: "Импорт компаний", count: importActionCount },
     { key: "claims", label: "Заявки на владение", count: claimPendingCount },
     { key: "reports", label: "Жалобы", count: reports.length },
   ];
@@ -334,24 +332,7 @@ export function AdminCatalogPanel() {
       : null}
 
       {tab === "import" ?
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-2 text-sm">
-            <Link
-              href="/admin/catalogs/import"
-              className="inline-flex rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
-            >
-              Извлечение по URL / CSV
-            </Link>
-            <Link
-              href="/admin/catalogs/import/drafts"
-              className="inline-flex rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
-            >
-              Кандидаты
-            </Link>
-          </div>
-          <AdminCatalogImportCandidatesSection compact onChanged={refreshCatalogCounts} />
-          <AdminCatalogDraftsPanel showImportLink={false} onChanged={refreshCatalogCounts} />
-        </div>
+        <AdminCatalogCompanyImportClient onChanged={refreshCatalogCounts} />
       : null}
 
       {tab === "claims" ?

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { confidenceFromStored, confidenceLabelRu } from "../../../lib/catalogConfidence";
 import {
@@ -22,12 +21,13 @@ const STATUS_LABEL: Record<CatalogImportDraftStatus, string> = {
   published: "Опубликован",
 };
 
-const TABS: { id: CatalogImportDraftStatus; label: string }[] = [
+const TABS: { id: CatalogImportDraftStatus | "duplicate"; label: string }[] = [
   { id: "draft", label: "Новые" },
   { id: "saved", label: "Сохранённые" },
   { id: "approved", label: "Одобренные" },
   { id: "published", label: "Опубликованные" },
   { id: "rejected", label: "Отклонённые" },
+  { id: "duplicate", label: "Дубликаты" },
 ];
 
 const NAME_SOURCE_LABEL: Record<string, string> = {
@@ -181,13 +181,13 @@ function patchFromDraft(draft: CatalogImportDraft): Record<string, unknown> {
 }
 
 export function AdminCatalogDraftsPanel({
-  showImportLink = true,
   onChanged,
+  refreshSignal = 0,
 }: {
-  showImportLink?: boolean;
   onChanged?: () => void;
+  refreshSignal?: number;
 }) {
-  const [tab, setTab] = useState<CatalogImportDraftStatus>("draft");
+  const [tab, setTab] = useState<CatalogImportDraftStatus | "duplicate">("draft");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<DraftSort>("new_first");
   const [drafts, setDrafts] = useState<CatalogImportDraft[]>([]);
@@ -201,9 +201,19 @@ export function AdminCatalogDraftsPanel({
   const [mergeCompanyId, setMergeCompanyId] = useState<Record<number, string>>({});
 
   const loadDrafts = useCallback(() => {
-    void fetch(`/api/admin/catalogs/import/drafts?status=${tab}`, { credentials: "include", cache: "no-store" })
+    const url =
+      tab === "duplicate" ?
+        "/api/admin/catalogs/import/drafts"
+      : `/api/admin/catalogs/import/drafts?status=${tab}`;
+    void fetch(url, { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
-      .then((d: { drafts?: CatalogImportDraft[] }) => setDrafts(d.drafts ?? []))
+      .then((d: { drafts?: CatalogImportDraft[] }) => {
+        let list = d.drafts ?? [];
+        if (tab === "duplicate") {
+          list = list.filter((draft) => Boolean(draft.duplicateHint || draft.duplicateOfCompanyId));
+        }
+        setDrafts(list);
+      })
       .catch(() => setDrafts([]));
   }, [tab]);
 
@@ -227,7 +237,7 @@ export function AdminCatalogDraftsPanel({
     loadCompanies();
     setSelected(new Set());
     setCategoryFilter("all");
-  }, [loadDrafts, loadSessions, loadCompanies]);
+  }, [loadDrafts, loadSessions, loadCompanies, refreshSignal]);
 
   function removeDraftsFromList(ids: number[]) {
     const idSet = new Set(ids);
@@ -421,30 +431,13 @@ export function AdminCatalogDraftsPanel({
     }
   }
 
-  const canReject = tab === "draft" || tab === "saved" || tab === "approved";
-  const canApprove = tab === "draft" || tab === "saved" || tab === "rejected";
+  const canReject = tab === "draft" || tab === "saved" || tab === "approved" || tab === "duplicate";
+  const canApprove = tab === "draft" || tab === "saved" || tab === "rejected" || tab === "duplicate";
   const selectedCount = selectedIds.length;
   const tabLabel = TABS.find((t) => t.id === tab)?.label ?? tab;
 
   return (
     <div className="space-y-4">
-      {showImportLink ?
-        <div className="flex flex-wrap gap-2 text-sm">
-          <Link
-            href="/admin/catalogs/import"
-            className="rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
-          >
-            Новый импорт
-          </Link>
-          <Link
-            href="/admin/catalogs/discover"
-            className="rounded-full border border-black/15 px-4 py-2 font-medium hover:bg-black/5"
-          >
-            Поиск источников
-          </Link>
-        </div>
-      : null}
-
       {sessions.length > 0 ?
         <details className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
           <summary className="cursor-pointer font-medium">Последние импорты ({sessions.length})</summary>
@@ -480,7 +473,7 @@ export function AdminCatalogDraftsPanel({
 
       <section className="rounded-2xl border border-black/10 bg-white p-4">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h2 className="text-lg font-semibold">Кандидаты каталога</h2>
+          <h2 className="text-lg font-semibold">Кандидаты компаний</h2>
           <span className="text-sm text-black/55">
             {tabLabel} · показано {filteredDrafts.length}
             {drafts.length !== filteredDrafts.length ? ` из ${drafts.length}` : ""}

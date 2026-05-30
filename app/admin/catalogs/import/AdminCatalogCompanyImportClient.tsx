@@ -16,7 +16,13 @@ function countActiveDrafts(drafts: CatalogImportDraft[]): number {
 }
 
 /** Company import: one visible mode at a time (search / create / review). */
-export function AdminCatalogCompanyImportClient({ onChanged }: { onChanged?: () => void }) {
+export function AdminCatalogCompanyImportClient({
+  onChanged,
+  onOpenOfferImport,
+}: {
+  onChanged?: () => void;
+  onOpenOfferImport?: () => void;
+}) {
   const [mode, setMode] = useState<ImportMode>("find");
   const [draftRefresh, setDraftRefresh] = useState(0);
   const [draftCount, setDraftCount] = useState(0);
@@ -71,11 +77,21 @@ export function AdminCatalogCompanyImportClient({ onChanged }: { onChanged?: () 
 
       <div className="w-full min-w-0 overflow-visible rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
         {mode === "find" ?
-          <AdminCatalogImportCandidatesSection compact hideShell onChanged={bump} />
+          <AdminCatalogImportCandidatesSection
+            compact
+            hideShell
+            onChanged={bump}
+            onOpenOfferImport={onOpenOfferImport}
+          />
         : null}
 
         {mode === "create" ?
-          <AdminCatalogDirectImportSection hideShell onChanged={bump} onSuccess={goToDrafts} />
+          <AdminCatalogDirectImportSection
+            hideShell
+            onChanged={bump}
+            onSuccess={goToDrafts}
+            onOpenOfferImport={onOpenOfferImport}
+          />
         : null}
 
         {mode === "drafts" ?

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
 import type { CatalogSourceOfferDraft, CatalogSourceOfferDraftStatus } from "../../../lib/catalogSourceOfferTypes";
+import { AdminCatalogSourceOfferMigrationWarning } from "../AdminCatalogSourceOfferMigrationWarning";
 
 const STATUS_LABEL: Record<CatalogSourceOfferDraftStatus, string> = {
   draft: "Новые",
@@ -22,12 +23,23 @@ const TABS: CatalogSourceOfferDraftStatus[] = [
   "rejected",
 ];
 
-export function AdminCatalogSourceOfferDraftsPanel() {
+export function AdminCatalogSourceOfferDraftsPanel({ onChanged }: { onChanged?: () => void }) {
   const [tab, setTab] = useState<CatalogSourceOfferDraftStatus>("draft");
   const [drafts, setDrafts] = useState<CatalogSourceOfferDraft[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [tablesReady, setTablesReady] = useState(true);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const r = await fetch("/api/admin/catalogs/source-offers/status", { cache: "no-store", credentials: "include" });
+      const data = (await r.json()) as { tablesReady?: boolean };
+      setTablesReady(data.tablesReady !== false);
+    } catch {
+      setTablesReady(false);
+    }
+  }, []);
 
   const load = useCallback(async (status: CatalogSourceOfferDraftStatus) => {
     const r = await fetch(`/api/admin/catalogs/source-offers/drafts?status=${status}`, { cache: "no-store" });
@@ -37,8 +49,13 @@ export function AdminCatalogSourceOfferDraftsPanel() {
   }, []);
 
   useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  useEffect(() => {
+    if (!tablesReady) return;
     void load(tab);
-  }, [tab, load]);
+  }, [tab, load, tablesReady]);
 
   const filtered = useMemo(() => drafts, [drafts]);
 
@@ -58,8 +75,9 @@ export function AdminCatalogSourceOfferDraftsPanel() {
         setMessage(data.error ?? "Ошибка");
         return;
       }
-      setMessage(action === "publish" ? "Опубликовано в «Объявления из источников»" : "Готово");
+      setMessage(action === "publish" ? "Опубликовано в «Предложения»" : "Готово");
       await load(tab);
+      onChanged?.();
     } catch {
       setMessage("Ошибка сети");
     } finally {
@@ -67,12 +85,20 @@ export function AdminCatalogSourceOfferDraftsPanel() {
     }
   }
 
+  if (!tablesReady) {
+    return (
+      <div className="space-y-3">
+        <AdminCatalogSourceOfferMigrationWarning />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Объявления из источников — кандидаты</h2>
+        <h2 className="text-lg font-semibold">Импорт предложений</h2>
         <p className="mt-1 text-sm text-black/55">
-          Импорт с Avito/Drom и др. попадает сюда, не в каталог компаний и не в объявления пользователей.
+          Объявления с Avito, Drom и других площадок. Не смешиваются с компаниями и объявлениями пользователей.
         </p>
       </div>
 

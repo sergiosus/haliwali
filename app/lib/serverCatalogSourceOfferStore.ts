@@ -71,3 +71,39 @@ export async function listPublishedSourceOffers(
 export async function loadSourceOfferDedupSeed() {
   return withStore(() => pg.pgLoadSourceOfferDedupSeed(), () => json.jsonLoadSourceOfferDedupSeed());
 }
+
+export type CatalogSourceOfferAdminStatus = {
+  tablesReady: boolean;
+  publishedCount: number;
+  importCount: number;
+};
+
+export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdminStatus> {
+  if (!usesPostgres()) {
+    const [publishedCount, importCount] = await Promise.all([
+      json.jsonCountPublishedSourceOffers(),
+      json.jsonCountActionableSourceOfferDrafts(),
+    ]);
+    return { tablesReady: true, publishedCount, importCount };
+  }
+  try {
+    const tablesReady = await pg.pgCheckSourceOffersTablesReady();
+    if (!tablesReady) {
+      return { tablesReady: false, publishedCount: 0, importCount: 0 };
+    }
+    const [publishedCount, importCount] = await Promise.all([
+      pg.pgCountPublishedSourceOffers(),
+      pg.pgCountActionableSourceOfferDrafts(),
+    ]);
+    return { tablesReady: true, publishedCount, importCount };
+  } catch {
+    return { tablesReady: false, publishedCount: 0, importCount: 0 };
+  }
+}
+
+export async function deletePublishedSourceOffers(ids: number[]): Promise<number> {
+  return withStore(
+    () => pg.pgDeletePublishedSourceOffers(ids),
+    () => json.jsonDeletePublishedSourceOffers(ids),
+  );
+}

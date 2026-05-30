@@ -22,6 +22,7 @@ import {
 import { CATALOG_CATEGORY_SEED } from "../../lib/catalogTypes";
 import { classifySourceUrl } from "../../lib/catalogSourceClassifier";
 import { catalogSourceNameFromUrl, catalogSourceNameLabel } from "../../lib/catalogSourceName";
+import { AdminCatalogOfferImportSuccessBanner } from "./AdminCatalogOfferImportSuccessBanner";
 
 const IMPORT_CANDIDATES_STATE_KEY = "haliwali_admin_import_candidates_state_v1";
 const RECENT_KEYWORDS_KEY = "haliwali_admin_import_recent_keywords";
@@ -220,10 +221,12 @@ export function AdminCatalogImportCandidatesSection({
   compact = false,
   hideShell = false,
   onChanged,
+  onOpenOfferImport,
 }: {
   compact?: boolean;
   hideShell?: boolean;
   onChanged?: () => void;
+  onOpenOfferImport?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
@@ -234,6 +237,7 @@ export function AdminCatalogImportCandidatesSection({
   const [resultFilter, setResultFilter] = useState<CandidateResultTab>("new");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [sourceOfferDraftCount, setSourceOfferDraftCount] = useState(0);
   const [queriesUsed, setQueriesUsed] = useState<string[]>([]);
   const [recentKeywords, setRecentKeywords] = useState<string[]>([]);
   const [keywordFocused, setKeywordFocused] = useState(false);
@@ -498,6 +502,7 @@ export function AdminCatalogImportCandidatesSection({
     const urls = selectedCandidates.slice(0, MAX_URLS_PER_BATCH).map((c) => c.url);
     if (urls.length === 0) return;
     setBusy(true);
+    setSourceOfferDraftCount(0);
     try {
       const r = await fetch("/api/admin/catalogs/discover/import", {
         method: "POST",
@@ -535,6 +540,7 @@ export function AdminCatalogImportCandidatesSection({
         processedCount?: number;
         processedLimit?: number;
         truncated?: boolean;
+        sourceOfferDrafts?: unknown[];
       };
       if (!r.ok) {
         setMessage(d.error && !/^[A-Z0-9_]+$/.test(d.error) ? d.error : "Ошибка импорта");
@@ -571,6 +577,7 @@ export function AdminCatalogImportCandidatesSection({
       setMessage(
         `${limitNotice}Импортировано: ${summary.imported} · Дубликаты: ${summary.duplicates} · Ошибки: ${summary.errors} · Пропущено: ${summary.skipped}`,
       );
+      setSourceOfferDraftCount(d.sourceOfferDrafts?.length ?? 0);
       onChanged?.();
     } catch {
       setMessage("Ошибка сети");
@@ -760,6 +767,7 @@ export function AdminCatalogImportCandidatesSection({
         {message ?
           <p className="mt-3 text-sm font-medium text-black/70">{message}</p>
         : null}
+        <AdminCatalogOfferImportSuccessBanner count={sourceOfferDraftCount} onOpenImport={onOpenOfferImport} />
 
         {isCurrentSearchResult ?
           <p className="mt-3 text-sm text-black/55">

@@ -9,16 +9,19 @@ import {
   type CatalogDiscoverLocation,
 } from "../../../lib/catalogDiscoverLocationStorage";
 import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
+import { AdminCatalogOfferImportSuccessBanner } from "../AdminCatalogOfferImportSuccessBanner";
 
 type InputKind = "csv" | "text" | "url" | "urls";
 
 export function AdminCatalogDirectImportSection({
   onChanged,
   onSuccess,
+  onOpenOfferImport,
   hideShell = false,
 }: {
   onChanged?: () => void;
   onSuccess?: () => void;
+  onOpenOfferImport?: () => void;
   hideShell?: boolean;
 }) {
   const [kind, setKind] = useState<InputKind>("urls");
@@ -31,6 +34,7 @@ export function AdminCatalogDirectImportSection({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [parseErrors, setParseErrors] = useState<{ url: string; error: string }[]>([]);
+  const [sourceOfferDraftCount, setSourceOfferDraftCount] = useState(0);
 
   useEffect(() => {
     const saved = readCatalogDiscoverLocation();
@@ -44,6 +48,7 @@ export function AdminCatalogDirectImportSection({
       setBusy(true);
       setMessage(null);
       setParseErrors([]);
+      setSourceOfferDraftCount(0);
       try {
         const fd = new FormData();
         fd.set("kind", kind === "url" ? "url" : kind);
@@ -71,6 +76,7 @@ export function AdminCatalogDirectImportSection({
           error?: string;
           count?: number;
           errors?: { url: string; error: string }[];
+          sourceOfferDrafts?: unknown[];
         };
         if (!r.ok) {
           setMessage(d.error ?? "Ошибка разбора");
@@ -78,7 +84,9 @@ export function AdminCatalogDirectImportSection({
         }
         setParseErrors(d.errors ?? []);
         const errN = d.errors?.length ?? 0;
-        setMessage(`Создано кандидатов: ${d.count ?? 0}${errN > 0 ? `, ошибок: ${errN}` : ""}`);
+        const companyCount = Math.max(0, (d.count ?? 0) - (d.sourceOfferDrafts?.length ?? 0));
+        setSourceOfferDraftCount(d.sourceOfferDrafts?.length ?? 0);
+        setMessage(`Создано кандидатов: ${companyCount}${errN > 0 ? `, ошибок: ${errN}` : ""}`);
         onChanged?.();
         onSuccess?.();
       } catch {
@@ -219,6 +227,7 @@ export function AdminCatalogDirectImportSection({
       {message ?
         <p className="mt-3 text-sm font-medium text-black/70">{message}</p>
       : null}
+      <AdminCatalogOfferImportSuccessBanner count={sourceOfferDraftCount} onOpenImport={onOpenOfferImport} />
       {parseErrors.length > 0 ?
         <ul className="mt-2 list-inside list-disc text-xs text-red-700">
           {parseErrors.map((e) => (

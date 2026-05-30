@@ -103,7 +103,7 @@ export async function POST(req: Request) {
       sourceOfferDrafts: offerBatch.drafts,
       count: companyBatch.drafts.length + offerBatch.drafts.length,
       errors: [...companyBatch.errors, ...offerBatch.errors],
-      sourceOfferImportUrl: "/admin/catalogs/import/drafts?panel=source-offers",
+      sourceOfferImportUrl: "/admin?section=catalog&catalogTab=offer-import",
     });
   }
 

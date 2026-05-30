@@ -481,3 +481,38 @@ export async function pgLoadSourceOfferDedupSeed(): Promise<{
     })),
   };
 }
+
+const ACTIONABLE_DRAFT_STATUSES = ["draft", "new", "saved", "approved", "duplicate"];
+
+export async function pgCheckSourceOffersTablesReady(): Promise<boolean> {
+  try {
+    const pool = getPool();
+    await pool.query(`SELECT 1 FROM catalog_source_offers LIMIT 1`);
+    await pool.query(`SELECT 1 FROM catalog_source_offer_import_drafts LIMIT 1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function pgCountPublishedSourceOffers(): Promise<number> {
+  const pool = getPool();
+  const { rows } = await pool.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM catalog_source_offers`);
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function pgCountActionableSourceOfferDrafts(): Promise<number> {
+  const pool = getPool();
+  const { rows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM catalog_source_offer_import_drafts WHERE status = ANY($1::text[])`,
+    [ACTIONABLE_DRAFT_STATUSES],
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function pgDeletePublishedSourceOffers(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const pool = getPool();
+  const { rowCount } = await pool.query(`DELETE FROM catalog_source_offers WHERE id = ANY($1::int[])`, [ids]);
+  return rowCount ?? 0;
+}

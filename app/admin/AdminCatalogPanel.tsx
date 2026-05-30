@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminCatalogCompanyEditModal } from "./AdminCatalogCompanyEditModal";
 import { AdminCatalogClaimsSection } from "./AdminCatalogClaimsSection";
 import { AdminCatalogCompanyImportClient } from "./catalogs/import/AdminCatalogCompanyImportClient";
+import { AdminCatalogSourceOfferDraftsPanel } from "./catalogs/import/AdminCatalogSourceOfferDraftsPanel";
+import { AdminCatalogPublishedOffersPanel } from "./catalogs/AdminCatalogPublishedOffersPanel";
+import { AdminCatalogSupplierSearchSection } from "./catalogs/AdminCatalogSupplierSearchSection";
 import {
   adminCatalogOwnershipBadgeLabel,
   catalogCompanyOriginBadgeClass,
@@ -20,10 +23,24 @@ import type {
 import { CATALOG_CATEGORY_SEED } from "../lib/catalogTypes";
 import type { CatalogImportDraft } from "../lib/catalogImportTypes";
 
-type CatalogAdminTab = "companies" | "categories" | "import" | "claims" | "reports";
+type CatalogAdminTab =
+  | "companies"
+  | "categories"
+  | "import"
+  | "offers"
+  | "offer-import"
+  | "supplier-search"
+  | "claims"
+  | "reports";
 
-export function AdminCatalogPanel() {
-  const [tab, setTab] = useState<CatalogAdminTab>("companies");
+export type { CatalogAdminTab };
+
+export function AdminCatalogPanel({
+  initialTab,
+}: {
+  initialTab?: CatalogAdminTab;
+}) {
+  const [tab, setTab] = useState<CatalogAdminTab>(initialTab ?? "companies");
   const [companies, setCompanies] = useState<CatalogCompanyAdminItem[]>([]);
   const [reports, setReports] = useState<CatalogReport[]>([]);
   const [companyFilter, setCompanyFilter] = useState("");
@@ -33,6 +50,8 @@ export function AdminCatalogPanel() {
   const [editingCompany, setEditingCompany] = useState<CatalogCompanyAdminItem | null>(null);
   const [claimPendingCount, setClaimPendingCount] = useState(0);
   const [importActionCount, setImportActionCount] = useState(0);
+  const [publishedOfferCount, setPublishedOfferCount] = useState(0);
+  const [offerImportCount, setOfferImportCount] = useState(0);
 
   const loadCompanies = useCallback(() => {
     void fetch("/api/admin/catalog/companies", { credentials: "include", cache: "no-store" })
@@ -74,11 +93,29 @@ export function AdminCatalogPanel() {
       .catch(() => setImportActionCount(0));
   }, []);
 
+  const loadOfferCounts = useCallback(() => {
+    void fetch("/api/admin/catalogs/source-offers/status", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { publishedCount?: number; importCount?: number }) => {
+        setPublishedOfferCount(d.publishedCount ?? 0);
+        setOfferImportCount(d.importCount ?? 0);
+      })
+      .catch(() => {
+        setPublishedOfferCount(0);
+        setOfferImportCount(0);
+      });
+  }, []);
+
   useEffect(() => {
     loadCompanies();
     loadReports();
     loadImportActionCount();
-  }, [loadCompanies, loadReports, loadImportActionCount]);
+    loadOfferCounts();
+  }, [loadCompanies, loadReports, loadImportActionCount, loadOfferCounts]);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     loadClaimCount();
@@ -90,11 +127,12 @@ export function AdminCatalogPanel() {
       loadCompanies();
       loadReports();
       loadImportActionCount();
+      loadOfferCounts();
       loadClaimCount();
     }
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [loadCompanies, loadReports, loadImportActionCount, loadClaimCount]);
+  }, [loadCompanies, loadReports, loadImportActionCount, loadOfferCounts, loadClaimCount]);
 
   const filteredCompanies = useMemo(() => {
     if (!companyFilter) return companies;
@@ -105,13 +143,21 @@ export function AdminCatalogPanel() {
     loadCompanies();
     loadReports();
     loadImportActionCount();
+    loadOfferCounts();
     loadClaimCount();
-  }, [loadCompanies, loadReports, loadImportActionCount, loadClaimCount]);
+  }, [loadCompanies, loadReports, loadImportActionCount, loadOfferCounts, loadClaimCount]);
+
+  const openOfferImport = useCallback(() => {
+    setTab("offer-import");
+  }, []);
 
   const subTabs: { key: CatalogAdminTab; label: string; count: number }[] = [
     { key: "companies", label: "Компании в базе", count: companies.length },
     { key: "categories", label: "Категории", count: CATALOG_CATEGORY_SEED.length },
     { key: "import", label: "Импорт компаний", count: importActionCount },
+    { key: "offers", label: "Предложения", count: publishedOfferCount },
+    { key: "offer-import", label: "Импорт предложений", count: offerImportCount },
+    { key: "supplier-search", label: "Поиск поставщиков", count: 0 },
     { key: "claims", label: "Заявки на владение", count: claimPendingCount },
     { key: "reports", label: "Жалобы", count: reports.length },
   ];
@@ -332,7 +378,19 @@ export function AdminCatalogPanel() {
       : null}
 
       {tab === "import" ?
-        <AdminCatalogCompanyImportClient onChanged={refreshCatalogCounts} />
+        <AdminCatalogCompanyImportClient onChanged={refreshCatalogCounts} onOpenOfferImport={openOfferImport} />
+      : null}
+
+      {tab === "offers" ?
+        <AdminCatalogPublishedOffersPanel onChanged={refreshCatalogCounts} />
+      : null}
+
+      {tab === "offer-import" ?
+        <AdminCatalogSourceOfferDraftsPanel onChanged={refreshCatalogCounts} />
+      : null}
+
+      {tab === "supplier-search" ?
+        <AdminCatalogSupplierSearchSection />
       : null}
 
       {tab === "claims" ?

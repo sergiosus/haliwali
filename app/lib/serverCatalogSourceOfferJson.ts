@@ -320,3 +320,30 @@ export async function jsonLoadSourceOfferDedupSeed(): Promise<{
     })),
   };
 }
+
+export async function jsonCheckSourceOffersTablesReady(): Promise<boolean> {
+  return true;
+}
+
+export async function jsonCountPublishedSourceOffers(): Promise<number> {
+  const store = await readStore();
+  return store.offers.length;
+}
+
+export async function jsonCountActionableSourceOfferDrafts(): Promise<number> {
+  const store = await readStore();
+  return store.drafts.filter((d) => {
+    const s = normalizeSourceOfferDraftStatus(d.status);
+    return s === "draft" || s === "saved" || s === "approved" || s === "duplicate";
+  }).length;
+}
+
+export async function jsonDeletePublishedSourceOffers(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const store = await readStore();
+  const set = new Set(ids);
+  const before = store.offers.length;
+  store.offers = store.offers.filter((o) => !set.has(o.id));
+  await writeStore(store);
+  return before - store.offers.length;
+}

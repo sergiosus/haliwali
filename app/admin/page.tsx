@@ -29,7 +29,15 @@ export default async function AdminPage({
 
         <main className="pb-16">
           {view === "dashboard" ? (
-            <AdminClient />
+            <AdminClient
+              initialSection={
+                sp.section === "catalog" ? "catalog"
+                : undefined
+              }
+              initialCatalogTab={
+                typeof sp.catalogTab === "string" ? sp.catalogTab : undefined
+              }
+            />
           ) : view === "login_account" ? (
             <div className="mx-auto max-w-md rounded-3xl border border-black/10 bg-white p-6">
               <div className="text-lg font-semibold tracking-tight">Требуется вход</div>

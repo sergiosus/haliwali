@@ -13,7 +13,7 @@ import { listingDealStatusBadgeRu } from "../lib/listingCardMeta";
 import type { Listing, ListingStatus } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { inferredSupportSenderType, supportMessageLabelAdminPanel } from "../lib/supportUiLabels";
-import { AdminCatalogPanel } from "./AdminCatalogPanel";
+import { AdminCatalogPanel, type CatalogAdminTab } from "./AdminCatalogPanel";
 
 const statusLabel: Record<ListingStatus, string> = {
   pending: "На проверке",
@@ -315,7 +315,7 @@ function Tabs({
     { key: "ads", label: "Объявления" },
     { key: "support", label: "Обращения", counter: counts.support },
     { key: "users", label: "Пользователи", counter: counts.users },
-    { key: "catalog", label: "Каталоги компаний" },
+    { key: "catalog", label: "Каталог предложений" },
   ];
 
   return (
@@ -345,9 +345,32 @@ function Tabs({
   );
 }
 
-export default function AdminClient() {
+function normalizeCatalogTab(value: string | undefined): CatalogAdminTab | undefined {
+  if (
+    value === "companies" ||
+    value === "categories" ||
+    value === "import" ||
+    value === "offers" ||
+    value === "offer-import" ||
+    value === "supplier-search" ||
+    value === "claims" ||
+    value === "reports"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+export default function AdminClient({
+  initialSection,
+  initialCatalogTab,
+}: {
+  initialSection?: AdminTab;
+  initialCatalogTab?: string;
+}) {
   const { loaded, listings, setStatus, deleteListing, refreshListings } = useListingsStore();
-  const [tab, setTab] = useState<AdminTab>("ads");
+  const [tab, setTab] = useState<AdminTab>(initialSection ?? "ads");
+  const catalogSubTab = normalizeCatalogTab(initialCatalogTab);
   const [listingTab, setListingTab] = useState<ListingModerationTab>("pending");
   const [reportsReload, setReportsReload] = useState(0);
   const [reports, setReports] = useState<AdminReportRow[]>([]);
@@ -1245,7 +1268,7 @@ export default function AdminClient() {
           ) : null}
         </div>
       ) : tab === "catalog" ? (
-        <AdminCatalogPanel />
+        <AdminCatalogPanel initialTab={catalogSubTab} />
       ) : tab === "support" ? (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1 space-y-3">

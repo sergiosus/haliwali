@@ -12,7 +12,10 @@ import {
   isRealOfferListingUrl,
   sanitizeOfferText,
 } from "./catalogOfferSearchText";
-import type { CatalogSourceName } from "./catalogSourceOfferTypes";
+import {
+  CATALOG_MARKETPLACE_SOURCES,
+  type CatalogSourceName,
+} from "./catalogSourceOfferTypes";
 
 export type OfferSearchSourceFilter =
   | "all"
@@ -48,7 +51,7 @@ export type OfferSearchStats = {
   afterPriceFilter: number;
   afterBrandOemFilter: number;
   afterDuplicateFilter: number;
-  sourceCounts: Partial<Record<OfferListingSourceId | "youla", number>>;
+  sourceCounts: Partial<Record<OfferListingSourceId, number>>;
   hidden: Record<string, number>;
   diagnostics: OfferSourceSearchDiagnostic[];
   directSearchUrls: Partial<Record<OfferListingSourceId, string[]>>;
@@ -107,13 +110,12 @@ function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
 }
 
 function countBySource(items: OfferSearchResultItem[]): OfferSearchStats["sourceCounts"] {
-  const counts: OfferSearchStats["sourceCounts"] = { avito: 0, drom: 0, youla: 0, vk: 0 };
+  const counts = Object.fromEntries(
+    CATALOG_MARKETPLACE_SOURCES.map((s) => [s, 0]),
+  ) as Record<OfferListingSourceId, number>;
   for (const item of items) {
-    const u = item.url.toLowerCase();
-    if (u.includes("avito.ru")) counts.avito = (counts.avito ?? 0) + 1;
-    else if (u.includes("drom.ru") || u.includes("auto.ru")) counts.drom = (counts.drom ?? 0) + 1;
-    else if (u.includes("youla.ru")) counts.youla = (counts.youla ?? 0) + 1;
-    else if (u.includes("vk.com") || u.includes("vk.ru")) counts.vk = (counts.vk ?? 0) + 1;
+    const src = listingSourceFromUrl(item.url);
+    if (src) counts[src] = (counts[src] ?? 0) + 1;
   }
   return counts;
 }

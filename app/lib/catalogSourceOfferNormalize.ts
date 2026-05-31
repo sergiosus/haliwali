@@ -68,7 +68,8 @@ export function sanitizeSourceOfferInput(
   }
 
   const sourceName: CatalogSourceName =
-    input.sourceName === "company_site" ? "company_site" : catalogSourceNameFromUrl(sourceUrl);
+    input.sourceName === "company_site" ? "company_site"
+    : listingSource ?? catalogSourceNameFromUrl(sourceUrl);
 
   return {
     title,

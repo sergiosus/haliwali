@@ -18,6 +18,7 @@ const SOURCE_OPTIONS: { value: "" | CatalogSourceName; label: string }[] = [
   { value: "", label: "Все источники" },
   { value: "avito", label: CATALOG_SOURCE_NAME_LABEL.avito },
   { value: "drom", label: CATALOG_SOURCE_NAME_LABEL.drom },
+  { value: "youla", label: CATALOG_SOURCE_NAME_LABEL.youla },
   { value: "vk", label: CATALOG_SOURCE_NAME_LABEL.vk },
   { value: "company_site", label: CATALOG_SOURCE_NAME_LABEL.company_site },
   { value: "other", label: CATALOG_SOURCE_NAME_LABEL.other },

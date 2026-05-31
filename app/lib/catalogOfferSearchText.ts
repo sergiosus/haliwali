@@ -2,7 +2,9 @@
  * UTF-8 / windows-1251 decoding and text quality for admin offer search.
  */
 
-export type OfferListingSourceId = "avito" | "drom" | "youla" | "vk";
+import type { OfferListingSourceId } from "./catalogSourceOfferTypes";
+
+export type { OfferListingSourceId } from "./catalogSourceOfferTypes";
 
 export type OfferHitSkipReason =
   | "bad_encoding"

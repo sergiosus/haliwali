@@ -1,5 +1,9 @@
 import { CATALOG_SOURCE_NAME_LABEL } from "./catalogSourceName";
-import type { CatalogSourceName, CatalogSourceOffer } from "./catalogSourceOfferTypes";
+import {
+  parseCatalogSourceName,
+  type CatalogSourceName,
+  type CatalogSourceOffer,
+} from "./catalogSourceOfferTypes";
 
 export type CatalogSourceOfferListQuery = {
   q?: string;
@@ -81,10 +85,7 @@ export function parseSourceOfferListQuery(searchParams: URLSearchParams): Catalo
   const categorySlug = searchParams.get("category") ?? searchParams.get("categorySlug") ?? undefined;
   const city = searchParams.get("city") ?? undefined;
   const sourceRaw = searchParams.get("sourceName") ?? searchParams.get("source") ?? undefined;
-  const sourceName =
-    sourceRaw && ["avito", "drom", "vk", "company_site", "other"].includes(sourceRaw) ?
-      (sourceRaw as CatalogSourceName)
-    : undefined;
+  const sourceName = parseCatalogSourceName(sourceRaw);
   const priceMin = Number(searchParams.get("priceMin") ?? searchParams.get("priceFrom"));
   const priceMax = Number(searchParams.get("priceMax") ?? searchParams.get("priceTo"));
   const limit = Number(searchParams.get("limit") ?? 48);

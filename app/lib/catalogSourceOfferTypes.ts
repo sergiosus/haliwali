@@ -1,5 +1,40 @@
+/** Marketplace sources — single canonical list for search, parsers, and URL classification. */
+export const CATALOG_MARKETPLACE_SOURCES = ["avito", "drom", "vk", "youla"] as const;
+
+export type CatalogMarketplaceSourceName = (typeof CATALOG_MARKETPLACE_SOURCES)[number];
+
+/** Alias for marketplace search parsers (same ids as {@link CatalogMarketplaceSourceName}). */
+export type OfferListingSourceId = CatalogMarketplaceSourceName;
+
+export const CATALOG_NON_MARKETPLACE_SOURCES = ["company_site", "other"] as const;
+
+export type CatalogNonMarketplaceSourceName = (typeof CATALOG_NON_MARKETPLACE_SOURCES)[number];
+
+/** All {@link CatalogSourceOfferInput.sourceName} values. */
+export const CATALOG_SOURCE_NAMES = [
+  ...CATALOG_MARKETPLACE_SOURCES,
+  ...CATALOG_NON_MARKETPLACE_SOURCES,
+] as const;
+
 /** External marketplace / site identifier for indexed offers. */
-export type CatalogSourceName = "avito" | "drom" | "vk" | "company_site" | "other";
+export type CatalogSourceName = CatalogMarketplaceSourceName | CatalogNonMarketplaceSourceName;
+
+export function isCatalogMarketplaceSourceName(
+  value: string,
+): value is CatalogMarketplaceSourceName {
+  return (CATALOG_MARKETPLACE_SOURCES as readonly string[]).includes(value);
+}
+
+export function isCatalogSourceName(value: string): value is CatalogSourceName {
+  return (CATALOG_SOURCE_NAMES as readonly string[]).includes(value);
+}
+
+export function parseCatalogSourceName(
+  raw: string | null | undefined,
+): CatalogSourceName | undefined {
+  const s = raw?.trim();
+  return s && isCatalogSourceName(s) ? s : undefined;
+}
 
 /** Canonical draft statuses (maps UI «new» → draft). */
 export type CatalogSourceOfferDraftStatus =

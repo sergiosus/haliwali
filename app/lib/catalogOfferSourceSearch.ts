@@ -14,13 +14,16 @@ import {
   sanitizeOfferText,
   titleFromListingUrl,
   validateOfferLinkFromSearchPage,
-  type OfferListingSourceId,
 } from "./catalogOfferSearchText";
 import { assertPublicResolvableHost } from "./catalogUrlSafety";
 import { slugifyCatalogText } from "./catalogSlug";
-import type { CatalogSourceName } from "./catalogSourceOfferTypes";
+import {
+  CATALOG_MARKETPLACE_SOURCES,
+  type OfferListingSourceId,
+} from "./catalogSourceOfferTypes";
 
-export type { OfferListingSourceId };
+export type { OfferListingSourceId } from "./catalogSourceOfferTypes";
+export { CATALOG_MARKETPLACE_SOURCES } from "./catalogSourceOfferTypes";
 
 export type OfferSourceZeroReason =
   | "blocked"
@@ -60,7 +63,7 @@ export type OfferSourceSearchHit = {
   price: string | null;
   city: string;
   sellerHint: string;
-  sourceName: CatalogSourceName;
+  sourceName: OfferListingSourceId;
   fromSearchPage: boolean;
 };
 
@@ -562,7 +565,7 @@ export function offerSourcesForFilter(
   if (filter === "drom") return ["drom"];
   if (filter === "youla") return ["youla"];
   if (filter === "vk") return ["vk"];
-  if (filter === "all") return ["avito", "drom", "youla", "vk"];
+  if (filter === "all") return [...CATALOG_MARKETPLACE_SOURCES];
   return [];
 }
 

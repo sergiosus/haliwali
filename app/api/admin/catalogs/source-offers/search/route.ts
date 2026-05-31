@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   });
 
   if (!out.ok) {
-    return NextResponse.json(out, { status: out.error === "SEARCH_PROVIDER_NONE" ? 503 : 400 });
+    return NextResponse.json(out, { status: 400 });
   }
 
   return NextResponse.json(out);

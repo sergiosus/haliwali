@@ -225,6 +225,24 @@ export function extractSellerFromContext(ctx: string): string {
   return m?.[1] ? sanitizeOfferText(decodeJsonString(m[1])) : "";
 }
 
+/** Link from marketplace search page — URL + title only (no price required yet). */
+export function validateOfferLinkFromSearchPage(
+  hit: {
+    url: string;
+    title: string;
+    snippet: string;
+  },
+  source: OfferListingSourceId,
+): OfferHitSkipReason | null {
+  if (!isRealOfferListingUrl(hit.url, source)) return "not_listing";
+  const title = sanitizeOfferText(hit.title);
+  if (!title || title.length < 3) return "insufficient_fields";
+  if (hasBadEncoding(title)) return "bad_encoding";
+  const snippet = sanitizeOfferText(hit.snippet);
+  if (snippet && hasBadEncoding(snippet)) return "bad_encoding";
+  return null;
+}
+
 export function validateOfferSearchHit(
   hit: {
     url: string;

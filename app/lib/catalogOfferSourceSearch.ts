@@ -12,7 +12,7 @@ import {
   extractSellerFromContext,
   isRealOfferListingUrl,
   sanitizeOfferText,
-  validateOfferSearchHit,
+  validateOfferLinkFromSearchPage,
   type OfferListingSourceId,
 } from "./catalogOfferSearchText";
 import { assertPublicResolvableHost } from "./catalogUrlSafety";
@@ -36,11 +36,15 @@ export type OfferSourceSearchDiagnostic = {
   sourceName: OfferListingSourceId;
   searched: boolean;
   blocked: boolean;
+  /** Direct marketplace search URLs opened (not Google/Bing). */
   searchUrls: string[];
   httpStatus: number | null;
-  pagesFetched: number;
-  parsedCount: number;
+  /** Search result pages fetched. */
+  pagesScanned: number;
+  /** Listing links extracted from SERP HTML. */
+  linksExtracted: number;
   skippedCount: number;
+  parserErrors: number;
   zeroReason: OfferSourceZeroReason;
   skipReasons: Record<string, number>;
   message?: string;
@@ -201,7 +205,7 @@ function pushAvitoHit(
     sourceName: "avito",
     fromSearchPage: true,
   };
-  if (validateOfferSearchHit(hit, "avito")) return null;
+  if (validateOfferLinkFromSearchPage(hit, "avito")) return null;
   hits.push(hit);
   return hit;
 }
@@ -278,7 +282,7 @@ function parseDromSearchHtml(html: string, baseUrl: string, cityDefault: string)
         sourceName: "drom",
         fromSearchPage: true,
       };
-      if (validateOfferSearchHit(hit, "drom")) continue;
+      if (validateOfferLinkFromSearchPage(hit, "drom")) continue;
       hits.push(hit);
     }
   }
@@ -313,7 +317,7 @@ function parseYoulaSearchHtml(html: string, baseUrl: string, cityDefault: string
       sourceName: "other",
       fromSearchPage: true,
     };
-    if (validateOfferSearchHit(hit, "youla")) continue;
+    if (validateOfferLinkFromSearchPage(hit, "youla")) continue;
     hits.push(hit);
   }
   return hits;
@@ -345,10 +349,23 @@ function parseVkSearchHtml(html: string, baseUrl: string, cityDefault: string): 
       sourceName: "vk",
       fromSearchPage: true,
     };
-    if (validateOfferSearchHit(hit, "vk")) continue;
+    if (validateOfferLinkFromSearchPage(hit, "vk")) continue;
     hits.push(hit);
   }
   return hits;
+}
+
+/** Page-1 direct search URLs per marketplace (no search-engine APIs). */
+export function buildDirectMarketplaceSearchUrls(
+  query: string,
+  city: string,
+  sources: OfferListingSourceId[],
+): Record<OfferListingSourceId, string[]> {
+  const out = {} as Record<OfferListingSourceId, string[]>;
+  for (const source of sources) {
+    out[source] = buildSearchUrls(source, query, city, 1).urls;
+  }
+  return out;
 }
 
 function buildSearchUrls(
@@ -450,9 +467,10 @@ export async function searchOfferListingSources(opts: {
       const skipReasons: Record<string, number> = {};
       const searchUrls: string[] = [];
       let httpStatus: number | null = null;
-      let pagesFetched = 0;
-      let parsedCount = 0;
+      let pagesScanned = 0;
+      let linksExtracted = 0;
       let skippedCount = 0;
+      let parserErrors = 0;
       let zeroReason: OfferSourceZeroReason = null;
       let lastError = "";
 
@@ -482,7 +500,7 @@ export async function searchOfferListingSources(opts: {
             continue;
           }
           httpStatus = fetched.status;
-          pagesFetched += 1;
+          pagesScanned += 1;
           pageOk = true;
           const batch = parseSearchHtml(source, fetched.html, fetched.url, city);
           pageHits.push(...batch);
@@ -505,9 +523,10 @@ export async function searchOfferListingSources(opts: {
 
         let newOnPage = 0;
         for (const rawHit of pageHits) {
-          const skip = validateOfferSearchHit(rawHit, source);
+          const skip = validateOfferLinkFromSearchPage(rawHit, source);
           if (skip) {
             skippedCount += 1;
+            parserErrors += 1;
             skipReasons[skip] = (skipReasons[skip] ?? 0) + 1;
             continue;
           }
@@ -529,24 +548,24 @@ export async function searchOfferListingSources(opts: {
           }
           globalSeen.add(key);
           allHits.push(hit);
-          parsedCount += 1;
+          linksExtracted += 1;
           newOnPage += 1;
         }
 
         if (newOnPage === 0) break;
       }
 
-      if (parsedCount === 0 && !zeroReason) {
+      if (linksExtracted === 0 && !zeroReason) {
         zeroReason = zeroReasonFromError(lastError || "NO_SELECTOR", 0);
       }
 
       const statusLabel =
-        zeroReason === "blocked" ? "заблокирован"
-        : zeroReason === "captcha" ? "капча"
+        zeroReason === "blocked" ? "источник заблокировал"
+        : zeroReason === "captcha" ? "капча на источнике"
         : zeroReason === "fetch_error" ? "ошибка загрузки"
-        : zeroReason === "no_selector" ? "разметка не распознана"
-        : parsedCount > 0 ? "ok"
-        : "нет объявлений";
+        : zeroReason === "no_selector" ? "ссылки на странице не найдены"
+        : linksExtracted > 0 ? "ok"
+        : "ссылок нет";
 
       const blocked =
         zeroReason === "blocked" || zeroReason === "captcha" || lastError === "BLOCKED" || lastError === "CAPTCHA";
@@ -557,18 +576,17 @@ export async function searchOfferListingSources(opts: {
         blocked,
         searchUrls,
         httpStatus,
-        pagesFetched,
-        parsedCount,
+        pagesScanned,
+        linksExtracted,
         skippedCount,
-        zeroReason: parsedCount > 0 ? null : zeroReason,
+        parserErrors,
+        zeroReason: linksExtracted > 0 ? null : zeroReason,
         skipReasons,
         message:
-          parsedCount === 0 ?
-            `${statusLabel}${zeroReason === "city_unsupported" ? " — город фильтруется после разбора" : ""}`
-          : skippedCount > 0 ?
-            `пропущено: ${Object.entries(skipReasons)
-              .map(([k, v]) => `${k} ${v}`)
-              .join(", ")}`
+          linksExtracted === 0 ?
+            statusLabel
+          : parserErrors > 0 ?
+            `ошибки разбора: ${parserErrors}`
           : undefined,
       });
     }),

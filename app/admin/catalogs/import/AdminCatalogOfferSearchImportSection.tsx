@@ -41,9 +41,7 @@ const HIDDEN_REASON_LABEL: Record<string, string> = {
 };
 
 const PARSE_QUALITY_LABEL: Record<string, string> = {
-  full: "полностью",
-  partial: "частично",
-  search_only: "только поиск",
+  link_only: "ссылка с поиска",
 };
 
 const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
@@ -63,15 +61,14 @@ type PageSize = 20 | 50;
 
 const EMPTY_REASON_LABEL: Record<string, string> = {
   EMPTY_QUERY: "Введите поисковый запрос",
-  SEARCH_PROVIDER_NONE: "Поиск не настроен на сервере (SEARCH_PROVIDER / SEARCH_API_KEY)",
-  SEARCH_FAILED: "Ошибка ответа поискового API",
-  NO_RAW_RESULTS: "Поисковый API не вернул ссылок по запросу",
-  ALL_FILTERED_NOT_LISTING: "Все ссылки отфильтрованы: это не объявления с Avito, Drom, Youla и др.",
+  UNSUPPORTED_SOURCE: "Для этого источника используйте «По ссылкам»",
+  NO_LINKS_EXTRACTED: "На страницах поиска площадок не найдено ссылок на объявления",
+  ALL_FILTERED_NOT_LISTING: "Все ссылки отфильтрованы: не объявления",
   ALL_FILTERED_SOURCE: "Нет результатов для выбранного источника",
   ALL_FILTERED_BRAND_OEM: "Нет совпадений по бренду или OEM/артикулу",
   ALL_FILTERED_PRICE: "Нет результатов в диапазоне цен",
-  ALL_FILTERED_CITY: "Все результаты отфильтрованы по городу",
-  SOURCE_BLOCKED: "Источники заблокировали запрос (капча / 403)",
+  ALL_FILTERED_CITY: "Все ссылки отфильтрованы по городу",
+  SOURCE_BLOCKED: "Площадки заблокировали загрузку (капча / 403)",
 };
 
 /** Offer web search — dedicated API, no company import sessions. */
@@ -246,7 +243,8 @@ export function AdminCatalogOfferSearchImportSection({
       <div>
         <h3 className="text-base font-semibold">По поисковому запросу</h3>
         <p className="mt-1 text-sm text-black/55">
-          Поиск объявлений как в поисковике. Город можно указать в запросе («touran Ижевск») или отдельно.
+          Прямой поиск на Avito, Drom, Youla, VK — без Google и Bing. Открываем страницы поиска площадок,
+          извлекаем ссылки на объявления. Выберите ссылки → «Создать кандидатов» разберёт карточки.
         </p>
       </div>
 
@@ -344,19 +342,15 @@ export function AdminCatalogOfferSearchImportSection({
           </p>
           {searchStats ?
             <p className="text-xs text-black/50">
-              Разобрано: {searchStats.parsed}
-              {searchStats.afterCityFilter !== searchStats.parsed ?
+              Ссылок: {searchStats.linksExtracted}
+              <span className="mx-1 text-black/30">·</span>
+              Страниц поиска: {searchStats.pagesScanned}
+              {searchStats.afterCityFilter !== searchStats.linksExtracted ?
                 ` → после города: ${searchStats.afterCityFilter}`
               : ""}
               {searchStats.afterPriceFilter !== searchStats.afterCityFilter ?
                 ` → после цены: ${searchStats.afterPriceFilter}`
               : ""}
-              {searchStats.afterDuplicateFilter !== searchStats.afterBrandOemFilter &&
-              searchStats.afterDuplicateFilter !== searchStats.afterPriceFilter ?
-                ` → без дублей: ${searchStats.afterDuplicateFilter}`
-              : ""}
-              {searchStats.detailEnriched > 0 ? ` · детально: ${searchStats.detailEnriched}` : ""}
-              {searchStats.serpFallbackUsed ? " · SERP-дополнение" : ""}
               {searchStats.pagesPerSource ?
                 ` · до ${searchStats.pagesPerSource} стр./источник`
               : ""}
@@ -384,18 +378,23 @@ export function AdminCatalogOfferSearchImportSection({
                 <div key={diag.sourceName} className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs">
                   <p className="font-medium text-black">{SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}</p>
                   <p className="mt-0.5 text-black/55">
-                    {diag.searched ? "искали" : "не искали"}
+                    {diag.blocked ? "заблокирован" : "доступ OK"}
                     {" · "}
-                    {diag.blocked ? "заблокирован" : "не заблокирован"}
+                    ссылок: {diag.linksExtracted}
                     {" · "}
-                    разобрано: {diag.parsedCount}
-                    {" · "}
-                    пропущено: {diag.skippedCount}
+                    стр.: {diag.pagesScanned}
+                    {diag.parserErrors > 0 ? ` · ошибки: ${diag.parserErrors}` : ""}
                   </p>
-                  <p className="text-black/50">HTTP {diag.httpStatus ?? "—"} · стр.: {diag.pagesFetched}</p>
-                    {diag.searchUrls[0] ?
-                      <p className="mt-1 break-all text-black/40">{diag.searchUrls[0]}</p>
-                    : null}
+                  <p className="text-black/50">HTTP {diag.httpStatus ?? "—"}</p>
+                  {diag.searchUrls.length > 0 ?
+                    <ul className="mt-1 space-y-0.5 text-black/40">
+                      {diag.searchUrls.map((u) => (
+                        <li key={u} className="break-all">
+                          {u}
+                        </li>
+                      ))}
+                    </ul>
+                  : null}
                     {diag.zeroReason ?
                       <p className="mt-1 text-amber-900">
                         0 результатов: {OFFER_SOURCE_ZERO_LABELS[diag.zeroReason]}
@@ -498,15 +497,7 @@ export function AdminCatalogOfferSearchImportSection({
                       <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
                         {catalogSourceNameLabel(item.sourceName)}
                       </span>
-                      <span
-                        className={
-                          item.parseQuality === "full" ?
-                            "rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800"
-                          : item.parseQuality === "partial" ?
-                            "rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900"
-                          : "rounded-full bg-black/[0.06] px-2 py-0.5 text-xs text-black/55"
-                        }
-                      >
+                      <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-xs text-black/55">
                         {PARSE_QUALITY_LABEL[item.parseQuality] ?? item.parseQuality}
                       </span>
                     </div>

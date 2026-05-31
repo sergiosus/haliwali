@@ -3,7 +3,11 @@
  * Fetches search result pages — not company discover / SERP.
  */
 
-import { logCatalogDiscover, logOfferSearchHtmlSnippet } from "./catalogCatalogLog";
+import {
+  logCatalogDiscover,
+  logCatalogOfferSearch,
+  logOfferSearchHtmlSnippet,
+} from "./catalogCatalogLog";
 import { assertCatalogFetchAllowed } from "./catalogHtmlFetch";
 import {
   decodeHtmlBytes,
@@ -49,11 +53,19 @@ export type OfferSourceSearchDiagnostic = {
   pagesScanned: number;
   /** Listing links extracted from SERP HTML. */
   linksExtracted: number;
+  /** After query relevance filter (filled by admin search). */
+  relevantCount?: number;
+  /** Rejected by query relevance filter (filled by admin search). */
+  rejectedByRelevance?: number;
   skippedCount: number;
   parserErrors: number;
   zeroReason: OfferSourceZeroReason;
   skipReasons: Record<string, number>;
   message?: string;
+  /** Last fetch/parse exception for this source. */
+  errorMessage?: string | null;
+  errorCode?: string | null;
+  lastRequestUrl?: string | null;
 };
 
 export type OfferSourceSearchHit = {
@@ -104,7 +116,10 @@ function isCaptchaOrBlocked(html: string, status: number): boolean {
 async function fetchSearchPage(
   rawUrl: string,
   source: OfferListingSourceId,
-): Promise<{ ok: true; status: number; html: string; url: string } | { ok: false; status: number | null; error: string }> {
+): Promise<
+  | { ok: true; status: number; html: string; url: string }
+  | { ok: false; status: number | null; error: string; errorMessage?: string }
+> {
   let url: URL;
   try {
     url = assertCatalogFetchAllowed(rawUrl);
@@ -584,10 +599,11 @@ export async function searchOfferListingSources(opts: {
   const allHits: OfferSourceSearchHit[] = [];
   const globalSeen = new Set<string>();
 
-  logCatalogDiscover("offer_source_search_start", { query: query.slice(0, 60), sources: opts.sources });
+  logCatalogOfferSearch("search_start", { query: query.slice(0, 60), sources: opts.sources });
 
   await Promise.all(
     opts.sources.map(async (source) => {
+      try {
       const skipReasons: Record<string, number> = {};
       const searchUrls: string[] = [];
       let httpStatus: number | null = null;
@@ -597,6 +613,8 @@ export async function searchOfferListingSources(opts: {
       let parserErrors = 0;
       let zeroReason: OfferSourceZeroReason = null;
       let lastError = "";
+      let lastErrorMessage: string | null = null;
+      let lastRequestUrl: string | null = null;
       let lastHtml = "";
       let dromMeta: DromParseMeta | undefined;
       let avitoMeta: AvitoParseMeta | undefined;
@@ -619,14 +637,27 @@ export async function searchOfferListingSources(opts: {
         for (const searchUrl of urls) {
           if (allHits.length >= maxTotal) break;
           searchUrls.push(searchUrl);
+          lastRequestUrl = searchUrl;
+          logCatalogOfferSearch("source_request", { source, url: searchUrl.slice(0, 160) });
           const fetched = await fetchSearchPage(searchUrl, source);
           if (!fetched.ok) {
             lastError = fetched.error;
+            lastErrorMessage = fetched.errorMessage ?? fetched.error;
             httpStatus = fetched.status;
+            logCatalogOfferSearch("source_response_error", {
+              source,
+              httpStatus: fetched.status,
+              error: fetched.error,
+            });
             if (page === 1) zeroReason = zeroReasonFromError(fetched.error, 0);
             continue;
           }
           httpStatus = fetched.status;
+          logCatalogOfferSearch("source_response_ok", {
+            source,
+            httpStatus: fetched.status,
+            htmlBytes: fetched.html.length,
+          });
           pagesScanned += 1;
           pageOk = true;
           lastHtml = fetched.html;
@@ -740,6 +771,14 @@ export async function searchOfferListingSources(opts: {
           : OFFER_SOURCE_ZERO_LABELS[zeroReason ?? "no_selector"] ?? "ссылок нет";
       }
 
+      logCatalogOfferSearch("source_links_extracted", {
+        source,
+        linksExtracted,
+        pagesScanned,
+        httpStatus,
+        zeroReason: linksExtracted > 0 ? null : zeroReason,
+      });
+
       diagnostics.push({
         sourceName: source,
         searched: searchUrls.length > 0,
@@ -754,15 +793,40 @@ export async function searchOfferListingSources(opts: {
         skipReasons,
         message:
           linksExtracted === 0 ?
-            detailMessage
+            detailMessage ?? lastErrorMessage ?? undefined
           : parserErrors > 0 ?
             `ошибки разбора: ${parserErrors}`
           : undefined,
+        errorMessage: linksExtracted === 0 ? lastErrorMessage : null,
+        errorCode: linksExtracted === 0 ? lastError || zeroReason : null,
+        lastRequestUrl,
       });
+      } catch (sourceErr) {
+        const errorMessage = sourceErr instanceof Error ? sourceErr.message : String(sourceErr);
+        logCatalogOfferSearch("source_failed", { source, error: errorMessage });
+        logCatalogOfferSearch("source_links_extracted", { source, linksExtracted: 0, error: errorMessage });
+        diagnostics.push({
+          sourceName: source,
+          searched: false,
+          blocked: false,
+          searchUrls: [],
+          httpStatus: null,
+          pagesScanned: 0,
+          linksExtracted: 0,
+          skippedCount: 0,
+          parserErrors: 1,
+          zeroReason: "parse_error",
+          skipReasons: {},
+          message: errorMessage,
+          errorMessage,
+          errorCode: "SOURCE_EXCEPTION",
+          lastRequestUrl: null,
+        });
+      }
     }),
   );
 
-  logCatalogDiscover("offer_source_search_done", { total: allHits.length });
+  logCatalogOfferSearch("search_done", { total: allHits.length, sources: diagnostics.length });
 
   return { hits: allHits, diagnostics };
 }

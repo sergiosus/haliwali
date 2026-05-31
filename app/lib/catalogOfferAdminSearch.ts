@@ -1,4 +1,5 @@
-import { logCatalogDiscover } from "./catalogCatalogLog";
+import { logCatalogDiscover, logCatalogOfferSearch } from "./catalogCatalogLog";
+import type { OfferSearchApiErrorDetail } from "./catalogOfferSearchApiError";
 import {
   buildDirectMarketplaceSearchUrls,
   offerSourcesForFilter,
@@ -30,7 +31,7 @@ export type OfferSearchSourceFilter =
 
 export type OfferParseQuality = "link_only";
 
-export type OfferSearchRelevance = "match" | "skipped";
+export type OfferSearchRelevance = "match" | "skipped" | "relevance_unknown";
 
 export type OfferSearchSkipReason = "query_mismatch";
 
@@ -67,7 +68,13 @@ function brandFromListingUrl(url: string): string | null {
 }
 
 export type OfferSearchStats = {
+  /** Raw listing links from marketplace SERP (before admin filters). */
   linksExtracted: number;
+  /** After city/price/brand/dedup/quality filters, before relevance. */
+  beforeRelevanceFilter: number;
+  relevantCount: number;
+  relevanceRejected: number;
+  relevanceFilterFailed: boolean;
   pagesScanned: number;
   afterCityFilter: number;
   afterPriceFilter: number;
@@ -89,7 +96,8 @@ export type OfferSearchResponse = {
   /** Filtered out as irrelevant to query (e.g. query_mismatch). */
   skipped?: OfferSearchResultItem[];
   stats: OfferSearchStats;
-  sessionId?: number;
+  sessionId?: number | null;
+  searchError?: OfferSearchApiErrorDetail;
 };
 
 const MAX_RESULTS = 100;
@@ -146,7 +154,14 @@ function applyQueryRelevanceFilter(
   const matched: OfferSearchResultItem[] = [];
   const skipped: OfferSearchResultItem[] = [];
   for (const item of items) {
-    if (offerMatchesSearchQuery(query, item)) {
+    if (
+      offerMatchesSearchQuery(query, {
+        title: item.title,
+        shortSnippet: item.shortSnippet,
+        url: item.url,
+        brand: item.brand,
+      })
+    ) {
       matched.push({ ...item, relevance: "match", skipReason: null });
     } else {
       skipped.push({ ...item, relevance: "skipped", skipReason: "query_mismatch" });
@@ -154,6 +169,63 @@ function applyQueryRelevanceFilter(
     }
   }
   return { matched, skipped };
+}
+
+function applyQueryRelevanceFilterSafe(
+  query: string,
+  items: OfferSearchResultItem[],
+  hidden: Record<string, number>,
+): {
+  matched: OfferSearchResultItem[];
+  skipped: OfferSearchResultItem[];
+  filterFailed: boolean;
+  filterError?: string;
+} {
+  try {
+    const { matched, skipped } = applyQueryRelevanceFilter(query, items, hidden);
+    if (matched.length === 0 && items.length > 0) {
+      const filterError = "no_relevant_matches";
+      logCatalogOfferSearch("relevance_zero_fallback", {
+        query: query.slice(0, 60),
+        kept: items.length,
+        rejected: skipped.length,
+      });
+      return {
+        matched: items.map((item) => ({
+          ...item,
+          relevance: "relevance_unknown" as const,
+          skipReason: null,
+        })),
+        skipped: [],
+        filterFailed: true,
+        filterError,
+      };
+    }
+    return { matched, skipped, filterFailed: false };
+  } catch (err) {
+    const filterError = err instanceof Error ? err.message : String(err);
+    logCatalogOfferSearch("relevance_filter_failed", { error: filterError, kept: items.length });
+    const matched = items.map((item) => ({
+      ...item,
+      relevance: "relevance_unknown" as const,
+      skipReason: null,
+    }));
+    return { matched, skipped: [], filterFailed: true, filterError };
+  }
+}
+
+function enrichDiagnosticsWithRelevance(
+  diagnostics: OfferSourceSearchDiagnostic[],
+  matched: OfferSearchResultItem[],
+  skipped: OfferSearchResultItem[],
+): OfferSourceSearchDiagnostic[] {
+  const relevantBySource = countBySource(matched);
+  const rejectedBySource = countBySource(skipped);
+  return diagnostics.map((d) => ({
+    ...d,
+    relevantCount: relevantBySource[d.sourceName] ?? 0,
+    rejectedByRelevance: rejectedBySource[d.sourceName] ?? 0,
+  }));
 }
 
 function countBySource(items: OfferSearchResultItem[]): OfferSearchStats["sourceCounts"] {
@@ -169,6 +241,8 @@ function countBySource(items: OfferSearchResultItem[]): OfferSearchStats["source
 
 function matchesCity(item: OfferSearchResultItem, city: string): boolean {
   if (!city.trim()) return true;
+  // SERP cards often have no city — do not drop when unknown.
+  if (!item.city.trim()) return true;
   const needle = norm(city);
   const blob = norm(`${item.city} ${item.title} ${item.shortSnippet} ${item.url}`);
   return blob.includes(needle);
@@ -219,6 +293,10 @@ function emptyStats(
 ): OfferSearchStats {
   return {
     linksExtracted: 0,
+    beforeRelevanceFilter: 0,
+    relevantCount: 0,
+    relevanceRejected: 0,
+    relevanceFilterFailed: false,
     pagesScanned: 0,
     afterCityFilter: 0,
     afterPriceFilter: 0,
@@ -279,6 +357,13 @@ export async function searchOffersForAdmin(opts: {
   const sources = offerSourcesForFilter(sourceFilter);
   const directSearchUrls = buildDirectMarketplaceSearchUrls(query, city, sources);
 
+  logCatalogOfferSearch("admin_search_start", {
+    query: query.slice(0, 60),
+    city: city.slice(0, 40),
+    sourceFilter,
+    sources,
+  });
+
   logCatalogDiscover("offer_direct_search", {
     query: query.slice(0, 60),
     sources,
@@ -294,10 +379,26 @@ export async function searchOffersForAdmin(opts: {
   });
 
   const pagesScanned = diagnostics.reduce((n, d) => n + d.pagesScanned, 0);
+  const rawLinkCount = hits.length;
   let items: OfferSearchResultItem[] = hits.map(hitToResult);
 
+  logCatalogOfferSearch("admin_links_from_sources", {
+    rawLinkCount,
+    pagesScanned,
+    diagnostics: diagnostics.map((d) => ({
+      source: d.sourceName,
+      found: d.linksExtracted,
+      httpStatus: d.httpStatus,
+      error: d.errorMessage ?? d.zeroReason,
+    })),
+  });
+
   const stats: OfferSearchStats = {
-    linksExtracted: items.length,
+    linksExtracted: rawLinkCount,
+    beforeRelevanceFilter: 0,
+    relevantCount: 0,
+    relevanceRejected: 0,
+    relevanceFilterFailed: false,
     pagesScanned,
     afterCityFilter: 0,
     afterPriceFilter: 0,
@@ -325,7 +426,9 @@ export async function searchOffersForAdmin(opts: {
   if (city) {
     const before = items.length;
     items = items.filter((i) => matchesCity(i, city));
-    if (before > items.length) hidden.city_mismatch = before - items.length;
+    const cityDropped = before - items.length;
+    if (cityDropped > 0) hidden.city_mismatch = cityDropped;
+    logCatalogOfferSearch("admin_after_city_filter", { before, after: items.length, cityDropped });
   }
   stats.afterCityFilter = items.length;
 
@@ -362,13 +465,38 @@ export async function searchOffersForAdmin(opts: {
   const beforeQuality = items.length;
   items = filterLinkResults(items, hidden);
   if (beforeQuality > items.length) {
-    logCatalogDiscover("offer_link_filter", { dropped: beforeQuality - items.length, hidden });
+    logCatalogOfferSearch("admin_quality_filter", { dropped: beforeQuality - items.length, hidden });
   }
 
-  const { matched, skipped } = applyQueryRelevanceFilter(query, items, hidden);
+  stats.beforeRelevanceFilter = items.length;
+  logCatalogOfferSearch("admin_before_relevance", { count: items.length, query: query.slice(0, 40) });
+
+  const {
+    matched,
+    skipped,
+    filterFailed,
+    filterError,
+  } = applyQueryRelevanceFilterSafe(query, items, hidden);
   items = matched;
-  stats.linksExtracted = items.length;
+  stats.relevantCount = matched.length;
+  stats.relevanceRejected = skipped.length;
+  stats.relevanceFilterFailed = filterFailed;
   stats.sourceCounts = countBySource(items);
+  stats.diagnostics = enrichDiagnosticsWithRelevance(diagnostics, matched, skipped);
+
+  logCatalogOfferSearch("admin_relevance_done", {
+    relevant: matched.length,
+    rejected: skipped.length,
+    filterFailed,
+    filterError: filterError?.slice(0, 120),
+  });
+
+  logCatalogOfferSearch("admin_search_final", {
+    rawLinkCount,
+    beforeRelevance: stats.beforeRelevanceFilter,
+    relevant: items.length,
+    rejected: skipped.length,
+  });
 
   return {
     ok: true,
@@ -386,8 +514,12 @@ export async function searchOffersForAdmin(opts: {
         : "ALL_FILTERED"
       : null,
     message:
-      items.length === 0 ?
-        `Ссылок после фильтров: 0 (было ${hits.length})`
+      filterFailed ?
+        `Фильтр релевантности недоступен — показаны все ${items.length} ссылок (${filterError ?? "ошибка"})`
+      : items.length === 0 && skipped.length > 0 ?
+        `Релевантных: 0. Скрыто по запросу: ${skipped.length} (всего с площадок: ${rawLinkCount})`
+      : items.length === 0 ?
+        `Ссылок после фильтров: 0 (с площадок: ${rawLinkCount})`
       : `Найдено ${items.length} ссылок. Выберите и создайте кандидатов — поля объявления разберутся при импорте.`,
   };
 }

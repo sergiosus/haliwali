@@ -59,3 +59,7 @@ export function logAdminCatalog(message: string, meta?: Record<string, unknown>)
 export function logAdminCatalogImport(message: string, meta?: Record<string, unknown>): void {
   console.info(`[ADMIN_CATALOG_IMPORT] ${message}${safeMeta(meta)}`);
 }
+
+export function logCatalogOfferSearch(message: string, meta?: Record<string, unknown>): void {
+  console.info(`[CATALOG_OFFER_SEARCH] ${message}${safeMeta(meta)}`);
+}

@@ -1,3 +1,4 @@
+import { logCatalogOfferSearch } from "./catalogCatalogLog";
 import { usesPostgres } from "./pgPool";
 import type { OfferSearchSessionPayload, PersistedOfferSearchSession } from "./catalogOfferSearchSessionTypes";
 import * as pg from "./serverCatalogOfferSearchSessionPg";
@@ -12,13 +13,20 @@ async function withStore<T>(pgFn: () => Promise<T>, jsonFn: () => Promise<T>): P
   }
 }
 
+/** Persist search session; never throws — search results must still return if DB/file store fails. */
 export async function saveOfferSearchSession(
   payload: OfferSearchSessionPayload,
-): Promise<PersistedOfferSearchSession> {
-  return withStore(
-    () => pg.pgSaveOfferSearchSession(payload),
-    () => json.jsonSaveOfferSearchSession(payload),
-  );
+): Promise<PersistedOfferSearchSession | null> {
+  try {
+    return await withStore(
+      () => pg.pgSaveOfferSearchSession(payload),
+      () => json.jsonSaveOfferSearchSession(payload),
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logCatalogOfferSearch("session_save_failed", { error: msg });
+    return null;
+  }
 }
 
 export async function getLatestOfferSearchSession(): Promise<PersistedOfferSearchSession | null> {

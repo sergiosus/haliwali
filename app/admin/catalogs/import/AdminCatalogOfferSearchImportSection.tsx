@@ -13,6 +13,7 @@ import type {
   OfferSearchResultItem,
   OfferSearchStats,
 } from "../../../lib/catalogOfferAdminSearch";
+import type { OfferSearchApiErrorDetail } from "../../../lib/catalogOfferSearchApiError";
 import type { SourceOfferImportError } from "../../../lib/catalogSourceOfferImportErrors";
 import { SOURCE_OFFER_IMPORT_ERROR_LABELS } from "../../../lib/catalogSourceOfferImportErrors";
 import {
@@ -104,6 +105,8 @@ export function AdminCatalogOfferSearchImportSection({
   const [searchStats, setSearchStats] = useState<OfferSearchStats | null>(null);
   const [diagnostics, setDiagnostics] = useState<OfferSourceSearchDiagnostic[]>([]);
   const [skippedResults, setSkippedResults] = useState<OfferSearchResultItem[]>([]);
+  const [searchError, setSearchError] = useState<OfferSearchApiErrorDetail | null>(null);
+  const [lastHttpStatus, setLastHttpStatus] = useState<number | null>(null);
 
   const applySessionPayload = useCallback(
     (d: {
@@ -202,6 +205,8 @@ export function AdminCatalogOfferSearchImportSection({
       setImportErrors([]);
       setCreatedCount(0);
       setPage(1);
+      setSearchError(null);
+      setLastHttpStatus(null);
     } catch {
       setMessage("Не удалось очистить результаты");
     } finally {
@@ -233,6 +238,8 @@ export function AdminCatalogOfferSearchImportSection({
     setPage(1);
     setCreatedCount(0);
     setImportErrors([]);
+    setSearchError(null);
+    setLastHttpStatus(null);
     try {
       const r = await fetch("/api/admin/catalogs/source-offers/search", {
         method: "POST",
@@ -248,7 +255,9 @@ export function AdminCatalogOfferSearchImportSection({
           priceMax: priceMax.trim() ? Number(priceMax) : undefined,
         }),
       });
-      const d = (await r.json()) as {
+      setLastHttpStatus(r.status);
+      const rawBody = await r.text();
+      let d: {
         ok?: boolean;
         error?: string;
         message?: string;
@@ -256,10 +265,44 @@ export function AdminCatalogOfferSearchImportSection({
         results?: OfferSearchResultItem[];
         skipped?: OfferSearchResultItem[];
         stats?: OfferSearchStats;
+        searchError?: OfferSearchApiErrorDetail;
       };
-      if (!d.ok) {
-        setMessage(d.message ?? d.error ?? "Ошибка поиска");
-        setEmptyReason(d.error ?? "SEARCH_FAILED");
+      try {
+        d = JSON.parse(rawBody) as typeof d;
+      } catch (parseErr) {
+        const parseMessage =
+          parseErr instanceof Error ? parseErr.message : String(parseErr);
+        const errDetail: OfferSearchApiErrorDetail = {
+          message: `Ответ сервера не JSON (HTTP ${r.status}): ${parseMessage}`,
+          httpStatus: r.status,
+          requestUrl: "/api/admin/catalogs/source-offers/search",
+        };
+        setSearchError(errDetail);
+        setMessage(errDetail.message);
+        setEmptyReason("INVALID_RESPONSE");
+        setResults([]);
+        setSkippedResults([]);
+        setSearchStats(null);
+        setDiagnostics([]);
+        setSearched(true);
+        return;
+      }
+
+      if (d.searchError) setSearchError(d.searchError);
+
+      if (!r.ok || !d.ok) {
+        const err = d.searchError;
+        const detail =
+          err?.message ??
+          d.message ??
+          d.error ??
+          `HTTP ${r.status}`;
+        setMessage(detail);
+        setEmptyReason(d.error ?? d.emptyReason ?? "SEARCH_FAILED");
+        setResults(d.results ?? []);
+        setSkippedResults(d.skipped ?? []);
+        setSearchStats(d.stats ?? null);
+        setDiagnostics(d.stats?.diagnostics ?? []);
         setSearched(true);
         return;
       }
@@ -271,7 +314,7 @@ export function AdminCatalogOfferSearchImportSection({
       setSearched(true);
       setEmptyReason(d.emptyReason ?? (list.length === 0 ? "NO_RESULTS" : null));
       if (list.length > 0) {
-        setMessage(null);
+        setMessage(d.message ?? null);
       } else {
         setMessage(
           d.message ??
@@ -279,9 +322,20 @@ export function AdminCatalogOfferSearchImportSection({
             "Объявления не найдены",
         );
       }
-    } catch {
-      setMessage("Ошибка сети");
-      setEmptyReason("NETWORK");
+    } catch (transportErr) {
+      const transportMessage =
+        transportErr instanceof Error ? transportErr.message : String(transportErr);
+      const errDetail: OfferSearchApiErrorDetail = {
+        message: `Сбой запроса к API: ${transportMessage}`,
+        requestUrl: "/api/admin/catalogs/source-offers/search",
+      };
+      setSearchError(errDetail);
+      setMessage(errDetail.message);
+      setEmptyReason("TRANSPORT_ERROR");
+      setResults([]);
+      setSkippedResults([]);
+      setSearchStats(null);
+      setDiagnostics([]);
       setSearched(true);
     } finally {
       setBusy(false);
@@ -478,6 +532,16 @@ export function AdminCatalogOfferSearchImportSection({
             <p className="text-xs text-black/50">
               Ссылок: {searchStats.linksExtracted}
               <span className="mx-1 text-black/30">·</span>
+              До релевантности: {searchStats.beforeRelevanceFilter}
+              <span className="mx-1 text-black/30">·</span>
+              Релевантных: {searchStats.relevantCount}
+              {searchStats.relevanceRejected > 0 ?
+                <>
+                  <span className="mx-1 text-black/30">·</span>
+                  Отклонено: {searchStats.relevanceRejected}
+                </>
+              : null}
+              <span className="mx-1 text-black/30">·</span>
               Страниц поиска: {searchStats.pagesScanned}
               {searchStats.afterCityFilter !== searchStats.linksExtracted ?
                 ` → после города: ${searchStats.afterCityFilter}`
@@ -507,50 +571,107 @@ export function AdminCatalogOfferSearchImportSection({
             </p>
           : null}
           {diagnostics.length > 0 ?
-            <div className="grid gap-2 sm:grid-cols-2">
-              {diagnostics.map((diag) => (
-                <div key={diag.sourceName} className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs">
-                  <p className="font-medium text-black">{SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}</p>
-                  <p className="mt-0.5 text-black/55">
-                    {diag.blocked ? "заблокирован" : "доступ OK"}
-                    {" · "}
-                    ссылок: {diag.linksExtracted}
-                    {" · "}
-                    стр.: {diag.pagesScanned}
-                    {diag.parserErrors > 0 ? ` · ошибки: ${diag.parserErrors}` : ""}
-                  </p>
-                  <p className="text-black/50">HTTP {diag.httpStatus ?? "—"}</p>
-                  {diag.searchUrls.length > 0 ?
-                    <ul className="mt-1 space-y-0.5 text-black/40">
-                      {diag.searchUrls.map((u) => (
-                        <li key={u} className="break-all">
-                          {u}
-                        </li>
-                      ))}
-                    </ul>
-                  : null}
-                    {diag.linksExtracted === 0 && (diag.message || diag.zeroReason) ?
-                      <p className="mt-1 text-amber-900">
-                        {diag.message ?? OFFER_SOURCE_ZERO_LABELS[diag.zeroReason ?? ""] ?? diag.zeroReason}
-                      </p>
-                    : null}
-                  {Object.keys(diag.skipReasons).length > 0 ?
-                    <p className="mt-0.5 text-black/40">
-                      Пропуски:{" "}
-                      {Object.entries(diag.skipReasons)
-                        .map(([k, v]) => `${HIDDEN_REASON_LABEL[k] ?? k}: ${v}`)
-                        .join(", ")}
-                    </p>
-                  : null}
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-lg border border-black/10 bg-white">
+              <table className="w-full min-w-[32rem] text-left text-xs">
+                <thead className="border-b border-black/10 bg-black/[0.03] text-black/60">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Источник</th>
+                    <th className="px-3 py-2 font-medium">Найдено</th>
+                    <th className="px-3 py-2 font-medium">Релевантно</th>
+                    <th className="px-3 py-2 font-medium">Отклонено</th>
+                    <th className="px-3 py-2 font-medium">Ошибка</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diagnostics.map((diag) => {
+                    const errText =
+                      diag.errorMessage ??
+                      (diag.linksExtracted === 0 ?
+                        diag.message ??
+                          OFFER_SOURCE_ZERO_LABELS[diag.zeroReason ?? ""] ??
+                          diag.zeroReason ??
+                          (diag.blocked ? "заблокирован" : null)
+                      : null) ??
+                      "—";
+                    return (
+                      <tr key={diag.sourceName} className="border-t border-black/5 align-top">
+                        <td className="px-3 py-2 font-medium text-black">
+                          {SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}
+                          <div className="mt-0.5 font-normal text-black/45">
+                            HTTP {diag.httpStatus ?? "—"}
+                            {diag.pagesScanned > 0 ? ` · стр. ${diag.pagesScanned}` : ""}
+                          </div>
+                          {diag.lastRequestUrl ?
+                            <div className="mt-1 max-w-xs break-all font-normal text-black/40">
+                              {diag.lastRequestUrl}
+                            </div>
+                          : diag.searchUrls[0] ?
+                            <div className="mt-1 max-w-xs break-all font-normal text-black/40">
+                              {diag.searchUrls[0]}
+                            </div>
+                          : null}
+                        </td>
+                        <td className="px-3 py-2">{diag.linksExtracted}</td>
+                        <td className="px-3 py-2">{diag.relevantCount ?? "—"}</td>
+                        <td className="px-3 py-2">{diag.rejectedByRelevance ?? "—"}</td>
+                        <td className="px-3 py-2 text-amber-900">{errText}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+          : null}
+          {searchStats?.relevanceFilterFailed ?
+            <p className="text-xs text-amber-900">
+              Фильтр релевантности не применён — показаны все ссылки после остальных фильтров (
+              {searchStats.beforeRelevanceFilter} шт.).
+            </p>
           : null}
         </div>
       : null}
 
-      {message ?
+      {searchError || lastHttpStatus != null ?
+        <div className="rounded-2xl border border-red-200 bg-red-50/90 p-4 text-sm text-red-950">
+          <p className="font-semibold">Ошибка поиска (детали)</p>
+          {lastHttpStatus != null ?
+            <p className="mt-1">
+              <span className="font-medium">HTTP:</span> {lastHttpStatus}
+            </p>
+          : null}
+          {searchError?.source ?
+            <p className="mt-1">
+              <span className="font-medium">Источник:</span> {searchError.source}
+            </p>
+          : null}
+          {searchError?.requestUrl ?
+            <p className="mt-1 break-all">
+              <span className="font-medium">URL запроса:</span> {searchError.requestUrl}
+            </p>
+          : null}
+          <p className="mt-1">
+            <span className="font-medium">Сообщение:</span>{" "}
+            {searchError?.message ?? message ?? "—"}
+          </p>
+          {searchError?.file ?
+            <p className="mt-1 font-mono text-xs">
+              {searchError.file}
+              {searchError.line != null ? `:${searchError.line}` : ""}
+            </p>
+          : null}
+          {searchError?.stack ?
+            <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-white/80 p-2 font-mono text-[10px] leading-snug text-black/70">
+              {searchError.stack}
+            </pre>
+          : null}
+        </div>
+      : null}
+
+      {message && !searchError ?
         <p className="text-sm font-medium text-amber-900">{message}</p>
+      : null}
+      {message && searchError && !searchError.message.includes(message) ?
+        <p className="text-sm text-amber-900">{message}</p>
       : null}
 
       {importErrors.length > 0 ?
@@ -657,6 +778,10 @@ export function AdminCatalogOfferSearchImportSection({
                       {item.relevance === "match" ?
                         <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
                           релевантно
+                        </span>
+                      : item.relevance === "relevance_unknown" ?
+                        <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-900">
+                          релевантность не проверена
                         </span>
                       : item.skipReason === "query_mismatch" ?
                         <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900">

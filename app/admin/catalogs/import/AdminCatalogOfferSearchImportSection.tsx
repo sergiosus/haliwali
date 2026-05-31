@@ -9,12 +9,42 @@ import {
   type CatalogDiscoverLocation,
 } from "../../../lib/catalogDiscoverLocationStorage";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
-import type { OfferSearchResultItem } from "../../../lib/catalogOfferAdminSearch";
+import type {
+  OfferSearchResultItem,
+  OfferSearchStats,
+} from "../../../lib/catalogOfferAdminSearch";
 import {
   OfferImportGoToDraftsBanner,
   OFFER_SOURCE_OPTIONS,
   type OfferSourceFilter,
 } from "./offerImportUi";
+
+type OfferSourceSearchDiagnostic = OfferSearchStats["diagnostics"][number];
+
+const SOURCE_DIAG_LABEL: Record<string, string> = {
+  avito: "Avito",
+  drom: "Drom",
+  youla: "Youla",
+  vk: "VK",
+};
+
+const HIDDEN_REASON_LABEL: Record<string, string> = {
+  city_mismatch: "город",
+  price_filter: "цена",
+  brand_oem: "бренд / OEM",
+  duplicate: "дубликат",
+};
+
+const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
+  blocked: "заблокировано источником",
+  captcha: "капча / антибот",
+  no_selector: "не найдены карточки на странице поиска",
+  empty_response: "пустой ответ",
+  fetch_error: "ошибка загрузки",
+  parse_error: "ошибка разбора HTML",
+  unsupported: "источник не поддерживается",
+  city_unsupported: "город не в URL — ищем широко, фильтр после разбора",
+};
 
 const DEFAULT_CATEGORY = "drugie";
 
@@ -29,6 +59,8 @@ const EMPTY_REASON_LABEL: Record<string, string> = {
   ALL_FILTERED_SOURCE: "Нет результатов для выбранного источника",
   ALL_FILTERED_BRAND_OEM: "Нет совпадений по бренду или OEM/артикулу",
   ALL_FILTERED_PRICE: "Нет результатов в диапазоне цен",
+  ALL_FILTERED_CITY: "Все результаты отфильтрованы по городу",
+  SOURCE_BLOCKED: "Источники заблокировали запрос (капча / 403)",
 };
 
 /** Offer web search — dedicated API, no company import sessions. */
@@ -55,6 +87,8 @@ export function AdminCatalogOfferSearchImportSection({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(20);
   const [searched, setSearched] = useState(false);
+  const [searchStats, setSearchStats] = useState<OfferSearchStats | null>(null);
+  const [diagnostics, setDiagnostics] = useState<OfferSourceSearchDiagnostic[]>([]);
 
   useEffect(() => {
     const saved = readCatalogDiscoverLocation();
@@ -79,6 +113,8 @@ export function AdminCatalogOfferSearchImportSection({
     setMessage(null);
     setEmptyReason(null);
     setResults([]);
+    setSearchStats(null);
+    setDiagnostics([]);
     setSelected(new Set());
     setPage(1);
     setCreatedCount(0);
@@ -103,6 +139,7 @@ export function AdminCatalogOfferSearchImportSection({
         message?: string;
         emptyReason?: string | null;
         results?: OfferSearchResultItem[];
+        stats?: OfferSearchStats;
       };
       if (!d.ok) {
         setMessage(d.message ?? d.error ?? "Ошибка поиска");
@@ -112,6 +149,8 @@ export function AdminCatalogOfferSearchImportSection({
       }
       const list = d.results ?? [];
       setResults(list);
+      setSearchStats(d.stats ?? null);
+      setDiagnostics(d.stats?.diagnostics ?? []);
       setSearched(true);
       setEmptyReason(d.emptyReason ?? (list.length === 0 ? "NO_RESULTS" : null));
       if (list.length > 0) {
@@ -284,14 +323,85 @@ export function AdminCatalogOfferSearchImportSection({
       </button>
 
       {searched ?
-        <div className="rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3 text-sm text-black/70">
+        <div className="space-y-3 rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3 text-sm text-black/70">
           <p>
-            <span className="font-medium text-black">Найдено:</span> {totalFound}
+            <span className="font-medium text-black">Найдено всего:</span> {totalFound}
             <span className="mx-2 text-black/30">·</span>
-            <span className="font-medium text-black">Показано:</span> {shownCount}
+            <span className="font-medium text-black">Показано:</span> {shownCount} из {totalFound}
             <span className="mx-2 text-black/30">·</span>
             <span className="font-medium text-black">Страница:</span> {safePage} из {totalPages}
           </p>
+          {searchStats ?
+            <p className="text-xs text-black/50">
+              Разобрано: {searchStats.parsed}
+              {searchStats.afterCityFilter !== searchStats.parsed ?
+                ` → после города: ${searchStats.afterCityFilter}`
+              : ""}
+              {searchStats.afterPriceFilter !== searchStats.afterCityFilter ?
+                ` → после цены: ${searchStats.afterPriceFilter}`
+              : ""}
+              {searchStats.afterDuplicateFilter !== searchStats.afterBrandOemFilter &&
+              searchStats.afterDuplicateFilter !== searchStats.afterPriceFilter ?
+                ` → без дублей: ${searchStats.afterDuplicateFilter}`
+              : ""}
+              {searchStats.detailEnriched > 0 ? ` · детально: ${searchStats.detailEnriched}` : ""}
+              {searchStats.serpFallbackUsed ? " · SERP-дополнение" : ""}
+              {searchStats.pagesPerSource ?
+                ` · до ${searchStats.pagesPerSource} стр./источник`
+              : ""}
+            </p>
+          : null}
+          {searchStats?.sourceCounts ?
+            <p>
+              <span className="font-medium text-black">Источники:</span>{" "}
+              {(["avito", "drom", "youla", "vk"] as const)
+                .map((k) => `${SOURCE_DIAG_LABEL[k]}: ${searchStats.sourceCounts[k] ?? 0}`)
+                .join(" · ")}
+            </p>
+          : null}
+          {searchStats?.hidden && Object.keys(searchStats.hidden).length > 0 ?
+            <p className="text-xs text-amber-900">
+              <span className="font-medium">Скрыто:</span>{" "}
+              {Object.entries(searchStats.hidden)
+                .map(([k, v]) => `${HIDDEN_REASON_LABEL[k] ?? k}: ${v}`)
+                .join(" · ")}
+            </p>
+          : null}
+          {diagnostics.length > 0 ?
+            <details className="text-xs">
+              <summary className="cursor-pointer font-medium text-black/60">Диагностика источников</summary>
+              <ul className="mt-2 space-y-2">
+                {diagnostics.map((diag) => (
+                  <li key={diag.sourceName} className="rounded-lg border border-black/10 bg-white px-3 py-2">
+                    <p className="font-medium text-black">{SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}</p>
+                    <p className="text-black/50">
+                      HTTP {diag.httpStatus ?? "—"} · страниц: {diag.pagesFetched} · разобрано:{" "}
+                      {diag.parsedCount} · пропущено: {diag.skippedCount}
+                    </p>
+                    {diag.searchUrls[0] ?
+                      <p className="mt-1 break-all text-black/40">{diag.searchUrls[0]}</p>
+                    : null}
+                    {diag.zeroReason ?
+                      <p className="mt-1 text-amber-900">
+                        0 результатов: {OFFER_SOURCE_ZERO_LABELS[diag.zeroReason]}
+                      </p>
+                    : null}
+                    {diag.message ?
+                      <p className="mt-0.5 text-black/45">{diag.message}</p>
+                    : null}
+                    {Object.keys(diag.skipReasons).length > 0 ?
+                      <p className="mt-0.5 text-black/40">
+                        Пропуски:{" "}
+                        {Object.entries(diag.skipReasons)
+                          .map(([k, v]) => `${HIDDEN_REASON_LABEL[k] ?? k}: ${v}`)
+                          .join(", ")}
+                      </p>
+                    : null}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          : null}
         </div>
       : null}
 

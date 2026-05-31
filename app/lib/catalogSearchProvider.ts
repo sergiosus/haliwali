@@ -79,6 +79,17 @@ function dedupeByDomain(items: SearchCandidate[]): SearchCandidate[] {
   return out;
 }
 
+/** Offer admin search: keep multiple URLs per marketplace domain. */
+function mergeCandidatesByUrl(lists: SearchCandidate[]): SearchCandidate[] {
+  const byUrl = new Map<string, SearchCandidate>();
+  for (const c of lists) {
+    const key = c.url.toLowerCase();
+    const prev = byUrl.get(key);
+    if (!prev || c.title.length > prev.title.length) byUrl.set(key, c);
+  }
+  return [...byUrl.values()];
+}
+
 export async function searchPublicWeb(opts: {
   query: string;
   city?: string;
@@ -145,12 +156,14 @@ async function serpApiSearch(
   key: string,
   limit: number,
   locale: ReturnType<typeof searchLocaleParams>,
+  start = 0,
 ): Promise<{ candidates: SearchCandidate[] }> {
   const url = new URL("https://serpapi.com/search.json");
   url.searchParams.set("engine", "google");
   url.searchParams.set("q", q);
   url.searchParams.set("api_key", key);
   url.searchParams.set("num", String(Math.min(limit, 20)));
+  if (start > 0) url.searchParams.set("start", String(start));
   url.searchParams.set("hl", locale.lang);
   url.searchParams.set("gl", locale.country.toLowerCase());
   if (locale.country === "RU") url.searchParams.set("google_domain", "google.ru");
@@ -247,6 +260,100 @@ async function dataForSeoSearch(q: string, key: string, limit: number): Promise<
     candidates: items
       .filter((r) => r.url)
       .map((r) => toCandidate(r.url!, r.title ?? "", r.description ?? "")),
+  };
+}
+
+const OFFER_SITE_QUERIES: Record<string, string> = {
+  avito: "site:avito.ru",
+  drom: "site:drom.ru OR site:auto.ru",
+  youla: "site:youla.ru",
+  vk: "site:vk.com/market OR site:vk.com wall",
+};
+
+/** Scoped web search for offer import fallback (no per-domain dedupe). */
+export async function searchPublicWebForOffers(opts: {
+  query: string;
+  siteKey?: keyof typeof OFFER_SITE_QUERIES;
+  limit?: number;
+  /** SERP offset (Google start / page index × page size). */
+  start?: number;
+}): Promise<{
+  ok: boolean;
+  candidates: SearchCandidate[];
+  queriesUsed: string[];
+  error?: string;
+}> {
+  const kind = provider();
+  const key = process.env.SEARCH_API_KEY?.trim() ?? "";
+  const site = opts.siteKey ? OFFER_SITE_QUERIES[opts.siteKey] : "";
+  const q = [site, opts.query.trim()].filter(Boolean).join(" ").trim();
+  if (!q) return { ok: false, candidates: [], queriesUsed: [], error: "EMPTY_QUERY" };
+  if (kind === "none") {
+    return { ok: false, candidates: [], queriesUsed: [q], error: "SEARCH_PROVIDER_NONE" };
+  }
+  if (!key) {
+    return { ok: false, candidates: [], queriesUsed: [q], error: "SEARCH_API_KEY_MISSING" };
+  }
+
+  const limit = Math.min(opts.limit ?? 30, 30);
+  const start = Math.max(0, opts.start ?? 0);
+  const locale = searchLocaleParams();
+
+  try {
+    let batch: SearchCandidate[] = [];
+    if (kind === "serpapi") batch = (await serpApiSearch(q, key, limit, locale, start)).candidates;
+    else if (kind === "brave") batch = (await braveSearch(q, key, limit)).candidates;
+    else if (kind === "bing") batch = (await bingSearch(q, key, limit)).candidates;
+    else if (kind === "yandex_xml") batch = (await yandexXmlSearch(q, key, limit)).candidates;
+    else if (kind === "dataforseo") batch = (await dataForSeoSearch(q, key, limit)).candidates;
+
+    return { ok: true, candidates: mergeCandidatesByUrl(batch).slice(0, limit), queriesUsed: [q] };
+  } catch {
+    return { ok: false, candidates: [], queriesUsed: [q], error: "SEARCH_FAILED" };
+  }
+}
+
+/** Up to 3 SERP pages for one site-scoped offer query. */
+export async function searchPublicWebForOffersDeep(opts: {
+  query: string;
+  siteKey: keyof typeof OFFER_SITE_QUERIES;
+  pages?: number;
+  perPage?: number;
+}): Promise<{
+  ok: boolean;
+  candidates: SearchCandidate[];
+  queriesUsed: string[];
+  error?: string;
+}> {
+  const pages = Math.min(opts.pages ?? 3, 3);
+  const perPage = Math.min(opts.perPage ?? 20, 30);
+  const batches: SearchCandidate[] = [];
+  const queriesUsed: string[] = [];
+  let lastError: string | undefined;
+
+  for (let page = 0; page < pages; page += 1) {
+    const res = await searchPublicWebForOffers({
+      query: opts.query,
+      siteKey: opts.siteKey,
+      limit: perPage,
+      start: page * 10,
+    });
+    queriesUsed.push(...res.queriesUsed);
+    if (!res.ok) {
+      lastError = res.error;
+      if (page === 0) return res;
+      break;
+    }
+    if (res.candidates.length === 0) break;
+    batches.push(...res.candidates);
+    if (res.candidates.length < 5) break;
+  }
+
+  return {
+    ok: batches.length > 0 || !lastError,
+    candidates: mergeCandidatesByUrl(batches),
+    queriesUsed: [...new Set(queriesUsed)],
+    error: batches.length === 0 ? lastError : undefined,
   };
 }
 

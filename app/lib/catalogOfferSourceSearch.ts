@@ -3,7 +3,7 @@
  * Fetches search result pages — not company discover / SERP.
  */
 
-import { logCatalogDiscover } from "./catalogCatalogLog";
+import { logCatalogDiscover, logOfferSearchHtmlSnippet } from "./catalogCatalogLog";
 import { assertCatalogFetchAllowed } from "./catalogHtmlFetch";
 import {
   decodeHtmlBytes,
@@ -12,6 +12,7 @@ import {
   extractSellerFromContext,
   isRealOfferListingUrl,
   sanitizeOfferText,
+  titleFromListingUrl,
   validateOfferLinkFromSearchPage,
   type OfferListingSourceId,
 } from "./catalogOfferSearchText";
@@ -30,6 +31,8 @@ export type OfferSourceZeroReason =
   | "parse_error"
   | "unsupported"
   | "city_unsupported"
+  | "catalog_only"
+  | "js_shell"
   | null;
 
 export type OfferSourceSearchDiagnostic = {
@@ -71,7 +74,9 @@ const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
 function sourceUserAgent(id: OfferListingSourceId): string {
-  return id === "vk" ? BROWSER_UA : MOBILE_UA;
+  if (id === "avito" || id === "youla") return MOBILE_UA;
+  if (id === "vk" || id === "drom") return BROWSER_UA;
+  return MOBILE_UA;
 }
 
 function citySlug(city: string): string | null {
@@ -156,13 +161,28 @@ function extractPriceFromBlob(blob: string): string | null {
   return digits ? digits : null;
 }
 
+/** Item id is the last `_digits` segment (ignore mileage like `_470_000_km`). */
+function avitoItemIdFromPath(path: string): string | null {
+  const cleaned = path.replace(/\\\//g, "/").split("?")[0] ?? "";
+  const m = cleaned.match(/_(\d{8,})$/);
+  return m?.[1] ?? null;
+}
+
 function avitoListingUrlFromPath(path: string, baseUrl: string): string | null {
   const cleaned = path.replace(/\\\//g, "/").split("?")[0] ?? "";
-  if (!/_\d{5,}$/.test(cleaned) && !/_\d{5,}\//.test(cleaned)) return null;
+  if (!avitoItemIdFromPath(cleaned)) return null;
   if (/\/(add|search|catalog|brands|profile)\b/i.test(cleaned)) return null;
   const rel = cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
   const url = normalizeListingUrl(`https://www.avito.ru${rel}`, baseUrl);
   return url && isRealOfferListingUrl(url, "avito") ? url : null;
+}
+
+function htmlHasAvitoListingSignals(html: string): boolean {
+  return (
+    /href="\/[^"]+_\d{8,}"/i.test(html) ||
+    /"urlPath"\s*:\s*"\/[^"]+_\d{8,}"/i.test(html) ||
+    /https?:\/\/(?:www\.)?avito\.ru\/[^"\s<>]+_\d{8,}/i.test(html)
+  );
 }
 
 function pushAvitoHit(
@@ -184,11 +204,7 @@ function pushAvitoHit(
           ctx.match(/"name"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
           "",
       ) ||
-      url
-        .split("/")
-        .pop()
-        ?.replace(/_\d+$/, "")
-        .replace(/_/g, " ") ||
+      titleFromListingUrl(url) ||
       "",
   );
   const price = extractPriceFromBlob(ctx);
@@ -210,17 +226,52 @@ function pushAvitoHit(
   return hit;
 }
 
-function parseAvitoSearchHtml(html: string, baseUrl: string, cityDefault: string): OfferSourceSearchHit[] {
+function isAvitoSearchBlocked(html: string, extracted: number): boolean {
+  if (extracted > 0) return false;
+  const sample = html.slice(0, 30_000).toLowerCase();
+  if (
+    sample.includes("captcha") ||
+    sample.includes("firewall") ||
+    sample.includes("доступ ограничен") ||
+    sample.includes("servicepipe") ||
+    sample.includes("perimeterx")
+  ) {
+    return true;
+  }
+  if (htmlHasAvitoListingSignals(html)) return false;
+  return html.length < 50_000;
+}
+
+type AvitoParseMeta = { jsShell: boolean; blocked: boolean };
+
+function parseAvitoSearchHtml(
+  html: string,
+  baseUrl: string,
+  cityDefault: string,
+): { hits: OfferSourceSearchHit[]; meta: AvitoParseMeta } {
   const hits: OfferSourceSearchHit[] = [];
   const seen = new Set<string>();
 
-  const urlRe = /https?:\/\/(?:www\.)?avito\.ru\/[a-z0-9_./-]+_\d{5,}/gi;
+  const absRe = /https?:\/\/(?:www\.)?avito\.ru\/[^"\s<>]+_\d{8,}(?:\?|"|#|\s|$)/gi;
   let m: RegExpExecArray | null;
-  while ((m = urlRe.exec(html)) !== null) {
-    pushAvitoHit(hits, seen, m[0]!, baseUrl, cityDefault, "", html.slice(Math.max(0, m.index - 200), m.index + 600));
+  while ((m = absRe.exec(html)) !== null) {
+    const raw = m[0]!.replace(/["#\s]+$/, "");
+    pushAvitoHit(hits, seen, raw, baseUrl, cityDefault, "", html.slice(Math.max(0, m.index - 200), m.index + 600));
   }
 
-  const pathRe = /"urlPath"\s*:\s*"(\/[^"\\]+_\d{5,}[^"\\]*)"/gi;
+  const hrefRe = /href="(\/[^"?#]+?_\d{8,})(?:\?|"|#)/gi;
+  while ((m = hrefRe.exec(html)) !== null) {
+    const built = avitoListingUrlFromPath(m[1]!, baseUrl);
+    if (built) {
+      const title =
+        decodeJsonString(
+          html.slice(m.index, m.index + 800).match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? "",
+        ) || "";
+      pushAvitoHit(hits, seen, built, baseUrl, cityDefault, title, html.slice(m.index, m.index + 500));
+    }
+  }
+
+  const pathRe = /"urlPath"\s*:\s*"(\/[^"\\]+_\d{8,}[^"\\]*)"/gi;
   while ((m = pathRe.exec(html)) !== null) {
     const built = avitoListingUrlFromPath(m[1]!, baseUrl);
     if (built) {
@@ -232,61 +283,109 @@ function parseAvitoSearchHtml(html: string, baseUrl: string, cityDefault: string
     }
   }
 
-  const hrefRe = /href="(\/[a-z0-9_-]+\/[^"]+?_\d{5,})"/gi;
-  while ((m = hrefRe.exec(html)) !== null) {
-    const built = avitoListingUrlFromPath(m[1]!, baseUrl);
-    if (built) pushAvitoHit(hits, seen, built, baseUrl, cityDefault, "", html.slice(m.index, m.index + 400));
-  }
-
   const itemRe =
-    /"id"\s*:\s*(\d{6,})[\s\S]{0,400}?"title"\s*:\s*"([^"]{3,200})"[\s\S]{0,400}?"urlPath"\s*:\s*"([^"]+)"/gi;
+    /"id"\s*:\s*(\d{8,})[\s\S]{0,500}?"title"\s*:\s*"([^"]{3,200})"[\s\S]{0,500}?"urlPath"\s*:\s*"([^"]+)"/gi;
   while ((m = itemRe.exec(html)) !== null) {
     const built = avitoListingUrlFromPath(m[3]!, baseUrl);
     if (built) pushAvitoHit(hits, seen, built, baseUrl, cityDefault, decodeJsonString(m[2]!), m[0]!);
   }
 
-  return hits;
+  const blocked = isAvitoSearchBlocked(html, hits.length);
+  const jsShell = hits.length === 0 && html.length > 100_000 && !htmlHasAvitoListingSignals(html);
+  return { hits, meta: { jsShell, blocked } };
 }
 
-function parseDromSearchHtml(html: string, baseUrl: string, cityDefault: string): OfferSourceSearchHit[] {
+export function diagnoseAvitoSearchPage(
+  html: string,
+  hits: OfferSourceSearchHit[],
+  meta?: AvitoParseMeta,
+): string | null {
+  if (hits.length > 0) return null;
+  if (meta?.blocked || isAvitoSearchBlocked(html, 0)) return "Avito blocked search page.";
+  if (meta?.jsShell) return "Avito: список объявлений не в HTML (нужна мобильная выдача).";
+  return "На странице поиска Avito нет ссылок на объявления в HTML.";
+}
+
+type DromParseMeta = { catalogOnly: boolean; jsShell: boolean };
+
+function pushDromHit(
+  hits: OfferSourceSearchHit[],
+  seen: Set<string>,
+  rawUrl: string,
+  baseUrl: string,
+  cityDefault: string,
+  ctx: string,
+): void {
+  const url = normalizeListingUrl(rawUrl, baseUrl);
+  if (!url || !isRealOfferListingUrl(url, "drom") || seen.has(url)) return;
+  seen.add(url);
+  const title = sanitizeOfferText(
+    decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ?? "") ||
+      decodeJsonString(ctx.match(/data-title="([^"]{4,200})"/i)?.[1] ?? "") ||
+      titleFromListingUrl(url) ||
+      "",
+  );
+  const snippet = sanitizeOfferText(
+    decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
+  );
+  const hit: OfferSourceSearchHit = {
+    url,
+    title: title.slice(0, 200),
+    snippet: snippet.slice(0, 280),
+    price: extractPriceFromBlob(ctx),
+    city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
+    sellerHint: extractSellerFromContext(ctx),
+    sourceName: "drom",
+    fromSearchPage: true,
+  };
+  if (validateOfferLinkFromSearchPage(hit, "drom")) return;
+  hits.push(hit);
+}
+
+function parseDromSearchHtml(
+  html: string,
+  baseUrl: string,
+  cityDefault: string,
+): { hits: OfferSourceSearchHit[]; meta: DromParseMeta } {
   const hits: OfferSourceSearchHit[] = [];
-  const patterns = [
-    /https?:\/\/auto\.ru\/[a-z0-9_./%-]+\d{7,}\/?/gi,
-    /https?:\/\/baza\.drom\.ru\/[a-z0-9_./%-]+\d{5,}(?:\.html)?/gi,
-  ];
   const seen = new Set<string>();
+  let catalogHits = 0;
+
+  const patterns: RegExp[] = [
+    /https?:\/\/auto\.drom\.ru\/[a-z0-9_./%-]+\d{6,}\.html/gi,
+    /https?:\/\/(?:www\.)?auto\.ru\/[a-z0-9_./%-]+\/sale\/[a-z0-9_./%-]+\d{6,}\/?/gi,
+    /https?:\/\/baza\.drom\.ru\/[a-z0-9_./%-]+\d{5,}(?:\.html)?/gi,
+    /href="(https?:\/\/auto\.drom\.ru\/[^"]+\d{6,}\.html)"/gi,
+    /href="(\/[^"?#]+\d{6,}\.html)"/gi,
+  ];
+
   for (const urlRe of patterns) {
     let m: RegExpExecArray | null;
     while ((m = urlRe.exec(html)) !== null) {
-      const url = normalizeListingUrl(m[0]!, baseUrl);
-      if (!url || !isRealOfferListingUrl(url, "drom") || seen.has(url)) continue;
-      seen.add(url);
+      const raw = m[1] ?? m[0]!;
+      if (/\/catalog(\/|$)/i.test(raw)) {
+        catalogHits += 1;
+        continue;
+      }
       const ctx = html.slice(Math.max(0, m.index - 400), m.index + 800);
-      const title = sanitizeOfferText(
-        decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ?? "") ||
-          decodeJsonString(ctx.match(/"name"\s*:\s*"([^"]{4,200})"/i)?.[1] ?? "") ||
-          decodeJsonString(ctx.match(/data-title="([^"]{4,200})"/i)?.[1] ?? "") ||
-          "",
-      );
-      if (!title) continue;
-      const snippet = sanitizeOfferText(
-        decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
-      );
-      const hit: OfferSourceSearchHit = {
-        url,
-        title: title.slice(0, 200),
-        snippet: snippet.slice(0, 280),
-        price: extractPriceFromBlob(ctx),
-        city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
-        sellerHint: extractSellerFromContext(ctx),
-        sourceName: "drom",
-        fromSearchPage: true,
-      };
-      if (validateOfferLinkFromSearchPage(hit, "drom")) continue;
-      hits.push(hit);
+      pushDromHit(hits, seen, raw, baseUrl, cityDefault, ctx);
     }
   }
-  return hits;
+
+  const jsShell =
+    hits.length === 0 &&
+    (/bulls-list|sales-bull-page|data-bull-id/i.test(html) ||
+      (/\/catalog\//i.test(html) && !/\d{6,}\.html/i.test(html)));
+  const catalogOnly = hits.length === 0 && catalogHits > 0 && !jsShell;
+
+  return { hits, meta: { catalogOnly, jsShell } };
+}
+
+export function diagnoseDromSearchPage(meta: DromParseMeta, hits: OfferSourceSearchHit[]): string | null {
+  if (hits.length > 0) return null;
+  if (meta.catalogOnly) return "Drom returned catalog pages, no real offers.";
+  if (meta.jsShell) return "Drom: объявления подгружаются скриптом, ссылок в HTML нет.";
+  return "На странице поиска Drom нет ссылок на объявления.";
 }
 
 function parseYoulaSearchHtml(html: string, baseUrl: string, cityDefault: string): OfferSourceSearchHit[] {
@@ -302,6 +401,7 @@ function parseYoulaSearchHtml(html: string, baseUrl: string, cityDefault: string
     const title = sanitizeOfferText(
       decodeJsonString(ctx.match(/"name"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? "") ||
         decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? "") ||
+        titleFromListingUrl(url) ||
         "",
     );
     const snippet = sanitizeOfferText(
@@ -314,7 +414,7 @@ function parseYoulaSearchHtml(html: string, baseUrl: string, cityDefault: string
       price: extractPriceFromBlob(ctx),
       city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
       sellerHint: extractSellerFromContext(ctx),
-      sourceName: "other",
+      sourceName: "youla",
       fromSearchPage: true,
     };
     if (validateOfferLinkFromSearchPage(hit, "youla")) continue;
@@ -325,32 +425,41 @@ function parseYoulaSearchHtml(html: string, baseUrl: string, cityDefault: string
 
 function parseVkSearchHtml(html: string, baseUrl: string, cityDefault: string): OfferSourceSearchHit[] {
   const hits: OfferSourceSearchHit[] = [];
-  const urlRe = /https?:\/\/vk\.(?:com|ru)\/(?:market\/product[^"'<\s]+|market\/-?\d+[^"'<\s]*)/gi;
+  const patterns = [
+    /https?:\/\/vk\.(?:com|ru)\/(?:market\/product[^"'<\s]+|market\/-?\d+[^"'<\s]*)/gi,
+    /href="(\/market\/product[^"]+)"/gi,
+    /href="(https?:\/\/vk\.(?:com|ru)\/market\/[^"]+)"/gi,
+  ];
   const seen = new Set<string>();
-  let m: RegExpExecArray | null;
-  while ((m = urlRe.exec(html)) !== null) {
-    const url = normalizeListingUrl(m[0]!, baseUrl);
-    if (!url || !isRealOfferListingUrl(url, "vk") || seen.has(url)) continue;
-    seen.add(url);
-    const ctx = html.slice(m.index - 300, m.index + 500);
-    const title = sanitizeOfferText(
-      decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? ""),
-    );
-    const snippet = sanitizeOfferText(
-      decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
-    );
-    const hit: OfferSourceSearchHit = {
-      url,
-      title: title.slice(0, 200),
-      snippet: snippet.slice(0, 280),
-      price: extractPriceFromBlob(ctx),
-      city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
-      sellerHint: extractSellerFromContext(ctx),
-      sourceName: "vk",
-      fromSearchPage: true,
-    };
-    if (validateOfferLinkFromSearchPage(hit, "vk")) continue;
-    hits.push(hit);
+  for (const urlRe of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = urlRe.exec(html)) !== null) {
+      const raw = m[1] ?? m[0]!;
+      const url = normalizeListingUrl(raw, baseUrl);
+      if (!url || !isRealOfferListingUrl(url, "vk") || seen.has(url)) continue;
+      seen.add(url);
+      const ctx = html.slice(Math.max(0, m.index - 300), m.index + 500);
+      const title = sanitizeOfferText(
+        decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? "") ||
+          titleFromListingUrl(url) ||
+          "",
+      );
+      const snippet = sanitizeOfferText(
+        decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
+      );
+      const hit: OfferSourceSearchHit = {
+        url,
+        title: title.slice(0, 200),
+        snippet: snippet.slice(0, 280),
+        price: extractPriceFromBlob(ctx),
+        city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
+        sellerHint: extractSellerFromContext(ctx),
+        sourceName: "vk",
+        fromSearchPage: true,
+      };
+      if (validateOfferLinkFromSearchPage(hit, "vk")) continue;
+      hits.push(hit);
+    }
   }
   return hits;
 }
@@ -412,16 +521,28 @@ function buildSearchUrls(
   return { urls: [], cityInUrl: false };
 }
 
+type ParseSearchResult = {
+  hits: OfferSourceSearchHit[];
+  dromMeta?: DromParseMeta;
+  avitoMeta?: AvitoParseMeta;
+};
+
 function parseSearchHtml(
   source: OfferListingSourceId,
   html: string,
   baseUrl: string,
   cityDefault: string,
-): OfferSourceSearchHit[] {
-  if (source === "avito") return parseAvitoSearchHtml(html, baseUrl, cityDefault);
-  if (source === "drom") return parseDromSearchHtml(html, baseUrl, cityDefault);
-  if (source === "youla") return parseYoulaSearchHtml(html, baseUrl, cityDefault);
-  return parseVkSearchHtml(html, baseUrl, cityDefault);
+): ParseSearchResult {
+  if (source === "avito") {
+    const { hits, meta } = parseAvitoSearchHtml(html, baseUrl, cityDefault);
+    return { hits, avitoMeta: meta };
+  }
+  if (source === "drom") {
+    const { hits, meta } = parseDromSearchHtml(html, baseUrl, cityDefault);
+    return { hits, dromMeta: meta };
+  }
+  if (source === "youla") return { hits: parseYoulaSearchHtml(html, baseUrl, cityDefault) };
+  return { hits: parseVkSearchHtml(html, baseUrl, cityDefault) };
 }
 
 function zeroReasonFromError(error: string, parsed: number): OfferSourceZeroReason {
@@ -473,6 +594,9 @@ export async function searchOfferListingSources(opts: {
       let parserErrors = 0;
       let zeroReason: OfferSourceZeroReason = null;
       let lastError = "";
+      let lastHtml = "";
+      let dromMeta: DromParseMeta | undefined;
+      let avitoMeta: AvitoParseMeta | undefined;
 
       let triedBroad = false;
 
@@ -502,9 +626,29 @@ export async function searchOfferListingSources(opts: {
           httpStatus = fetched.status;
           pagesScanned += 1;
           pageOk = true;
-          const batch = parseSearchHtml(source, fetched.html, fetched.url, city);
-          pageHits.push(...batch);
-          if (batch.length > 0) break;
+          lastHtml = fetched.html;
+          if (source === "avito" || source === "drom") {
+            logOfferSearchHtmlSnippet(source, searchUrl, fetched.html);
+          }
+          const parsed = parseSearchHtml(source, fetched.html, fetched.url, city);
+          if (parsed.dromMeta) {
+            dromMeta = dromMeta
+              ? {
+                  catalogOnly: dromMeta.catalogOnly || parsed.dromMeta.catalogOnly,
+                  jsShell: dromMeta.jsShell || parsed.dromMeta.jsShell,
+                }
+              : parsed.dromMeta;
+          }
+          if (parsed.avitoMeta) {
+            avitoMeta = avitoMeta
+              ? {
+                  blocked: avitoMeta.blocked || parsed.avitoMeta.blocked,
+                  jsShell: avitoMeta.jsShell || parsed.avitoMeta.jsShell,
+                }
+              : parsed.avitoMeta;
+          }
+          pageHits.push(...parsed.hits);
+          if (parsed.hits.length > 0) break;
         }
 
         if (!pageOk && page === 1) break;
@@ -555,20 +699,43 @@ export async function searchOfferListingSources(opts: {
         if (newOnPage === 0) break;
       }
 
+      let detailMessage: string | undefined;
+
       if (linksExtracted === 0 && !zeroReason) {
-        zeroReason = zeroReasonFromError(lastError || "NO_SELECTOR", 0);
+        if (source === "avito" && lastHtml) {
+          detailMessage = diagnoseAvitoSearchPage(lastHtml, [], avitoMeta) ?? undefined;
+          if (avitoMeta?.blocked || detailMessage?.includes("blocked")) {
+            zeroReason = "blocked";
+          } else if (avitoMeta?.jsShell) {
+            zeroReason = "js_shell";
+          } else {
+            zeroReason = "no_selector";
+          }
+        } else if (source === "drom" && dromMeta) {
+          detailMessage = diagnoseDromSearchPage(dromMeta, []) ?? undefined;
+          zeroReason = dromMeta.catalogOnly ? "catalog_only" : dromMeta.jsShell ? "js_shell" : "no_selector";
+        } else {
+          zeroReason = zeroReasonFromError(lastError || "NO_SELECTOR", 0);
+        }
       }
 
-      const statusLabel =
-        zeroReason === "blocked" ? "источник заблокировал"
-        : zeroReason === "captcha" ? "капча на источнике"
-        : zeroReason === "fetch_error" ? "ошибка загрузки"
-        : zeroReason === "no_selector" ? "ссылки на странице не найдены"
-        : linksExtracted > 0 ? "ok"
-        : "ссылок нет";
-
       const blocked =
-        zeroReason === "blocked" || zeroReason === "captcha" || lastError === "BLOCKED" || lastError === "CAPTCHA";
+        zeroReason === "blocked" ||
+        zeroReason === "captcha" ||
+        lastError === "BLOCKED" ||
+        lastError === "CAPTCHA";
+
+      if (!detailMessage && linksExtracted === 0) {
+        detailMessage =
+          zeroReason === "blocked" ? "Avito blocked search page."
+          : zeroReason === "captcha" ? "Капча на странице источника."
+          : zeroReason === "catalog_only" ? "Drom returned catalog pages, no real offers."
+          : zeroReason === "js_shell" ?
+            source === "avito" ?
+              "Avito: список объявлений не в HTML (нужна мобильная выдача)."
+            : "Drom: объявления подгружаются скриптом."
+          : OFFER_SOURCE_ZERO_LABELS[zeroReason ?? "no_selector"] ?? "ссылок нет";
+      }
 
       diagnostics.push({
         sourceName: source,
@@ -584,7 +751,7 @@ export async function searchOfferListingSources(opts: {
         skipReasons,
         message:
           linksExtracted === 0 ?
-            statusLabel
+            detailMessage
           : parserErrors > 0 ?
             `ошибки разбора: ${parserErrors}`
           : undefined,
@@ -598,12 +765,14 @@ export async function searchOfferListingSources(opts: {
 }
 
 export const OFFER_SOURCE_ZERO_LABELS: Record<NonNullable<OfferSourceZeroReason>, string> = {
-  blocked: "заблокировано источником",
+  blocked: "Avito blocked search page.",
   captcha: "капча / антибот",
-  no_selector: "не найдены карточки на странице поиска",
+  no_selector: "ссылки на объявления в HTML не найдены",
   empty_response: "пустой ответ",
   fetch_error: "ошибка загрузки",
   parse_error: "ошибка разбора HTML",
   unsupported: "источник не поддерживается",
   city_unsupported: "город не в URL — ищем широко, фильтр после разбора",
+  catalog_only: "Drom returned catalog pages, no real offers.",
+  js_shell: "Drom: объявления подгружаются скриптом, ссылок в HTML нет.",
 };

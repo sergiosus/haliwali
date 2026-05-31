@@ -139,7 +139,8 @@ export function isRealOfferListingUrl(url: string, source: OfferListingSourceId)
     if (source === "avito") {
       if (!/avito\.ru/i.test(u.hostname)) return false;
       if (/\/(add|search|catalog|brands|profile|user|shops|favorites|comparison)\b/i.test(path)) return false;
-      return /_\d{5,}(?:\?|$)/.test(path) || /\/\d{6,}$/.test(path);
+      const pathOnly = path.split("?")[0] ?? path;
+      return /_\d{8,}$/.test(pathOnly) || /\/\d{8,}$/.test(pathOnly);
     }
 
     if (source === "drom") {
@@ -226,6 +227,18 @@ export function extractSellerFromContext(ctx: string): string {
 }
 
 /** Link from marketplace search page — URL + title only (no price required yet). */
+/** Title from listing URL path when SERP card has no text. */
+export function titleFromListingUrl(url: string): string {
+  try {
+    const seg = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+    const withoutId = seg.replace(/_\d{8,}$/, "").replace(/\.html$/i, "");
+    const t = withoutId.replace(/[-_]+/g, " ").trim();
+    return t.length >= 3 ? t : "";
+  } catch {
+    return "";
+  }
+}
+
 export function validateOfferLinkFromSearchPage(
   hit: {
     url: string;
@@ -235,7 +248,8 @@ export function validateOfferLinkFromSearchPage(
   source: OfferListingSourceId,
 ): OfferHitSkipReason | null {
   if (!isRealOfferListingUrl(hit.url, source)) return "not_listing";
-  const title = sanitizeOfferText(hit.title);
+  let title = sanitizeOfferText(hit.title);
+  if (!title || title.length < 3) title = titleFromListingUrl(hit.url);
   if (!title || title.length < 3) return "insufficient_fields";
   if (hasBadEncoding(title)) return "bad_encoding";
   const snippet = sanitizeOfferText(hit.snippet);

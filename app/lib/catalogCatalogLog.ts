@@ -24,6 +24,18 @@ export function logCatalogDiscover(message: string, meta?: Record<string, unknow
   console.info(`[CATALOG_DISCOVER] ${message}${safeMeta(meta)}`);
 }
 
+/** Dev-only snippet log for offer search HTML debugging (no full page dump). */
+export function logOfferSearchHtmlSnippet(
+  source: string,
+  searchUrl: string,
+  html: string,
+): void {
+  if (process.env.NODE_ENV === "production") return;
+  console.info(
+    `[CATALOG_OFFER_SEARCH_HTML] source=${source} url=${searchUrl.slice(0, 120)} snippet=${html.slice(0, 2000).replace(/\s+/g, " ")}`,
+  );
+}
+
 export function logCatalogImport(message: string, meta?: Record<string, unknown>): void {
   console.info(`[CATALOG_IMPORT] ${message}${safeMeta(meta)}`);
 }

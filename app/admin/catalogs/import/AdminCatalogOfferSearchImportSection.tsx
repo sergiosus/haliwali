@@ -45,14 +45,16 @@ const PARSE_QUALITY_LABEL: Record<string, string> = {
 };
 
 const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
-  blocked: "заблокировано источником",
+  blocked: "Avito blocked search page.",
   captcha: "капча / антибот",
-  no_selector: "не найдены карточки на странице поиска",
+  no_selector: "ссылки на объявления в HTML не найдены",
   empty_response: "пустой ответ",
   fetch_error: "ошибка загрузки",
   parse_error: "ошибка разбора HTML",
   unsupported: "источник не поддерживается",
   city_unsupported: "город не в URL — ищем широко, фильтр после разбора",
+  catalog_only: "Drom returned catalog pages, no real offers.",
+  js_shell: "Drom: объявления подгружаются скриптом, ссылок в HTML нет.",
 };
 
 const DEFAULT_CATEGORY = "drugie";
@@ -395,13 +397,10 @@ export function AdminCatalogOfferSearchImportSection({
                       ))}
                     </ul>
                   : null}
-                    {diag.zeroReason ?
+                    {diag.linksExtracted === 0 && (diag.message || diag.zeroReason) ?
                       <p className="mt-1 text-amber-900">
-                        0 результатов: {OFFER_SOURCE_ZERO_LABELS[diag.zeroReason]}
+                        {diag.message ?? OFFER_SOURCE_ZERO_LABELS[diag.zeroReason ?? ""] ?? diag.zeroReason}
                       </p>
-                    : null}
-                    {diag.message ?
-                      <p className="mt-0.5 text-black/45">{diag.message}</p>
                     : null}
                   {Object.keys(diag.skipReasons).length > 0 ?
                     <p className="mt-0.5 text-black/40">

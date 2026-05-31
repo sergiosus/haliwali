@@ -262,19 +262,14 @@ export async function searchOffersForAdmin(opts: {
   };
 
   if (items.length === 0) {
-    const blocked = diagnostics.every((d) => d.blocked || d.zeroReason === "captcha" || d.zeroReason === "blocked");
     return {
       ok: true,
       results: [],
       stats,
-      emptyReason: blocked ? "SOURCE_BLOCKED" : "NO_LINKS_EXTRACTED",
+      emptyReason: "NO_LINKS_EXTRACTED",
       message:
-        diagnostics
-          .map((d) => {
-            const label = d.zeroReason ?? (d.blocked ? "blocked" : "empty");
-            return `${d.sourceName}: ${label} (стр. ${d.pagesScanned}, ссылок ${d.linksExtracted})`;
-          })
-          .join(" · ") || "На страницах поиска не найдено ссылок на объявления",
+        diagnostics.map((d) => d.message ?? `${d.sourceName}: ${d.zeroReason ?? "empty"}`).join(" · ") ||
+        "На страницах поиска не найдено ссылок на объявления",
     };
   }
 

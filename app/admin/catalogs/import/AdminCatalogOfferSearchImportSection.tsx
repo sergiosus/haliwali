@@ -1,25 +1,37 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { catalogSourceNameFromUrl, catalogSourceNameLabel } from "../../../lib/catalogSourceName";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { SettlementLocationField } from "../../../components/location/SettlementLocationField";
+import {
+  catalogDiscoverCityLabel,
+  persistCatalogDiscoverLocation,
+  readCatalogDiscoverLocation,
+  type CatalogDiscoverLocation,
+} from "../../../lib/catalogDiscoverLocationStorage";
+import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
+import type { OfferSearchResultItem } from "../../../lib/catalogOfferAdminSearch";
 import {
   OfferImportGoToDraftsBanner,
-  OfferImportMetaFields,
-  isOfferListingUrl,
-  matchesOfferSourceFilter,
-  useOfferImportLocation,
   OFFER_SOURCE_OPTIONS,
   type OfferSourceFilter,
 } from "./offerImportUi";
 
-type SearchHit = {
-  url: string;
-  title: string;
-  snippet: string;
-  domain: string;
+const DEFAULT_CATEGORY = "drugie";
+
+type PageSize = 20 | 50;
+
+const EMPTY_REASON_LABEL: Record<string, string> = {
+  EMPTY_QUERY: "Введите поисковый запрос",
+  SEARCH_PROVIDER_NONE: "Поиск не настроен на сервере (SEARCH_PROVIDER / SEARCH_API_KEY)",
+  SEARCH_FAILED: "Ошибка ответа поискового API",
+  NO_RAW_RESULTS: "Поисковый API не вернул ссылок по запросу",
+  ALL_FILTERED_NOT_LISTING: "Все ссылки отфильтрованы: это не объявления с Avito, Drom, Youla и др.",
+  ALL_FILTERED_SOURCE: "Нет результатов для выбранного источника",
+  ALL_FILTERED_BRAND_OEM: "Нет совпадений по бренду или OEM/артикулу",
+  ALL_FILTERED_PRICE: "Нет результатов в диапазоне цен",
 };
 
-/** Offer web search — no company import candidate sessions. */
+/** Offer web search — dedicated API, no company import sessions. */
 export function AdminCatalogOfferSearchImportSection({
   onChanged,
   onGoToDrafts,
@@ -28,72 +40,100 @@ export function AdminCatalogOfferSearchImportSection({
   onGoToDrafts?: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [categorySlug, setCategorySlug] = useState("remont");
-  const { location, setLocation, cityLabel } = useOfferImportLocation();
+  const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
   const [sourceFilter, setSourceFilter] = useState<OfferSourceFilter>("all");
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [brand, setBrand] = useState("");
   const [oemArticle, setOemArticle] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [results, setResults] = useState<OfferSearchResultItem[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const [createdCount, setCreatedCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(20);
+  const [searched, setSearched] = useState(false);
 
-  const filteredHits = useMemo(
-    () =>
-      hits.filter((h) => isOfferListingUrl(h.url) && matchesOfferSourceFilter(h.url, sourceFilter)),
-    [hits, sourceFilter],
-  );
+  useEffect(() => {
+    const saved = readCatalogDiscoverLocation();
+    if (saved) setLocation(saved);
+  }, []);
+
+  const cityLabel = catalogDiscoverCityLabel(location);
+
+  const totalFound = results.length;
+  const totalPages = Math.max(1, Math.ceil(totalFound / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageResults = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return results.slice(start, start + pageSize);
+  }, [results, safePage, pageSize]);
+
+  const shownCount = pageResults.length;
 
   const runSearch = useCallback(async () => {
-    if (!query.trim() || !cityLabel) return;
+    if (!query.trim()) return;
     setBusy(true);
     setMessage(null);
-    setHits([]);
+    setEmptyReason(null);
+    setResults([]);
     setSelected(new Set());
+    setPage(1);
+    setCreatedCount(0);
     try {
-      const r = await fetch("/api/admin/catalogs/discover/search", {
+      const r = await fetch("/api/admin/catalogs/source-offers/search", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: [query.trim(), brand.trim(), oemArticle.trim()].filter(Boolean).join(" "),
+          query: query.trim(),
           city: cityLabel,
-          categorySlug,
+          brand: brand.trim(),
+          oemArticle: oemArticle.trim(),
+          source: sourceFilter,
+          priceMin: priceMin.trim() ? Number(priceMin) : undefined,
+          priceMax: priceMax.trim() ? Number(priceMax) : undefined,
         }),
       });
       const d = (await r.json()) as {
         ok?: boolean;
         error?: string;
         message?: string;
-        candidates?: { url: string; title?: string; snippet?: string; domain?: string }[];
+        emptyReason?: string | null;
+        results?: OfferSearchResultItem[];
       };
       if (!d.ok) {
         setMessage(d.message ?? d.error ?? "Ошибка поиска");
+        setEmptyReason(d.error ?? "SEARCH_FAILED");
+        setSearched(true);
         return;
       }
-      const list = (d.candidates ?? []).map((c) => ({
-        url: c.url,
-        title: c.title ?? c.url,
-        snippet: c.snippet ?? "",
-        domain: c.domain ?? "",
-      }));
-      setHits(list);
-      const offerHits = list.filter(
-        (h) => isOfferListingUrl(h.url) && matchesOfferSourceFilter(h.url, sourceFilter),
-      );
-      setMessage(`Найдено объявлений: ${offerHits.length} из ${list.length} результатов`);
+      const list = d.results ?? [];
+      setResults(list);
+      setSearched(true);
+      setEmptyReason(d.emptyReason ?? (list.length === 0 ? "NO_RESULTS" : null));
+      if (list.length > 0) {
+        setMessage(null);
+      } else {
+        setMessage(
+          d.message ??
+            EMPTY_REASON_LABEL[d.emptyReason ?? ""] ??
+            "Объявления не найдены",
+        );
+      }
     } catch {
       setMessage("Ошибка сети");
+      setEmptyReason("NETWORK");
+      setSearched(true);
     } finally {
       setBusy(false);
     }
-  }, [query, cityLabel, categorySlug, brand, oemArticle, sourceFilter]);
+  }, [query, cityLabel, brand, oemArticle, sourceFilter, priceMin, priceMax]);
 
   const importSelected = useCallback(async () => {
-    const urls = [...selected].filter((u) => isOfferListingUrl(u));
+    const urls = [...selected];
     if (urls.length === 0) return;
     setBusy(true);
     setMessage(null);
@@ -101,7 +141,7 @@ export function AdminCatalogOfferSearchImportSection({
     try {
       const fd = new FormData();
       fd.set("kind", "urls");
-      fd.set("categorySlug", categorySlug);
+      fd.set("categorySlug", DEFAULT_CATEGORY);
       fd.set("city", cityLabel);
       fd.set("urls", urls.join("\n"));
 
@@ -132,7 +172,7 @@ export function AdminCatalogOfferSearchImportSection({
     } finally {
       setBusy(false);
     }
-  }, [selected, categorySlug, cityLabel, onChanged]);
+  }, [selected, cityLabel, onChanged]);
 
   function toggleUrl(url: string) {
     setSelected((prev) => {
@@ -143,34 +183,43 @@ export function AdminCatalogOfferSearchImportSection({
     });
   }
 
+  function selectAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const item of pageResults) next.add(item.url);
+      return next;
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div>
         <h3 className="text-base font-semibold">По поисковому запросу</h3>
         <p className="mt-1 text-sm text-black/55">
-          Поиск объявлений на площадках. Выбранные ссылки импортируются только как кандидаты предложений.
+          Поиск объявлений как в поисковике. Город можно указать в запросе («touran Ижевск») или отдельно.
         </p>
       </div>
 
-      <label className="block text-sm sm:col-span-2">
-        <span className="text-black/60">Что ищем</span>
+      <label className="block text-sm">
+        <span className="text-black/60">Поисковый запрос</span>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="запчасти toyota camry"
+          placeholder="touran Ижевск · насос caterpillar 320 · iphone 12 Казань"
           className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
         />
       </label>
 
-      <OfferImportMetaFields
-        categorySlug={categorySlug}
-        onCategoryChange={setCategorySlug}
-        location={location}
-        onLocationChange={setLocation}
-        showSource={false}
-      />
-
       <div className="grid gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <SettlementLocationField
+            value={location}
+            onChange={setLocation}
+            onPersist={persistCatalogDiscoverLocation}
+            label="Город / регион (необязательно)"
+            placeholder="Ижевск"
+          />
+        </div>
         <label className="block text-sm">
           <span className="text-black/60">Источник</span>
           <select
@@ -227,27 +276,69 @@ export function AdminCatalogOfferSearchImportSection({
 
       <button
         type="button"
-        disabled={busy || !query.trim() || !cityLabel}
+        disabled={busy || !query.trim()}
         onClick={() => void runSearch()}
         className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
       >
         {busy ? "Поиск…" : "Найти предложения"}
       </button>
 
-      {message ?
-        <p className="text-sm font-medium text-black/70">{message}</p>
+      {searched ?
+        <div className="rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3 text-sm text-black/70">
+          <p>
+            <span className="font-medium text-black">Найдено:</span> {totalFound}
+            <span className="mx-2 text-black/30">·</span>
+            <span className="font-medium text-black">Показано:</span> {shownCount}
+            <span className="mx-2 text-black/30">·</span>
+            <span className="font-medium text-black">Страница:</span> {safePage} из {totalPages}
+          </p>
+        </div>
       : null}
 
-      {filteredHits.length > 0 ?
+      {message ?
+        <p className="text-sm font-medium text-amber-900">{message}</p>
+      : null}
+
+      {searched && totalFound > 0 ?
         <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-black/60">
+              На странице
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value) as PageSize);
+                  setPage(1);
+                }}
+                className="rounded-lg border border-black/15 px-2 py-1"
+              >
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={busy || safePage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+            >
+              ← Назад
+            </button>
+            <button
+              type="button"
+              disabled={busy || safePage >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+            >
+              Вперёд →
+            </button>
             <button
               type="button"
               disabled={busy}
-              onClick={() => setSelected(new Set(filteredHits.map((h) => h.url)))}
+              onClick={selectAllVisible}
               className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
             >
-              Выбрать все
+              Выбрать на странице
             </button>
             <button
               type="button"
@@ -266,31 +357,56 @@ export function AdminCatalogOfferSearchImportSection({
               Создать кандидатов предложений ({selected.size})
             </button>
           </div>
-          <ul className="space-y-2">
-            {filteredHits.map((h) => (
-              <li key={h.url} className="rounded-2xl border border-black/10 bg-white p-3 text-sm">
+
+          <ul className="space-y-3">
+            {pageResults.map((item) => (
+              <li key={item.url} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
                 <div className="flex items-start gap-3">
                   <input
                     type="checkbox"
-                    checked={selected.has(h.url)}
-                    onChange={() => toggleUrl(h.url)}
-                    className="mt-1"
+                    checked={selected.has(item.url)}
+                    onChange={() => toggleUrl(item.url)}
+                    className="mt-1 shrink-0"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-black">{h.title}</span>
+                      <span className="font-semibold text-black">{item.title}</span>
                       <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
-                        {catalogSourceNameLabel(catalogSourceNameFromUrl(h.url))}
+                        {catalogSourceNameLabel(item.sourceName)}
                       </span>
+                      {item.parsed ?
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
+                          разобрано
+                        </span>
+                      : null}
                     </div>
-                    <p className="mt-1 line-clamp-2 text-black/50">{h.snippet || h.domain}</p>
+                    <p className="mt-1 text-black/55">
+                      {[item.price, item.city].filter(Boolean).join(" · ")}
+                    </p>
+                    {(item.companyName || item.sellerName) && (
+                      <p className="mt-1 text-xs text-black/50">
+                        {item.companyName ? `Компания: ${item.companyName}` : ""}
+                        {item.companyName && item.sellerName ? " · " : ""}
+                        {item.sellerName ? `Продавец: ${item.sellerName}` : ""}
+                      </p>
+                    )}
+                    {item.shortSnippet ?
+                      <p className="mt-1 line-clamp-2 text-black/45">{item.shortSnippet}</p>
+                    : null}
+                    {(item.brand || item.oemCodes.length > 0 || item.articleCodes.length > 0) && (
+                      <p className="mt-1 text-xs text-black/40">
+                        {item.brand ? `Бренд: ${item.brand}` : ""}
+                        {item.oemCodes.length > 0 ? ` · OEM: ${item.oemCodes.join(", ")}` : ""}
+                        {item.articleCodes.length > 0 ? ` · Арт.: ${item.articleCodes.join(", ")}` : ""}
+                      </p>
+                    )}
                     <a
-                      href={h.url}
+                      href={item.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-1 inline-block text-xs text-[#c25a00] underline"
+                      className="mt-2 inline-block break-all text-xs font-medium text-[#c25a00] underline"
                     >
-                      {h.url}
+                      {item.url}
                     </a>
                   </div>
                 </div>
@@ -298,6 +414,14 @@ export function AdminCatalogOfferSearchImportSection({
             ))}
           </ul>
         </div>
+      : null}
+
+      {searched && totalFound === 0 && !busy ?
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          {EMPTY_REASON_LABEL[emptyReason ?? ""] ??
+            message ??
+            "Объявления не найдены. Измените запрос, город или источник."}
+        </p>
       : null}
 
       <OfferImportGoToDraftsBanner count={createdCount} onGoToDrafts={onGoToDrafts} />

@@ -75,3 +75,38 @@ export async function processSourceOfferUrlBatch(
   const upsert = await upsertSourceOfferDrafts(items);
   return { drafts: upsert.drafts, errors, upsert };
 }
+
+/** Parse offer fields from URLs without writing to DB (admin search preview). */
+export async function previewSourceOffersFromUrls(
+  urls: string[],
+  defaults: ExtractionDefaults,
+): Promise<{
+  previews: Array<{ url: string; input: NonNullable<Awaited<ReturnType<typeof extractSourceOfferFromHtml>>> }>;
+  errors: { url: string; error: string }[];
+}> {
+  const previews: Array<{ url: string; input: NonNullable<Awaited<ReturnType<typeof extractSourceOfferFromHtml>>> }> = [];
+  const errors: { url: string; error: string }[] = [];
+
+  for (const rawUrl of urls) {
+    if (!/^https?:\/\//i.test(rawUrl)) {
+      errors.push({ url: rawUrl, error: "INVALID_URL" });
+      continue;
+    }
+    try {
+      const fetched = await fetchPublicHtml(rawUrl);
+      const input = extractSourceOfferFromHtml(fetched, defaults);
+      if (!input) {
+        errors.push({ url: rawUrl, error: "NO_OFFER_EXTRACTED" });
+        continue;
+      }
+      if (!input.categorySlug) input.categorySlug = defaults.categorySlug;
+      if (!input.city && defaults.city) input.city = defaults.city;
+      previews.push({ url: rawUrl, input });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "PARSE_FAILED";
+      errors.push({ url: rawUrl, error: msg });
+    }
+  }
+
+  return { previews, errors };
+}

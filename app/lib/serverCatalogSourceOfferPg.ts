@@ -11,6 +11,7 @@ import {
 } from "./catalogSourceOfferTypes";
 import type { CatalogSourceOfferListQuery } from "./catalogSourceOfferQuery";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
+import { sanitizeSourceOfferInput } from "./catalogSourceOfferNormalize";
 
 type DraftRow = {
   id: number;
@@ -152,7 +153,10 @@ export async function pgUpsertSourceOfferDrafts(
   const drafts: CatalogSourceOfferDraft[] = [];
 
   for (const item of items) {
-    const search = buildSourceOfferSearchFields(item.input);
+    const input = sanitizeSourceOfferInput(item.input);
+    if (!input) continue;
+
+    const search = buildSourceOfferSearchFields(input);
     const status = item.duplicateHint || item.duplicateOfOfferId ? "duplicate" : "draft";
 
     if (item.existingDraftId) {
@@ -172,20 +176,20 @@ export async function pgUpsertSourceOfferDrafts(
         [
           item.existingDraftId,
           status,
-          item.input.title,
-          item.input.price,
-          item.input.city,
-          item.input.region,
-          item.input.categorySlug,
-          item.input.companyName,
-          item.input.sellerName,
-          item.input.brand,
-          JSON.stringify(item.input.oemCodes),
-          JSON.stringify(item.input.articleCodes),
-          item.input.sourceName,
-          item.input.sourceUrl,
-          item.input.shortSnippet,
-          item.input.confidenceScore,
+          input.title,
+          input.price,
+          input.city,
+          input.region,
+          input.categorySlug,
+          input.companyName,
+          input.sellerName,
+          input.brand,
+          JSON.stringify(input.oemCodes),
+          JSON.stringify(input.articleCodes),
+          input.sourceName,
+          input.sourceUrl,
+          input.shortSnippet,
+          input.confidenceScore,
           item.duplicateHint,
           item.duplicateOfOfferId,
           search.titleSearch,
@@ -193,7 +197,7 @@ export async function pgUpsertSourceOfferDrafts(
           search.oemSearch,
           search.companySearch,
           search.citySearch,
-          JSON.stringify(item.input.rawPayload ?? {}),
+          JSON.stringify(input.rawPayload ?? {}),
         ],
       );
       if (rows[0]) {
@@ -218,20 +222,20 @@ export async function pgUpsertSourceOfferDrafts(
       `,
       [
         status,
-        item.input.title,
-        item.input.price,
-        item.input.city,
-        item.input.region,
-        item.input.categorySlug,
-        item.input.companyName,
-        item.input.sellerName,
-        item.input.brand,
-        JSON.stringify(item.input.oemCodes),
-        JSON.stringify(item.input.articleCodes),
-        item.input.sourceName,
-        item.input.sourceUrl,
-        item.input.shortSnippet,
-        item.input.confidenceScore,
+        input.title,
+        input.price,
+        input.city,
+        input.region,
+        input.categorySlug,
+        input.companyName,
+        input.sellerName,
+        input.brand,
+        JSON.stringify(input.oemCodes),
+        JSON.stringify(input.articleCodes),
+        input.sourceName,
+        input.sourceUrl,
+        input.shortSnippet,
+        input.confidenceScore,
         item.duplicateHint,
         item.duplicateOfOfferId,
         search.titleSearch,
@@ -239,7 +243,7 @@ export async function pgUpsertSourceOfferDrafts(
         search.oemSearch,
         search.companySearch,
         search.citySearch,
-        JSON.stringify(item.input.rawPayload ?? {}),
+        JSON.stringify(input.rawPayload ?? {}),
       ],
     );
     if (rows[0]) {

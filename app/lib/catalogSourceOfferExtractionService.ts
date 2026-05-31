@@ -1,6 +1,8 @@
 import { classifySourceUrl } from "./catalogSourceClassifier";
 import { extractSourceOfferFromHtml } from "./catalogSourceOfferExtract";
 import { findSourceOfferDuplicate } from "./catalogSourceOfferDedup";
+import { isRealOfferListingUrl } from "./catalogOfferSearchText";
+import { offerListingSourceFromUrl } from "./catalogSourceOfferNormalize";
 import { fetchPublicHtml } from "./catalogHtmlFetch";
 import { MAX_URLS_PER_BATCH } from "./catalogImportLimits";
 import type { ExtractionDefaults } from "./catalogExtractionTypes";
@@ -14,7 +16,10 @@ import { logCatalogImport } from "./catalogCatalogLog";
 function isSourceOfferUrl(rawUrl: string): boolean {
   try {
     const url = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
-    return classifySourceUrl(url) === "listing";
+    if (classifySourceUrl(url) !== "listing") return false;
+    const src = offerListingSourceFromUrl(url.toString());
+    if (!src) return true;
+    return isRealOfferListingUrl(url.toString(), src);
   } catch {
     return false;
   }

@@ -8,6 +8,17 @@ import {
   type OfferListingSourceId,
 } from "./catalogOfferSourceSearch";
 import { previewSourceOffersFromUrls } from "./catalogSourceOfferExtractionService";
+import {
+  hasBadEncoding,
+  isRealOfferListingUrl,
+  meetsMinimumOfferFields,
+  sanitizeOfferText,
+  validateOfferSearchHit,
+} from "./catalogOfferSearchText";
+import {
+  sanitizeSourceOfferInput,
+  SOURCE_OFFER_SNIPPET_MAX,
+} from "./catalogSourceOfferNormalize";
 import { searchPublicWebForOffers, searchPublicWebForOffersDeep } from "./catalogSearchProvider";
 import type { CatalogSourceName } from "./catalogSourceOfferTypes";
 
@@ -19,6 +30,8 @@ export type OfferSearchSourceFilter =
   | "vk"
   | "company_site"
   | "other";
+
+export type OfferParseQuality = "full" | "partial" | "search_only";
 
 export type OfferSearchResultItem = {
   url: string;
@@ -33,6 +46,7 @@ export type OfferSearchResultItem = {
   oemCodes: string[];
   articleCodes: string[];
   parsed: boolean;
+  parseQuality: OfferParseQuality;
 };
 
 export type OfferSearchStats = {
@@ -102,21 +116,98 @@ function parsePriceNumber(raw: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function listingSourceFromUrl(url: string): OfferListingSourceId | null {
+  const lower = url.toLowerCase();
+  if (lower.includes("avito.ru")) return "avito";
+  if (lower.includes("drom.ru") || lower.includes("auto.ru")) return "drom";
+  if (lower.includes("youla.ru")) return "youla";
+  if (lower.includes("vk.com") || lower.includes("vk.ru")) return "vk";
+  return null;
+}
+
+function computeParseQuality(item: {
+  parsed: boolean;
+  price: string | null;
+  city: string;
+  companyName: string;
+  sellerName: string;
+  shortSnippet: string;
+}): OfferParseQuality {
+  if (!item.parsed) return "search_only";
+  const hasPrice = Boolean(item.price);
+  const hasSeller = Boolean(item.companyName?.trim() || item.sellerName?.trim());
+  const hasCity = Boolean(item.city?.trim());
+  const hasSnippet = Boolean(item.shortSnippet?.trim() && item.shortSnippet.length > 14);
+  if (hasPrice && (hasSeller || hasCity)) return "full";
+  if (hasPrice || hasSeller || hasCity || hasSnippet) return "partial";
+  return "search_only";
+}
+
 function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
-  return {
+  const item: OfferSearchResultItem = {
     url: hit.url,
-    title: hit.title,
+    title: sanitizeOfferText(hit.title),
     price: hit.price,
-    city: hit.city,
+    city: sanitizeOfferText(hit.city),
     companyName: "",
-    sellerName: "",
+    sellerName: sanitizeOfferText(hit.sellerHint),
     sourceName: hit.sourceName,
-    shortSnippet: hit.snippet,
+    shortSnippet: sanitizeOfferText(hit.snippet || hit.title),
     brand: null,
     oemCodes: [],
     articleCodes: [],
-    parsed: hit.fromSearchPage,
+    parsed: false,
+    parseQuality: "search_only",
   };
+  item.parseQuality = computeParseQuality(item);
+  return item;
+}
+
+function sanitizeResultItem(item: OfferSearchResultItem): OfferSearchResultItem {
+  return {
+    ...item,
+    title: sanitizeOfferText(item.title),
+    city: sanitizeOfferText(item.city),
+    companyName: sanitizeOfferText(item.companyName),
+    sellerName: sanitizeOfferText(item.sellerName),
+    shortSnippet: sanitizeOfferText(item.shortSnippet || item.title),
+    parseQuality: computeParseQuality(item),
+  };
+}
+
+function filterValidResults(
+  items: OfferSearchResultItem[],
+  hidden: Record<string, number>,
+): OfferSearchResultItem[] {
+  const out: OfferSearchResultItem[] = [];
+  for (const raw of items) {
+    const item = sanitizeResultItem(raw);
+    if (hasBadEncoding(item.title) || hasBadEncoding(item.shortSnippet)) {
+      hidden.bad_encoding = (hidden.bad_encoding ?? 0) + 1;
+      continue;
+    }
+    const src = listingSourceFromUrl(item.url);
+    if (src && !isRealOfferListingUrl(item.url, src)) {
+      hidden.not_listing = (hidden.not_listing ?? 0) + 1;
+      continue;
+    }
+    if (
+      !meetsMinimumOfferFields({
+        title: item.title,
+        url: item.url,
+        price: item.price,
+        city: item.city,
+        snippet: item.shortSnippet,
+        companyName: item.companyName,
+        sellerName: item.sellerName,
+      })
+    ) {
+      hidden.insufficient_fields = (hidden.insufficient_fields ?? 0) + 1;
+      continue;
+    }
+    out.push(item);
+  }
+  return out;
 }
 
 function mergeDetail(
@@ -132,22 +223,44 @@ function mergeDetail(
     brand: string | null;
     oemCodes: string[];
     articleCodes: string[];
+    categorySlug?: string;
   },
 ): OfferSearchResultItem {
-  return {
-    url: item.url,
+  const sanitized = sanitizeSourceOfferInput({
     title: input.title || item.title,
     price: input.price ?? item.price,
     city: input.city || item.city,
+    region: "",
+    categorySlug: input.categorySlug ?? "drugie",
     companyName: input.companyName,
     sellerName: input.sellerName,
-    sourceName: input.sourceName,
-    shortSnippet: input.shortSnippet || item.shortSnippet,
     brand: input.brand,
     oemCodes: input.oemCodes,
     articleCodes: input.articleCodes,
+    sourceName: input.sourceName,
+    sourceUrl: item.url,
+    shortSnippet: (input.shortSnippet || item.shortSnippet).slice(0, SOURCE_OFFER_SNIPPET_MAX),
+    confidenceScore: 0.65,
+  });
+  if (!sanitized) return item;
+
+  const merged: OfferSearchResultItem = {
+    url: item.url,
+    title: sanitized.title,
+    price: sanitized.price,
+    city: sanitized.city,
+    companyName: sanitized.companyName,
+    sellerName: sanitized.sellerName,
+    sourceName: sanitized.sourceName,
+    shortSnippet: sanitized.shortSnippet,
+    brand: sanitized.brand,
+    oemCodes: sanitized.oemCodes,
+    articleCodes: sanitized.articleCodes,
     parsed: true,
+    parseQuality: "search_only",
   };
+  merged.parseQuality = computeParseQuality(merged);
+  return merged;
 }
 
 function countBySource(items: OfferSearchResultItem[]): OfferSearchStats["sourceCounts"] {
@@ -224,20 +337,25 @@ async function serpFallbackHits(
 
     for (const c of serp.candidates) {
       const url = c.url;
-      if (!urlMatchesListingSource(url, source)) continue;
+      if (!urlMatchesListingSource(url, source) || !isRealOfferListingUrl(url, source)) continue;
+      const title = sanitizeOfferText(c.title || "");
+      const snippet = sanitizeOfferText(c.snippet || title);
+      const priceNum = parsePriceNumber(snippet || title);
+      const candidate: OfferSourceSearchHit = {
+        url,
+        title,
+        snippet,
+        price: priceNum != null ? String(priceNum) : null,
+        city: "",
+        sellerHint: "",
+        sourceName: catalogSourceNameFromUrl(url),
+        fromSearchPage: true,
+      };
+      if (validateOfferSearchHit(candidate, source)) continue;
       const key = url.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      const priceNum = parsePriceNumber(c.snippet);
-      hits.push({
-        url,
-        title: c.title || url,
-        snippet: c.snippet,
-        price: priceNum != null ? String(priceNum) : null,
-        city: "",
-        sourceName: catalogSourceNameFromUrl(url),
-        fromSearchPage: true,
-      });
+      hits.push(candidate);
     }
   }
   return { hits, serpUrlsBySource };
@@ -300,6 +418,7 @@ export async function searchOffersForAdmin(opts: {
           snippet: c.snippet,
           price: parsePriceNumber(c.snippet) != null ? String(parsePriceNumber(c.snippet)) : null,
           city: "",
+          sellerHint: "",
           sourceName: catalogSourceNameFromUrl(c.url),
           fromSearchPage: true,
         }),
@@ -448,6 +567,7 @@ export async function searchOffersForAdmin(opts: {
       brand: input.brand,
       oemCodes: input.oemCodes,
       articleCodes: input.articleCodes,
+      categorySlug: DEFAULT_CATEGORY,
     });
   });
 
@@ -487,6 +607,16 @@ export async function searchOffersForAdmin(opts: {
   }
   items = deduped;
   stats.afterDuplicateFilter = items.length;
+
+  const beforeQuality = items.length;
+  items = filterValidResults(items, hidden);
+  if (beforeQuality > items.length) {
+    logCatalogDiscover("offer_search_quality_filter", {
+      dropped: beforeQuality - items.length,
+      hidden,
+    });
+  }
+
   stats.sourceCounts = countBySource(items);
 
   return {

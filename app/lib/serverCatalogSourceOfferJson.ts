@@ -12,6 +12,7 @@ import {
   sourceOfferDraftStatusDbValues,
 } from "./catalogSourceOfferTypes";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
+import { sanitizeSourceOfferInput } from "./catalogSourceOfferNormalize";
 import {
   filterSourceOffersInMemory,
   type CatalogSourceOfferListQuery,
@@ -144,7 +145,9 @@ export async function jsonUpsertSourceOfferDrafts(
   const drafts: CatalogSourceOfferDraft[] = [];
 
   for (const item of items) {
-    const enriched = inputWithSearch(item.input);
+    const clean = sanitizeSourceOfferInput(item.input);
+    if (!clean) continue;
+    const enriched = inputWithSearch(clean);
     const status: CatalogSourceOfferDraftStatus =
       item.duplicateHint || item.duplicateOfOfferId ? "duplicate" : "draft";
     const existing =

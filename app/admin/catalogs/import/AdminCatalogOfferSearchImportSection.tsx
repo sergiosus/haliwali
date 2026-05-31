@@ -33,6 +33,17 @@ const HIDDEN_REASON_LABEL: Record<string, string> = {
   price_filter: "цена",
   brand_oem: "бренд / OEM",
   duplicate: "дубликат",
+  bad_encoding: "битая кодировка",
+  not_listing: "не объявление",
+  insufficient_fields: "мало полей",
+  generic_title: "общий заголовок",
+  cap: "лимит 100",
+};
+
+const PARSE_QUALITY_LABEL: Record<string, string> = {
+  full: "полностью",
+  partial: "частично",
+  search_only: "только поиск",
 };
 
 const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
@@ -368,16 +379,20 @@ export function AdminCatalogOfferSearchImportSection({
             </p>
           : null}
           {diagnostics.length > 0 ?
-            <details className="text-xs">
-              <summary className="cursor-pointer font-medium text-black/60">Диагностика источников</summary>
-              <ul className="mt-2 space-y-2">
-                {diagnostics.map((diag) => (
-                  <li key={diag.sourceName} className="rounded-lg border border-black/10 bg-white px-3 py-2">
-                    <p className="font-medium text-black">{SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}</p>
-                    <p className="text-black/50">
-                      HTTP {diag.httpStatus ?? "—"} · страниц: {diag.pagesFetched} · разобрано:{" "}
-                      {diag.parsedCount} · пропущено: {diag.skippedCount}
-                    </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {diagnostics.map((diag) => (
+                <div key={diag.sourceName} className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs">
+                  <p className="font-medium text-black">{SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}</p>
+                  <p className="mt-0.5 text-black/55">
+                    {diag.searched ? "искали" : "не искали"}
+                    {" · "}
+                    {diag.blocked ? "заблокирован" : "не заблокирован"}
+                    {" · "}
+                    разобрано: {diag.parsedCount}
+                    {" · "}
+                    пропущено: {diag.skippedCount}
+                  </p>
+                  <p className="text-black/50">HTTP {diag.httpStatus ?? "—"} · стр.: {diag.pagesFetched}</p>
                     {diag.searchUrls[0] ?
                       <p className="mt-1 break-all text-black/40">{diag.searchUrls[0]}</p>
                     : null}
@@ -389,18 +404,17 @@ export function AdminCatalogOfferSearchImportSection({
                     {diag.message ?
                       <p className="mt-0.5 text-black/45">{diag.message}</p>
                     : null}
-                    {Object.keys(diag.skipReasons).length > 0 ?
-                      <p className="mt-0.5 text-black/40">
-                        Пропуски:{" "}
-                        {Object.entries(diag.skipReasons)
-                          .map(([k, v]) => `${HIDDEN_REASON_LABEL[k] ?? k}: ${v}`)
-                          .join(", ")}
-                      </p>
-                    : null}
-                  </li>
-                ))}
-              </ul>
-            </details>
+                  {Object.keys(diag.skipReasons).length > 0 ?
+                    <p className="mt-0.5 text-black/40">
+                      Пропуски:{" "}
+                      {Object.entries(diag.skipReasons)
+                        .map(([k, v]) => `${HIDDEN_REASON_LABEL[k] ?? k}: ${v}`)
+                        .join(", ")}
+                    </p>
+                  : null}
+                </div>
+              ))}
+            </div>
           : null}
         </div>
       : null}
@@ -484,14 +498,25 @@ export function AdminCatalogOfferSearchImportSection({
                       <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
                         {catalogSourceNameLabel(item.sourceName)}
                       </span>
-                      {item.parsed ?
-                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
-                          разобрано
-                        </span>
-                      : null}
+                      <span
+                        className={
+                          item.parseQuality === "full" ?
+                            "rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800"
+                          : item.parseQuality === "partial" ?
+                            "rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900"
+                          : "rounded-full bg-black/[0.06] px-2 py-0.5 text-xs text-black/55"
+                        }
+                      >
+                        {PARSE_QUALITY_LABEL[item.parseQuality] ?? item.parseQuality}
+                      </span>
                     </div>
                     <p className="mt-1 text-black/55">
-                      {[item.price, item.city].filter(Boolean).join(" · ")}
+                      {[
+                        item.price ? `${Number(item.price).toLocaleString("ru-RU")} ₽` : null,
+                        item.city || null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
                     </p>
                     {(item.companyName || item.sellerName) && (
                       <p className="mt-1 text-xs text-black/50">

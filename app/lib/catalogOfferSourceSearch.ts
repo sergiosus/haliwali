@@ -5,11 +5,21 @@
 
 import { logCatalogDiscover } from "./catalogCatalogLog";
 import { assertCatalogFetchAllowed } from "./catalogHtmlFetch";
+import {
+  decodeHtmlBytes,
+  decodeJsonString,
+  extractCityFromContext,
+  extractSellerFromContext,
+  isRealOfferListingUrl,
+  sanitizeOfferText,
+  validateOfferSearchHit,
+  type OfferListingSourceId,
+} from "./catalogOfferSearchText";
 import { assertPublicResolvableHost } from "./catalogUrlSafety";
 import { slugifyCatalogText } from "./catalogSlug";
 import type { CatalogSourceName } from "./catalogSourceOfferTypes";
 
-export type OfferListingSourceId = "avito" | "drom" | "youla" | "vk";
+export type { OfferListingSourceId };
 
 export type OfferSourceZeroReason =
   | "blocked"
@@ -24,6 +34,8 @@ export type OfferSourceZeroReason =
 
 export type OfferSourceSearchDiagnostic = {
   sourceName: OfferListingSourceId;
+  searched: boolean;
+  blocked: boolean;
   searchUrls: string[];
   httpStatus: number | null;
   pagesFetched: number;
@@ -40,6 +52,7 @@ export type OfferSourceSearchHit = {
   snippet: string;
   price: string | null;
   city: string;
+  sellerHint: string;
   sourceName: CatalogSourceName;
   fromSearchPage: boolean;
 };
@@ -107,7 +120,7 @@ async function fetchSearchPage(
     }
     const buf = await res.arrayBuffer();
     if (buf.byteLength < 80) return { ok: false, status, error: "EMPTY_RESPONSE" };
-    const html = new TextDecoder("utf-8", { fatal: false }).decode(buf).slice(0, 1_200_000);
+    const html = decodeHtmlBytes(buf, res.headers.get("content-type"));
     if (isCaptchaOrBlocked(html, status)) {
       return { ok: false, status, error: "CAPTCHA" };
     }
@@ -130,10 +143,6 @@ function normalizeListingUrl(raw: string, base: string): string | null {
   }
 }
 
-function decodeJsonString(s: string): string {
-  return s.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\//g, "/");
-}
-
 function extractPriceFromBlob(blob: string): string | null {
   const m =
     blob.match(/([0-9][0-9\s\u00a0]{2,12})\s*(?:₽|руб\.?|р\.)/i) ??
@@ -143,35 +152,13 @@ function extractPriceFromBlob(blob: string): string | null {
   return digits ? digits : null;
 }
 
-function isAvitoListingUrl(url: string): boolean {
-  return (
-    /avito\.ru\/[^?\s]+_\d{5,}/i.test(url) &&
-    !/\/(add|search|catalog|brands|profile|user|shops|favorites)\b/i.test(url)
-  );
-}
-
 function avitoListingUrlFromPath(path: string, baseUrl: string): string | null {
   const cleaned = path.replace(/\\\//g, "/").split("?")[0] ?? "";
   if (!/_\d{5,}$/.test(cleaned) && !/_\d{5,}\//.test(cleaned)) return null;
   if (/\/(add|search|catalog|brands|profile)\b/i.test(cleaned)) return null;
   const rel = cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
-  return normalizeListingUrl(`https://www.avito.ru${rel}`, baseUrl);
-}
-
-function isDromListingUrl(url: string): boolean {
-  return (
-    /drom\.ru\/[^?\s]+\/\d{5,}/i.test(url) ||
-    /auto\.ru\/[^?\s]+\/\d{5,}/i.test(url) ||
-    (/drom\.ru\/catalog\//i.test(url) && /\d{5,}/.test(url))
-  );
-}
-
-function isYoulaListingUrl(url: string): boolean {
-  return /youla\.ru\/(?:product|user\/[^/]+\/product|[^/]+\/[^/]+)/i.test(url) && !/\/search\b/i.test(url);
-}
-
-function isVkListingUrl(url: string): boolean {
-  return /vk\.(?:com|ru)\/(?:market\/product|market\/-?\d+|wall|item)/i.test(url);
+  const url = normalizeListingUrl(`https://www.avito.ru${rel}`, baseUrl);
+  return url && isRealOfferListingUrl(url, "avito") ? url : null;
 }
 
 function pushAvitoHit(
@@ -182,27 +169,41 @@ function pushAvitoHit(
   cityDefault: string,
   titleHint: string,
   ctx: string,
-): void {
+): OfferSourceSearchHit | null {
   const url = normalizeListingUrl(rawUrl, baseUrl);
-  if (!url || !isAvitoListingUrl(url) || seen.has(url)) return;
+  if (!url || !isRealOfferListingUrl(url, "avito") || seen.has(url)) return null;
   seen.add(url);
-  const title =
+  const title = sanitizeOfferText(
     titleHint ||
-    url
-      .split("/")
-      .pop()
-      ?.replace(/_\d+$/, "")
-      .replace(/_/g, " ") ||
-    "Объявление";
-  hits.push({
+      decodeJsonString(
+        ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
+          ctx.match(/"name"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
+          "",
+      ) ||
+      url
+        .split("/")
+        .pop()
+        ?.replace(/_\d+$/, "")
+        .replace(/_/g, " ") ||
+      "",
+  );
+  const price = extractPriceFromBlob(ctx);
+  const snippet = sanitizeOfferText(
+    decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
+  );
+  const hit: OfferSourceSearchHit = {
     url,
     title: title.slice(0, 200),
-    snippet: title.slice(0, 280),
-    price: extractPriceFromBlob(ctx),
-    city: cityDefault,
+    snippet: snippet.slice(0, 280),
+    price,
+    city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
+    sellerHint: extractSellerFromContext(ctx),
     sourceName: "avito",
     fromSearchPage: true,
-  });
+  };
+  if (validateOfferSearchHit(hit, "avito")) return null;
+  hits.push(hit);
+  return hit;
 }
 
 function parseAvitoSearchHtml(html: string, baseUrl: string, cityDefault: string): OfferSourceSearchHit[] {
@@ -212,7 +213,7 @@ function parseAvitoSearchHtml(html: string, baseUrl: string, cityDefault: string
   const urlRe = /https?:\/\/(?:www\.)?avito\.ru\/[a-z0-9_./-]+_\d{5,}/gi;
   let m: RegExpExecArray | null;
   while ((m = urlRe.exec(html)) !== null) {
-    pushAvitoHit(hits, seen, m[0]!, baseUrl, cityDefault, "", html.slice(Math.max(0, m.index - 200), m.index + 400));
+    pushAvitoHit(hits, seen, m[0]!, baseUrl, cityDefault, "", html.slice(Math.max(0, m.index - 200), m.index + 600));
   }
 
   const pathRe = /"urlPath"\s*:\s*"(\/[^"\\]+_\d{5,}[^"\\]*)"/gi;
@@ -246,28 +247,39 @@ function parseAvitoSearchHtml(html: string, baseUrl: string, cityDefault: string
 function parseDromSearchHtml(html: string, baseUrl: string, cityDefault: string): OfferSourceSearchHit[] {
   const hits: OfferSourceSearchHit[] = [];
   const patterns = [
-    /https?:\/\/(?:www\.)?drom\.ru\/[a-z0-9_./-]+\/\d{5,}/gi,
-    /https?:\/\/auto\.ru\/[a-z0-9_./-]+\/\d{5,}/gi,
+    /https?:\/\/auto\.ru\/[a-z0-9_./%-]+\d{7,}\/?/gi,
+    /https?:\/\/baza\.drom\.ru\/[a-z0-9_./%-]+\d{5,}(?:\.html)?/gi,
   ];
   const seen = new Set<string>();
   for (const urlRe of patterns) {
     let m: RegExpExecArray | null;
     while ((m = urlRe.exec(html)) !== null) {
       const url = normalizeListingUrl(m[0]!, baseUrl);
-      if (!url || !isDromListingUrl(url) || seen.has(url)) continue;
+      if (!url || !isRealOfferListingUrl(url, "drom") || seen.has(url)) continue;
       seen.add(url);
-      const slug = url.split("/").filter(Boolean).pop() ?? "Объявление";
-      const title = decodeURIComponent(slug).replace(/[-_]+/g, " ").slice(0, 200);
-      const ctx = html.slice(Math.max(0, m.index - 200), m.index + 400);
-      hits.push({
+      const ctx = html.slice(Math.max(0, m.index - 400), m.index + 800);
+      const title = sanitizeOfferText(
+        decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ?? "") ||
+          decodeJsonString(ctx.match(/"name"\s*:\s*"([^"]{4,200})"/i)?.[1] ?? "") ||
+          decodeJsonString(ctx.match(/data-title="([^"]{4,200})"/i)?.[1] ?? "") ||
+          "",
+      );
+      if (!title) continue;
+      const snippet = sanitizeOfferText(
+        decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
+      );
+      const hit: OfferSourceSearchHit = {
         url,
-        title,
-        snippet: title,
+        title: title.slice(0, 200),
+        snippet: snippet.slice(0, 280),
         price: extractPriceFromBlob(ctx),
-        city: cityDefault,
+        city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
+        sellerHint: extractSellerFromContext(ctx),
         sourceName: "drom",
         fromSearchPage: true,
-      });
+      };
+      if (validateOfferSearchHit(hit, "drom")) continue;
+      hits.push(hit);
     }
   }
   return hits;
@@ -280,24 +292,29 @@ function parseYoulaSearchHtml(html: string, baseUrl: string, cityDefault: string
   let m: RegExpExecArray | null;
   while ((m = urlRe.exec(html)) !== null) {
     const url = normalizeListingUrl(m[0]!, baseUrl);
-    if (!url || !isYoulaListingUrl(url) || seen.has(url)) continue;
+    if (!url || !isRealOfferListingUrl(url, "youla") || seen.has(url)) continue;
     seen.add(url);
-    const title =
-      decodeJsonString(
-        html.slice(m.index, m.index + 600).match(/"name"\s*:\s*"([^"]{3,200})"/i)?.[1] ??
-          html.slice(m.index, m.index + 600).match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ??
-          "",
-      ) || url.split("/").pop()?.replace(/[-_]+/g, " ") || "Объявление";
-    const ctx = html.slice(Math.max(0, m.index - 200), m.index + 400);
-    hits.push({
+    const ctx = html.slice(Math.max(0, m.index - 200), m.index + 600);
+    const title = sanitizeOfferText(
+      decodeJsonString(ctx.match(/"name"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? "") ||
+        decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? "") ||
+        "",
+    );
+    const snippet = sanitizeOfferText(
+      decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
+    );
+    const hit: OfferSourceSearchHit = {
       url,
       title: title.slice(0, 200),
-      snippet: title.slice(0, 280),
+      snippet: snippet.slice(0, 280),
       price: extractPriceFromBlob(ctx),
-      city: cityDefault,
+      city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
+      sellerHint: extractSellerFromContext(ctx),
       sourceName: "other",
       fromSearchPage: true,
-    });
+    };
+    if (validateOfferSearchHit(hit, "youla")) continue;
+    hits.push(hit);
   }
   return hits;
 }
@@ -309,20 +326,27 @@ function parseVkSearchHtml(html: string, baseUrl: string, cityDefault: string): 
   let m: RegExpExecArray | null;
   while ((m = urlRe.exec(html)) !== null) {
     const url = normalizeListingUrl(m[0]!, baseUrl);
-    if (!url || !isVkListingUrl(url) || seen.has(url)) continue;
+    if (!url || !isRealOfferListingUrl(url, "vk") || seen.has(url)) continue;
     seen.add(url);
-    const title =
-      decodeJsonString(html.slice(m.index - 300, m.index + 300).match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? "") ||
-      "VK объявление";
-    hits.push({
+    const ctx = html.slice(m.index - 300, m.index + 500);
+    const title = sanitizeOfferText(
+      decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{3,200})"/i)?.[1] ?? ""),
+    );
+    const snippet = sanitizeOfferText(
+      decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
+    );
+    const hit: OfferSourceSearchHit = {
       url,
       title: title.slice(0, 200),
-      snippet: title.slice(0, 280),
-      price: extractPriceFromBlob(html.slice(m.index - 200, m.index + 400)),
-      city: cityDefault,
+      snippet: snippet.slice(0, 280),
+      price: extractPriceFromBlob(ctx),
+      city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
+      sellerHint: extractSellerFromContext(ctx),
       sourceName: "vk",
       fromSearchPage: true,
-    });
+    };
+    if (validateOfferSearchHit(hit, "vk")) continue;
+    hits.push(hit);
   }
   return hits;
 }
@@ -346,10 +370,11 @@ function buildSearchUrls(
   }
 
   if (source === "drom") {
-    const base = `https://www.drom.ru/catalog/?q=${q}`;
-    const url = page <= 1 ? base : `${base}&page=${page}`;
-    const alt = page <= 1 ? `https://auto.drom.ru/?q=${q}` : `${base}&p=${page}`;
-    return { urls: page === 1 ? [base, alt] : [url], cityInUrl: false };
+    const auto = `https://auto.drom.ru/all/?query=${q}`;
+    const baza = `https://baza.drom.ru/sell_spare_parts/search/?query=${q}`;
+    const url = page <= 1 ? auto : `${auto}&page=${page}`;
+    const alt = page <= 1 ? baza : `${baza}&page=${page}`;
+    return { urls: page === 1 ? [url, alt] : [url], cityInUrl: false };
   }
 
   if (source === "youla") {
@@ -479,7 +504,18 @@ export async function searchOfferListingSources(opts: {
         }
 
         let newOnPage = 0;
-        for (const hit of pageHits) {
+        for (const rawHit of pageHits) {
+          const skip = validateOfferSearchHit(rawHit, source);
+          if (skip) {
+            skippedCount += 1;
+            skipReasons[skip] = (skipReasons[skip] ?? 0) + 1;
+            continue;
+          }
+          const hit: OfferSourceSearchHit = {
+            ...rawHit,
+            title: sanitizeOfferText(rawHit.title),
+            snippet: sanitizeOfferText(rawHit.snippet || rawHit.title),
+          };
           const key = hit.url.toLowerCase();
           if (globalSeen.has(key)) {
             skippedCount += 1;
@@ -504,8 +540,21 @@ export async function searchOfferListingSources(opts: {
         zeroReason = zeroReasonFromError(lastError || "NO_SELECTOR", 0);
       }
 
+      const statusLabel =
+        zeroReason === "blocked" ? "заблокирован"
+        : zeroReason === "captcha" ? "капча"
+        : zeroReason === "fetch_error" ? "ошибка загрузки"
+        : zeroReason === "no_selector" ? "разметка не распознана"
+        : parsedCount > 0 ? "ok"
+        : "нет объявлений";
+
+      const blocked =
+        zeroReason === "blocked" || zeroReason === "captcha" || lastError === "BLOCKED" || lastError === "CAPTCHA";
+
       diagnostics.push({
         sourceName: source,
+        searched: searchUrls.length > 0,
+        blocked,
         searchUrls,
         httpStatus,
         pagesFetched,
@@ -514,8 +563,12 @@ export async function searchOfferListingSources(opts: {
         zeroReason: parsedCount > 0 ? null : zeroReason,
         skipReasons,
         message:
-          parsedCount === 0 && zeroReason === "city_unsupported" ?
-            "Город не встроен в URL источника — ищем широко, фильтр после разбора"
+          parsedCount === 0 ?
+            `${statusLabel}${zeroReason === "city_unsupported" ? " — город фильтруется после разбора" : ""}`
+          : skippedCount > 0 ?
+            `пропущено: ${Object.entries(skipReasons)
+              .map(([k, v]) => `${k} ${v}`)
+              .join(", ")}`
           : undefined,
       });
     }),

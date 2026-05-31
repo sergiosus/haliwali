@@ -3,6 +3,7 @@ import {
   searchOffersForAdmin,
   type OfferSearchSourceFilter,
 } from "../../../../../lib/catalogOfferAdminSearch";
+import { saveOfferSearchSession } from "../../../../../lib/serverCatalogOfferSearchSessionStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 
 export const runtime = "nodejs";
@@ -55,5 +56,20 @@ export async function POST(req: Request) {
     return NextResponse.json(out, { status: 400 });
   }
 
-  return NextResponse.json(out);
+  const session = await saveOfferSearchSession({
+    query,
+    city,
+    brand,
+    oemArticle,
+    sourceFilter,
+    priceMin: Number.isFinite(priceMin) ? priceMin : undefined,
+    priceMax: Number.isFinite(priceMax) ? priceMax : undefined,
+    results: out.results,
+    skipped: out.skipped ?? [],
+    message: out.message,
+    emptyReason: out.emptyReason,
+    stats: out.stats,
+  });
+
+  return NextResponse.json({ ...out, sessionId: session.id });
 }

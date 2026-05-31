@@ -39,6 +39,7 @@ const HIDDEN_REASON_LABEL: Record<string, string> = {
   not_listing: "не объявление",
   insufficient_fields: "мало полей",
   generic_title: "общий заголовок",
+  query_mismatch: "не совпадает с запросом",
   cap: "лимит 100",
 };
 
@@ -102,10 +103,110 @@ export function AdminCatalogOfferSearchImportSection({
   const [searched, setSearched] = useState(false);
   const [searchStats, setSearchStats] = useState<OfferSearchStats | null>(null);
   const [diagnostics, setDiagnostics] = useState<OfferSourceSearchDiagnostic[]>([]);
+  const [skippedResults, setSkippedResults] = useState<OfferSearchResultItem[]>([]);
+
+  const applySessionPayload = useCallback(
+    (d: {
+      query?: string;
+      city?: string;
+      brand?: string;
+      oemArticle?: string;
+      sourceFilter?: OfferSourceFilter;
+      priceMin?: number;
+      priceMax?: number;
+      results?: OfferSearchResultItem[];
+      skipped?: OfferSearchResultItem[];
+      stats?: OfferSearchStats;
+      message?: string;
+      emptyReason?: string | null;
+    }) => {
+      if (d.query != null) setQuery(d.query);
+      if (d.city) {
+        setLocation({
+          city: d.city,
+          region: "",
+          displayName: d.city,
+          source: "suggestion",
+          settlementId: null,
+        });
+      }
+      if (d.brand != null) setBrand(d.brand);
+      if (d.oemArticle != null) setOemArticle(d.oemArticle);
+      if (d.sourceFilter) setSourceFilter(d.sourceFilter);
+      if (d.priceMin != null) setPriceMin(String(d.priceMin));
+      if (d.priceMax != null) setPriceMax(String(d.priceMax));
+      setResults(d.results ?? []);
+      setSkippedResults(d.skipped ?? []);
+      setSearchStats(d.stats ?? null);
+      setDiagnostics(d.stats?.diagnostics ?? []);
+      setMessage(d.message ?? null);
+      setEmptyReason(d.emptyReason ?? null);
+      setSearched(true);
+      setPage(1);
+      setSelected(new Set());
+    },
+    [],
+  );
 
   useEffect(() => {
     const saved = readCatalogDiscoverLocation();
     if (saved) setLocation(saved);
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch("/api/admin/catalogs/source-offers/search-session", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        const d = (await r.json()) as {
+          ok?: boolean;
+          session?: { results?: OfferSearchResultItem[]; skipped?: OfferSearchResultItem[] } | null;
+          results?: OfferSearchResultItem[];
+          skipped?: OfferSearchResultItem[];
+          query?: string;
+          city?: string;
+          brand?: string;
+          oemArticle?: string;
+          sourceFilter?: OfferSourceFilter;
+          priceMin?: number;
+          priceMax?: number;
+          stats?: OfferSearchStats;
+          message?: string;
+          emptyReason?: string | null;
+        };
+        if (!d.ok || !d.session && !(d.results?.length)) return;
+        applySessionPayload(d);
+      } catch {
+        /* no saved session */
+      }
+    })();
+  }, [applySessionPayload]);
+
+  const clearSearchResults = useCallback(async () => {
+    setBusy(true);
+    try {
+      await fetch("/api/admin/catalogs/source-offers/search-session", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      setResults([]);
+      setSkippedResults([]);
+      setSearchStats(null);
+      setDiagnostics([]);
+      setSelected(new Set());
+      setSearched(false);
+      setMessage(null);
+      setEmptyReason(null);
+      setImportErrors([]);
+      setCreatedCount(0);
+      setPage(1);
+    } catch {
+      setMessage("Не удалось очистить результаты");
+    } finally {
+      setBusy(false);
+    }
   }, []);
 
   const cityLabel = catalogDiscoverCityLabel(location);
@@ -153,6 +254,7 @@ export function AdminCatalogOfferSearchImportSection({
         message?: string;
         emptyReason?: string | null;
         results?: OfferSearchResultItem[];
+        skipped?: OfferSearchResultItem[];
         stats?: OfferSearchStats;
       };
       if (!d.ok) {
@@ -163,6 +265,7 @@ export function AdminCatalogOfferSearchImportSection({
       }
       const list = d.results ?? [];
       setResults(list);
+      setSkippedResults(d.skipped ?? []);
       setSearchStats(d.stats ?? null);
       setDiagnostics(d.stats?.diagnostics ?? []);
       setSearched(true);
@@ -337,19 +440,35 @@ export function AdminCatalogOfferSearchImportSection({
         </label>
       </div>
 
-      <button
-        type="button"
-        disabled={busy || !query.trim()}
-        onClick={() => void runSearch()}
-        className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-      >
-        {busy ? "Поиск…" : "Найти предложения"}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy || !query.trim()}
+          onClick={() => void runSearch()}
+          className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? "Поиск…" : "Найти предложения"}
+        </button>
+        <button
+          type="button"
+          disabled={busy || (!searched && results.length === 0)}
+          onClick={() => void clearSearchResults()}
+          className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-medium disabled:opacity-40"
+        >
+          Очистить результаты поиска
+        </button>
+      </div>
 
       {searched ?
         <div className="space-y-3 rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3 text-sm text-black/70">
           <p>
-            <span className="font-medium text-black">Найдено всего:</span> {totalFound}
+            <span className="font-medium text-black">Релевантных:</span> {totalFound}
+            {skippedResults.length > 0 ?
+              <>
+                <span className="mx-2 text-black/30">·</span>
+                <span className="font-medium text-black">Скрыто (запрос):</span> {skippedResults.length}
+              </>
+            : null}
             <span className="mx-2 text-black/30">·</span>
             <span className="font-medium text-black">Показано:</span> {shownCount} из {totalFound}
             <span className="mx-2 text-black/30">·</span>
@@ -535,6 +654,15 @@ export function AdminCatalogOfferSearchImportSection({
                       <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-xs text-black/55">
                         {PARSE_QUALITY_LABEL[item.parseQuality] ?? item.parseQuality}
                       </span>
+                      {item.relevance === "match" ?
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
+                          релевантно
+                        </span>
+                      : item.skipReason === "query_mismatch" ?
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900">
+                          не по запросу
+                        </span>
+                      : null}
                     </div>
                     <p className="mt-1 text-black/55">
                       {[

@@ -16,6 +16,8 @@ import {
   CATALOG_MARKETPLACE_SOURCES,
   type CatalogSourceName,
 } from "./catalogSourceOfferTypes";
+import { offerMatchesSearchQuery } from "./catalogOfferSearchRelevance";
+import { titleFromListingUrl } from "./catalogOfferSearchText";
 
 export type OfferSearchSourceFilter =
   | "all"
@@ -27,6 +29,10 @@ export type OfferSearchSourceFilter =
   | "other";
 
 export type OfferParseQuality = "link_only";
+
+export type OfferSearchRelevance = "match" | "skipped";
+
+export type OfferSearchSkipReason = "query_mismatch";
 
 export type OfferSearchResultItem = {
   url: string;
@@ -42,7 +48,23 @@ export type OfferSearchResultItem = {
   articleCodes: string[];
   parsed: boolean;
   parseQuality: OfferParseQuality;
+  relevance: OfferSearchRelevance;
+  skipReason?: OfferSearchSkipReason | null;
 };
+
+function brandFromListingUrl(url: string): string | null {
+  try {
+    const seg = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+    const withoutId = seg.replace(/_\d{8,}$/, "").replace(/\.html$/i, "");
+    const parts = withoutId.split(/[_-]+/).filter(Boolean);
+    if (parts.length >= 2 && /^[a-z]+$/i.test(parts[0]!)) {
+      return parts[0]!.charAt(0).toUpperCase() + parts[0]!.slice(1).toLowerCase();
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
 
 export type OfferSearchStats = {
   linksExtracted: number;
@@ -64,7 +86,10 @@ export type OfferSearchResponse = {
   message?: string;
   emptyReason?: string | null;
   results: OfferSearchResultItem[];
+  /** Filtered out as irrelevant to query (e.g. query_mismatch). */
+  skipped?: OfferSearchResultItem[];
   stats: OfferSearchStats;
+  sessionId?: number;
 };
 
 const MAX_RESULTS = 100;
@@ -92,21 +117,43 @@ function listingSourceFromUrl(url: string): OfferListingSourceId | null {
 }
 
 function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
+  const title =
+    sanitizeOfferText(hit.title) || titleFromListingUrl(hit.url) || "";
   return {
     url: hit.url,
-    title: sanitizeOfferText(hit.title),
+    title,
     price: hit.price,
     city: sanitizeOfferText(hit.city),
     companyName: "",
     sellerName: sanitizeOfferText(hit.sellerHint),
     sourceName: hit.sourceName,
     shortSnippet: sanitizeOfferText(hit.snippet || hit.title).slice(0, 280),
-    brand: null,
+    brand: brandFromListingUrl(hit.url),
     oemCodes: [],
     articleCodes: [],
     parsed: false,
     parseQuality: "link_only",
+    relevance: "match",
+    skipReason: null,
   };
+}
+
+function applyQueryRelevanceFilter(
+  query: string,
+  items: OfferSearchResultItem[],
+  hidden: Record<string, number>,
+): { matched: OfferSearchResultItem[]; skipped: OfferSearchResultItem[] } {
+  const matched: OfferSearchResultItem[] = [];
+  const skipped: OfferSearchResultItem[] = [];
+  for (const item of items) {
+    if (offerMatchesSearchQuery(query, item)) {
+      matched.push({ ...item, relevance: "match", skipReason: null });
+    } else {
+      skipped.push({ ...item, relevance: "skipped", skipReason: "query_mismatch" });
+      hidden.query_mismatch = (hidden.query_mismatch ?? 0) + 1;
+    }
+  }
+  return { matched, skipped };
 }
 
 function countBySource(items: OfferSearchResultItem[]): OfferSearchStats["sourceCounts"] {
@@ -189,7 +236,7 @@ function emptyStats(
  * Direct marketplace search — no Google/Bing/Yandex APIs.
  * 1. Build Avito/Drom/Youla/VK search URLs
  * 2. Fetch search pages, extract listing links
- * 3. Admin selects links → import via parse API (separate step)
+ * 3. Admin selects links → import via import-selections API
  */
 export async function searchOffersForAdmin(opts: {
   query: string;
@@ -318,12 +365,15 @@ export async function searchOffersForAdmin(opts: {
     logCatalogDiscover("offer_link_filter", { dropped: beforeQuality - items.length, hidden });
   }
 
+  const { matched, skipped } = applyQueryRelevanceFilter(query, items, hidden);
+  items = matched;
   stats.linksExtracted = items.length;
   stats.sourceCounts = countBySource(items);
 
   return {
     ok: true,
     results: items,
+    skipped,
     stats,
     emptyReason:
       items.length === 0 ?

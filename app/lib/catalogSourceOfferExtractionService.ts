@@ -1,7 +1,12 @@
 import { classifySourceUrl } from "./catalogSourceClassifier";
 import { extractSourceOfferFromHtml } from "./catalogSourceOfferExtract";
 import { findSourceOfferDuplicate } from "./catalogSourceOfferDedup";
-import { isRealOfferListingUrl, sanitizeOfferText, titleFromListingUrl } from "./catalogOfferSearchText";
+import {
+  isGenericOfferTitle,
+  isRealOfferListingUrl,
+  sanitizeOfferText,
+  titleFromListingUrl,
+} from "./catalogOfferSearchText";
 import { offerListingSourceFromUrl, sanitizeSourceOfferDraftInput } from "./catalogSourceOfferNormalize";
 import { fetchPublicHtml } from "./catalogHtmlFetch";
 import { MAX_URLS_PER_BATCH } from "./catalogImportLimits";
@@ -79,10 +84,16 @@ function mergeEnrichedInput(
   base: CatalogSourceOfferInput,
   enriched: CatalogSourceOfferInput,
 ): CatalogSourceOfferInput {
-  const generic = (t: string) => !t || t.length < 5;
+  const pickTitle = (): string => {
+    if (!isGenericOfferTitle(base.title)) return base.title;
+    if (enriched.title && !isGenericOfferTitle(enriched.title)) return enriched.title;
+    const fromUrl = titleFromListingUrl(base.sourceUrl);
+    if (fromUrl && !isGenericOfferTitle(fromUrl)) return fromUrl;
+    return base.title;
+  };
   return {
     ...base,
-    title: generic(base.title) && !generic(enriched.title) ? enriched.title : base.title,
+    title: pickTitle(),
     price: base.price ?? enriched.price,
     city: base.city || enriched.city,
     companyName: base.companyName || enriched.companyName,
@@ -163,8 +174,9 @@ export async function processSourceOfferSearchSelections(
     }
 
     const parseWarnings: string[] = [];
+    const searchTitle = sanitizeOfferText(sel.title) || titleFromListingUrl(rawUrl);
     let input = buildInputFromSearchSelection(
-      { ...sel, url: rawUrl, sourceName: sourceNameHint },
+      { ...sel, url: rawUrl, sourceName: sourceNameHint, title: searchTitle || sel.title },
       defaults,
       parseWarnings,
     );
@@ -182,18 +194,29 @@ export async function processSourceOfferSearchSelections(
           input = mergeEnrichedInput(input, enrichedDraft);
         }
       } else {
-        parseWarnings.push("page_parse_skipped");
+        parseWarnings.push("full_page_parse_failed");
       }
-    } catch (e) {
-      parseWarnings.push(e instanceof Error ? e.message : "page_fetch_failed");
+    } catch {
+      parseWarnings.push("full_page_parse_failed");
     }
 
-    if (parseWarnings.length > 0) {
-      input = {
-        ...input,
-        rawPayload: { ...input.rawPayload, parseWarnings },
-      };
+    if (isGenericOfferTitle(input.title)) {
+      const fallback =
+        (searchTitle && !isGenericOfferTitle(searchTitle) ? searchTitle : "") ||
+        titleFromListingUrl(rawUrl);
+      if (fallback) input = { ...input, title: fallback.slice(0, 200) };
     }
+
+    input = {
+      ...input,
+      rawPayload: {
+        ...input.rawPayload,
+        parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
+        parseWarning: parseWarnings.includes("full_page_parse_failed") ?
+          "full_page_parse_failed"
+        : undefined,
+      },
+    };
 
     const preCheck = validateSourceOfferDraftCandidate(input);
     if (!preCheck.ok) {

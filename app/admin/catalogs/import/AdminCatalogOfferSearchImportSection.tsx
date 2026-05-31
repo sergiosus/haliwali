@@ -13,6 +13,8 @@ import type {
   OfferSearchResultItem,
   OfferSearchStats,
 } from "../../../lib/catalogOfferAdminSearch";
+import type { SourceOfferImportError } from "../../../lib/catalogSourceOfferImportErrors";
+import { SOURCE_OFFER_IMPORT_ERROR_LABELS } from "../../../lib/catalogSourceOfferImportErrors";
 import {
   OfferImportGoToDraftsBanner,
   OFFER_SOURCE_OPTIONS,
@@ -94,6 +96,7 @@ export function AdminCatalogOfferSearchImportSection({
   const [message, setMessage] = useState<string | null>(null);
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const [createdCount, setCreatedCount] = useState(0);
+  const [importErrors, setImportErrors] = useState<SourceOfferImportError[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(20);
   const [searched, setSearched] = useState(false);
@@ -128,6 +131,7 @@ export function AdminCatalogOfferSearchImportSection({
     setSelected(new Set());
     setPage(1);
     setCreatedCount(0);
+    setImportErrors([]);
     try {
       const r = await fetch("/api/admin/catalogs/source-offers/search", {
         method: "POST",
@@ -182,46 +186,55 @@ export function AdminCatalogOfferSearchImportSection({
   }, [query, cityLabel, brand, oemArticle, sourceFilter, priceMin, priceMax]);
 
   const importSelected = useCallback(async () => {
-    const urls = [...selected];
-    if (urls.length === 0) return;
+    const urlSet = selected;
+    if (urlSet.size === 0) return;
+    const selections = results.filter((item) => urlSet.has(item.url));
     setBusy(true);
     setMessage(null);
     setCreatedCount(0);
+    setImportErrors([]);
     try {
-      const fd = new FormData();
-      fd.set("kind", "urls");
-      fd.set("categorySlug", DEFAULT_CATEGORY);
-      fd.set("city", cityLabel);
-      fd.set("urls", urls.join("\n"));
-
-      const r = await fetch("/api/admin/catalogs/import/parse", {
+      const r = await fetch("/api/admin/catalogs/source-offers/import-selections", {
         method: "POST",
         credentials: "include",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categorySlug: DEFAULT_CATEGORY,
+          city: cityLabel,
+          selections,
+        }),
       });
       const d = (await r.json()) as {
         ok?: boolean;
         error?: string;
-        errors?: { url: string; error: string }[];
+        errors?: SourceOfferImportError[];
         sourceOfferDrafts?: unknown[];
+        createdCount?: number;
       };
       if (!r.ok) {
         setMessage(d.error ?? "Ошибка импорта");
         return;
       }
-      const offerCount = d.sourceOfferDrafts?.length ?? 0;
+      const offerCount = d.sourceOfferDrafts?.length ?? d.createdCount ?? 0;
+      const errs = d.errors ?? [];
       setCreatedCount(offerCount);
-      const errN = d.errors?.length ?? 0;
-      setMessage(
-        `Создано кандидатов предложений: ${offerCount}${errN > 0 ? `, ошибок: ${errN}` : ""}`,
-      );
+      setImportErrors(errs);
+      if (errs.length > 0) {
+        setMessage(
+          offerCount > 0 ?
+            `Создано кандидатов: ${offerCount}. Не создано: ${errs.length} — см. список ниже.`
+          : `Не создано ни одного кандидата (${errs.length}). См. причины ниже.`,
+        );
+      } else {
+        setMessage(`Создано кандидатов предложений: ${offerCount}`);
+      }
       onChanged?.();
     } catch {
       setMessage("Ошибка сети");
     } finally {
       setBusy(false);
     }
-  }, [selected, cityLabel, onChanged]);
+  }, [selected, cityLabel, results, onChanged]);
 
   function toggleUrl(url: string) {
     setSelected((prev) => {
@@ -419,6 +432,29 @@ export function AdminCatalogOfferSearchImportSection({
 
       {message ?
         <p className="text-sm font-medium text-amber-900">{message}</p>
+      : null}
+
+      {importErrors.length > 0 ?
+        <div className="rounded-2xl border border-red-200 bg-red-50/80 p-4 text-sm">
+          <p className="font-semibold text-red-950">Не удалось создать кандидатов</p>
+          <ul className="mt-2 space-y-2">
+            {importErrors.map((err) => (
+              <li key={err.url} className="rounded-xl border border-red-100 bg-white/80 p-3">
+                <p className="break-all font-medium text-black">{err.url}</p>
+                <p className="mt-1 text-xs text-black/55">
+                  {err.sourceName ?
+                    catalogSourceNameLabel(err.sourceName)
+                  : "Источник не определён"}
+                  {" · "}
+                  <span className="font-mono text-[11px]">{err.error}</span>
+                </p>
+                <p className="mt-1 text-red-900">
+                  {err.message || SOURCE_OFFER_IMPORT_ERROR_LABELS[err.error]}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
       : null}
 
       {searched && totalFound > 0 ?

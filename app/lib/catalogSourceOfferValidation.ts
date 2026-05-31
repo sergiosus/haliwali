@@ -7,6 +7,7 @@ import {
   isGenericOfferTitle,
   isRealOfferListingUrl,
   sanitizeOfferText,
+  titleFromListingUrl,
 } from "./catalogOfferSearchText";
 import { offerListingSourceFromUrl } from "./catalogSourceName";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
@@ -157,6 +158,43 @@ export function validateSourceOfferInput(
 
 export function isValidPublishedSourceOffer(input: CatalogSourceOfferInput): boolean {
   return validateSourceOfferInput(input).ok;
+}
+
+/** Candidate from admin search — real listing URL + title; extra fields optional. */
+export function validateSourceOfferDraftCandidate(
+  input: CatalogSourceOfferInput,
+): SourceOfferValidationResult {
+  const sourceUrl = input.sourceUrl?.trim();
+  if (!sourceUrl) return { ok: false, reason: "missing_required_fields" };
+
+  const urlReason = classifyInvalidSourceUrl(sourceUrl);
+  if (urlReason) return { ok: false, reason: urlReason };
+
+  const listingSource = offerListingSourceFromUrl(sourceUrl);
+  if (!listingSource) {
+    return { ok: false, reason: "invalid_source_page" };
+  }
+  if (!isRealOfferListingUrl(sourceUrl, listingSource)) {
+    const again = classifyInvalidSourceUrl(sourceUrl) ?? "invalid_source_page";
+    return { ok: false, reason: again };
+  }
+
+  let title = sanitizeOfferText(input.title);
+  if (!title || title.length < 3) title = titleFromListingUrl(sourceUrl);
+  if (!title || title.length < 3 || hasBadEncoding(title)) {
+    return { ok: false, reason: "missing_required_fields" };
+  }
+  if (isGenericOfferTitle(title)) return { ok: false, reason: "generic_title" };
+
+  return {
+    ok: true,
+    input: {
+      ...input,
+      title,
+      sourceName: listingSource,
+      sourceUrl,
+    },
+  };
 }
 
 export function inputFromSourceOfferFields(fields: {

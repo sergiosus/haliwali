@@ -9,7 +9,10 @@ import {
   sanitizeOfferText,
 } from "./catalogOfferSearchText";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
-import { validateSourceOfferInput } from "./catalogSourceOfferValidation";
+import {
+  validateSourceOfferDraftCandidate,
+  validateSourceOfferInput,
+} from "./catalogSourceOfferValidation";
 
 export const SOURCE_OFFER_SNIPPET_MAX = 280;
 export const SOURCE_OFFER_TITLE_MAX = 200;
@@ -83,5 +86,48 @@ export function sanitizeSourceOfferInput(
   };
 
   const validated = validateSourceOfferInput(candidate);
+  return validated.ok ? validated.input : null;
+}
+
+/** Draft candidate from search selection — relaxed fields, still requires real listing URL. */
+export function sanitizeSourceOfferDraftInput(
+  input: CatalogSourceOfferInput,
+): CatalogSourceOfferInput | null {
+  const sourceUrl = input.sourceUrl?.trim();
+  if (!sourceUrl) return null;
+
+  const title = sanitizeOfferText(input.title).slice(0, SOURCE_OFFER_TITLE_MAX);
+  if (!title || hasBadEncoding(title)) return null;
+
+  let shortSnippet = sanitizeOfferText(input.shortSnippet).slice(0, SOURCE_OFFER_SNIPPET_MAX);
+  if (!shortSnippet || hasBadEncoding(shortSnippet)) {
+    shortSnippet = title.slice(0, SOURCE_OFFER_SNIPPET_MAX);
+  }
+  if (hasBadEncoding(shortSnippet)) return null;
+
+  const listingSource = offerListingSourceFromUrl(sourceUrl);
+  const sourceName: CatalogSourceName =
+    input.sourceName === "company_site" ? "company_site"
+    : listingSource ?? catalogSourceNameFromUrl(sourceUrl);
+
+  const candidate: CatalogSourceOfferInput = {
+    title,
+    price: input.price ? sanitizeOfferText(String(input.price)).replace(/\s+/g, " ").slice(0, 40) : null,
+    city: sanitizeOfferText(input.city).slice(0, 120),
+    region: sanitizeOfferText(input.region).slice(0, 120),
+    categorySlug: input.categorySlug,
+    companyName: sanitizeOfferText(input.companyName).slice(0, 120),
+    sellerName: sanitizeOfferText(input.sellerName || input.companyName).slice(0, 120),
+    brand: input.brand ? sanitizeOfferText(input.brand).slice(0, 80) : null,
+    oemCodes: trimCodes(input.oemCodes),
+    articleCodes: trimCodes(input.articleCodes),
+    sourceName,
+    sourceUrl,
+    shortSnippet,
+    confidenceScore: Math.min(1, Math.max(0, input.confidenceScore ?? 0.35)),
+    rawPayload: input.rawPayload,
+  };
+
+  const validated = validateSourceOfferDraftCandidate(candidate);
   return validated.ok ? validated.input : null;
 }

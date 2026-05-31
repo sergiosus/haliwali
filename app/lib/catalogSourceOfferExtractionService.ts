@@ -1,17 +1,234 @@
 import { classifySourceUrl } from "./catalogSourceClassifier";
 import { extractSourceOfferFromHtml } from "./catalogSourceOfferExtract";
 import { findSourceOfferDuplicate } from "./catalogSourceOfferDedup";
-import { isRealOfferListingUrl } from "./catalogOfferSearchText";
-import { offerListingSourceFromUrl } from "./catalogSourceOfferNormalize";
+import { isRealOfferListingUrl, sanitizeOfferText, titleFromListingUrl } from "./catalogOfferSearchText";
+import { offerListingSourceFromUrl, sanitizeSourceOfferDraftInput } from "./catalogSourceOfferNormalize";
 import { fetchPublicHtml } from "./catalogHtmlFetch";
 import { MAX_URLS_PER_BATCH } from "./catalogImportLimits";
 import type { ExtractionDefaults } from "./catalogExtractionTypes";
-import type { CatalogSourceOfferUpsertResult } from "./catalogSourceOfferTypes";
+import type { CatalogSourceName, CatalogSourceOfferInput, CatalogSourceOfferUpsertResult } from "./catalogSourceOfferTypes";
 import {
   loadSourceOfferDedupSeed,
   upsertSourceOfferDrafts,
 } from "./serverCatalogSourceOfferStore";
 import { logCatalogImport } from "./catalogCatalogLog";
+import {
+  sourceOfferImportError,
+  type SourceOfferImportError,
+} from "./catalogSourceOfferImportErrors";
+import {
+  classifyInvalidSourceUrl,
+  validateSourceOfferDraftCandidate,
+} from "./catalogSourceOfferValidation";
+import { isCatalogMarketplaceSourceName } from "./catalogSourceOfferTypes";
+
+export type SourceOfferSearchSelection = {
+  url: string;
+  title: string;
+  price: string | null;
+  city: string;
+  companyName?: string;
+  sellerName?: string;
+  sourceName: CatalogSourceName;
+  shortSnippet: string;
+  brand?: string | null;
+  oemCodes?: string[];
+  articleCodes?: string[];
+};
+
+function resolveSourceName(url: string, hint: CatalogSourceName): CatalogSourceName | "" {
+  const fromUrl = offerListingSourceFromUrl(url);
+  if (fromUrl) return fromUrl;
+  if (isCatalogMarketplaceSourceName(hint)) return hint;
+  return "";
+}
+
+function buildInputFromSearchSelection(
+  sel: SourceOfferSearchSelection,
+  defaults: ExtractionDefaults,
+  parseWarnings: string[],
+): CatalogSourceOfferInput {
+  const listingSource = offerListingSourceFromUrl(sel.url)!;
+  const title =
+    sanitizeOfferText(sel.title) || titleFromListingUrl(sel.url) || "Объявление";
+  const shortSnippet = sanitizeOfferText(sel.shortSnippet || sel.title).slice(0, 280) || title.slice(0, 280);
+  return {
+    title: title.slice(0, 200),
+    price: sel.price ? sanitizeOfferText(String(sel.price)).replace(/\D/g, "") || null : null,
+    city: sanitizeOfferText(sel.city || defaults.city),
+    region: defaults.city && defaults.city !== sel.city ? defaults.city : "",
+    categorySlug: defaults.categorySlug,
+    companyName: sanitizeOfferText(sel.companyName ?? ""),
+    sellerName: sanitizeOfferText(sel.sellerName ?? sel.companyName ?? ""),
+    brand: sel.brand ? sanitizeOfferText(sel.brand) : null,
+    oemCodes: sel.oemCodes ?? [],
+    articleCodes: sel.articleCodes ?? [],
+    sourceName: listingSource,
+    sourceUrl: sel.url.trim(),
+    shortSnippet,
+    confidenceScore: 0.35,
+    rawPayload: {
+      extractor: "search_selection",
+      parseQuality: "link_only",
+      parseWarnings,
+    },
+  };
+}
+
+function mergeEnrichedInput(
+  base: CatalogSourceOfferInput,
+  enriched: CatalogSourceOfferInput,
+): CatalogSourceOfferInput {
+  const generic = (t: string) => !t || t.length < 5;
+  return {
+    ...base,
+    title: generic(base.title) && !generic(enriched.title) ? enriched.title : base.title,
+    price: base.price ?? enriched.price,
+    city: base.city || enriched.city,
+    companyName: base.companyName || enriched.companyName,
+    sellerName: base.sellerName || enriched.sellerName,
+    brand: base.brand ?? enriched.brand,
+    oemCodes: base.oemCodes.length ? base.oemCodes : enriched.oemCodes,
+    articleCodes: base.articleCodes.length ? base.articleCodes : enriched.articleCodes,
+    shortSnippet:
+      base.shortSnippet.length > 40 ? base.shortSnippet : enriched.shortSnippet || base.shortSnippet,
+    confidenceScore: Math.max(base.confidenceScore ?? 0.35, enriched.confidenceScore ?? 0.5),
+    rawPayload: {
+      ...base.rawPayload,
+      enrichedFromPage: true,
+      parseWarnings: base.rawPayload?.parseWarnings,
+    },
+  };
+}
+
+function duplicateImportError(
+  url: string,
+  sourceName: CatalogSourceName | "",
+  dup: NonNullable<ReturnType<typeof findSourceOfferDuplicate>>,
+  seed: Awaited<ReturnType<typeof loadSourceOfferDedupSeed>>,
+): SourceOfferImportError {
+  if (dup.duplicateOfOfferId) {
+    const published = seed.published.find((p) => p.id === dup.duplicateOfOfferId);
+    if (published) {
+      return sourceOfferImportError(url, sourceName, "DUPLICATE_PUBLISHED");
+    }
+  }
+  if (dup.existingDraftId) {
+    return sourceOfferImportError(url, sourceName, "DUPLICATE_DRAFT");
+  }
+  if (dup.duplicateOfOfferId) {
+    return sourceOfferImportError(url, sourceName, "DUPLICATE_PUBLISHED");
+  }
+  return sourceOfferImportError(url, sourceName, "DUPLICATE_DRAFT", dup.hint);
+}
+
+/** Create drafts from admin marketplace search selections (SERP metadata + optional page enrich). */
+export async function processSourceOfferSearchSelections(
+  selections: SourceOfferSearchSelection[],
+  defaults: ExtractionDefaults,
+): Promise<{
+  drafts: CatalogSourceOfferUpsertResult["drafts"];
+  errors: SourceOfferImportError[];
+  upsert: CatalogSourceOfferUpsertResult;
+}> {
+  const limited = selections.slice(0, MAX_URLS_PER_BATCH);
+  const seed = await loadSourceOfferDedupSeed();
+  const errors: SourceOfferImportError[] = [];
+  const items: Parameters<typeof upsertSourceOfferDrafts>[0] = [];
+
+  logCatalogImport("source_offer_search_selections", { count: limited.length });
+
+  for (const sel of limited) {
+    const rawUrl = sel.url?.trim() ?? "";
+    const sourceNameHint = resolveSourceName(rawUrl, sel.sourceName);
+
+    if (!rawUrl) {
+      errors.push(sourceOfferImportError(rawUrl, "", "MISSING_URL"));
+      continue;
+    }
+    if (!/^https?:\/\//i.test(rawUrl)) {
+      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, "INVALID_URL"));
+      continue;
+    }
+
+    if (!sourceNameHint) {
+      errors.push(sourceOfferImportError(rawUrl, "", "UNSUPPORTED_SOURCE"));
+      continue;
+    }
+
+    const urlReason = classifyInvalidSourceUrl(rawUrl);
+    if (urlReason) {
+      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, urlReason));
+      continue;
+    }
+
+    const parseWarnings: string[] = [];
+    let input = buildInputFromSearchSelection(
+      { ...sel, url: rawUrl, sourceName: sourceNameHint },
+      defaults,
+      parseWarnings,
+    );
+
+    try {
+      const fetched = await fetchPublicHtml(rawUrl);
+      const enriched = extractSourceOfferFromHtml(fetched, defaults);
+      if (enriched) {
+        const enrichedDraft = sanitizeSourceOfferDraftInput({
+          ...enriched,
+          sourceName: sourceNameHint,
+          sourceUrl: rawUrl,
+        });
+        if (enrichedDraft) {
+          input = mergeEnrichedInput(input, enrichedDraft);
+        }
+      } else {
+        parseWarnings.push("page_parse_skipped");
+      }
+    } catch (e) {
+      parseWarnings.push(e instanceof Error ? e.message : "page_fetch_failed");
+    }
+
+    if (parseWarnings.length > 0) {
+      input = {
+        ...input,
+        rawPayload: { ...input.rawPayload, parseWarnings },
+      };
+    }
+
+    const preCheck = validateSourceOfferDraftCandidate(input);
+    if (!preCheck.ok) {
+      const code =
+        preCheck.reason === "missing_required_fields" ? "MISSING_TITLE" : preCheck.reason;
+      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, code));
+      continue;
+    }
+    input = preCheck.input;
+
+    const dup = findSourceOfferDuplicate(seed, input, input.rawPayload);
+    if (dup) {
+      errors.push(duplicateImportError(rawUrl, sourceNameHint, dup, seed));
+      continue;
+    }
+
+    const sanitized = sanitizeSourceOfferDraftInput(input);
+    if (!sanitized) {
+      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, "SANITIZE_FAILED"));
+      continue;
+    }
+
+    if (!sanitized.categorySlug) sanitized.categorySlug = defaults.categorySlug;
+    if (!sanitized.city && defaults.city) sanitized.city = defaults.city;
+
+    items.push({
+      input: sanitized,
+      duplicateHint: null,
+      duplicateOfOfferId: null,
+    });
+  }
+
+  const upsert = await upsertSourceOfferDrafts(items);
+  return { drafts: upsert.drafts, errors, upsert };
+}
 
 function isSourceOfferUrl(rawUrl: string): boolean {
   try {

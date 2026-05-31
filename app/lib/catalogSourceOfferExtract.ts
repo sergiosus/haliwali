@@ -9,6 +9,7 @@ import {
   sanitizeSourceOfferInput,
   SOURCE_OFFER_SNIPPET_MAX,
 } from "./catalogSourceOfferNormalize";
+import { classifyInvalidSourceUrl } from "./catalogSourceOfferValidation";
 
 /** Parse only `<head>` + early meta — never full page body text. */
 const HEAD_SCAN_BYTES = 120_000;
@@ -88,9 +89,8 @@ function sellerFromTitle(title: string): string {
 }
 
 function isCatalogOrSearchPage(head: string, sourceUrl: string): boolean {
+  if (classifyInvalidSourceUrl(sourceUrl)) return true;
   const lower = sourceUrl.toLowerCase();
-  if (/\/catalog(\/|$|\?)/i.test(lower) && !/\/sale\//i.test(lower)) return true;
-  if (/\/search(\?|$|\/)/i.test(lower) && !/\d{5,}/.test(lower)) return true;
   const ogType = metaContent(head, "og:type");
   if (ogType && /website|object/i.test(ogType) && !/product/i.test(ogType)) {
     if (!/\/sale\/|_\d{5,}|\/product\//i.test(lower)) return true;

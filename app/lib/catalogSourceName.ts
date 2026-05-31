@@ -1,7 +1,17 @@
 import {
   CATALOG_MARKETPLACE_SOURCES,
   type CatalogSourceName,
+  type OfferListingSourceId,
 } from "./catalogSourceOfferTypes";
+
+export function offerListingSourceFromUrl(url: string): OfferListingSourceId | null {
+  const lower = url.toLowerCase();
+  if (lower.includes("avito.ru")) return "avito";
+  if (lower.includes("youla.ru")) return "youla";
+  if (lower.includes("drom.ru") || lower.includes("auto.ru")) return "drom";
+  if (lower.includes("vk.com") || lower.includes("vk.ru")) return "vk";
+  return null;
+}
 
 const AVITO = /(^|\.)avito\.ru$/i;
 const DROM = /(^|\.)(drom\.ru|auto\.ru)$/i;

@@ -2,26 +2,19 @@
  * Allowed offer fields only — used before DB write and admin display.
  */
 
-import { catalogSourceNameFromUrl } from "./catalogSourceName";
+import { catalogSourceNameFromUrl, offerListingSourceFromUrl } from "./catalogSourceName";
 import {
   hasBadEncoding,
   isRealOfferListingUrl,
   sanitizeOfferText,
-  type OfferListingSourceId,
 } from "./catalogOfferSearchText";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
+import { validateSourceOfferInput } from "./catalogSourceOfferValidation";
 
 export const SOURCE_OFFER_SNIPPET_MAX = 280;
 export const SOURCE_OFFER_TITLE_MAX = 200;
 
-export function offerListingSourceFromUrl(url: string): OfferListingSourceId | null {
-  const lower = url.toLowerCase();
-  if (lower.includes("avito.ru")) return "avito";
-  if (lower.includes("youla.ru")) return "youla";
-  if (lower.includes("drom.ru") || lower.includes("auto.ru")) return "drom";
-  if (lower.includes("vk.com") || lower.includes("vk.ru")) return "vk";
-  return null;
-}
+export { offerListingSourceFromUrl } from "./catalogSourceName";
 
 function trimCodes(codes: string[], limit = 8): string[] {
   const out: string[] = [];
@@ -71,7 +64,7 @@ export function sanitizeSourceOfferInput(
     input.sourceName === "company_site" ? "company_site"
     : listingSource ?? catalogSourceNameFromUrl(sourceUrl);
 
-  return {
+  const candidate: CatalogSourceOfferInput = {
     title,
     price: input.price ? sanitizeOfferText(String(input.price)).replace(/\s+/g, " ").slice(0, 40) : null,
     city: sanitizeOfferText(input.city).slice(0, 120),
@@ -86,6 +79,9 @@ export function sanitizeSourceOfferInput(
     sourceUrl,
     shortSnippet,
     confidenceScore: Math.min(1, Math.max(0, input.confidenceScore ?? 0.45)),
-    rawPayload: { extractor: "source_offer", host },
+    rawPayload: input.rawPayload ?? { extractor: "source_offer", host },
   };
+
+  const validated = validateSourceOfferInput(candidate);
+  return validated.ok ? validated.input : null;
 }

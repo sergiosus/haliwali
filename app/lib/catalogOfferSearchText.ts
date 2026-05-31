@@ -121,13 +121,28 @@ export function hasBadEncoding(text: string): boolean {
   return false;
 }
 
-const GENERIC_TITLES = /^(объявление|товар|продажа|купить|vk объявление|item|listing)$/i;
+const MARKETPLACE_GENERIC_TITLE_RES = [
+  /^авито\s*[—–\-]\s*объявлен/i,
+  /объявлени[яе]\s+на\s+сайте\s+авито/i,
+  /^drom\s*[—–\-]\s*каталог/i,
+  /^дром\s*[—–\-]\s*каталог/i,
+  /объявлени[яе]\s+на\s+сайте/i,
+  /продажа\s+автомобилей\s+в\s+россии/i,
+  /подержанные\s+авто.*(?:drom|дром)/i,
+  /купить\s+автомобил/i,
+  /^юла\s*[—–\-]/i,
+  /^youla\s*[—–\-]/i,
+  /^vk\s+маркет\s*[—–\-]/i,
+];
 
 export function isGenericOfferTitle(title: string): boolean {
-  const t = title.trim();
+  const t = sanitizeOfferText(title);
   if (t.length < 4) return true;
-  if (GENERIC_TITLES.test(t)) return true;
+  if (/^(объявление|товар|продажа|купить|vk объявление|item|listing)$/i.test(t)) return true;
   if (/^[\d_\-\s.]+$/.test(t)) return true;
+  for (const re of MARKETPLACE_GENERIC_TITLE_RES) {
+    if (re.test(t)) return true;
+  }
   return false;
 }
 
@@ -141,6 +156,7 @@ export function isRealOfferListingUrl(url: string, source: OfferListingSourceId)
     if (source === "avito") {
       if (!/avito\.ru/i.test(u.hostname)) return false;
       if (/\/(add|search|catalog|brands|profile|user|shops|favorites|comparison)\b/i.test(path)) return false;
+      if (/\/all\/?$/i.test(path)) return false;
       const pathOnly = path.split("?")[0] ?? path;
       return /_\d{8,}$/.test(pathOnly) || /\/\d{8,}$/.test(pathOnly);
     }
@@ -159,6 +175,10 @@ export function isRealOfferListingUrl(url: string, source: OfferListingSourceId)
           /\/cars\/used\//i.test(path) ||
           /\/\d{7,}\/?(?:\?|$)/.test(path)
         );
+      }
+      if (/auto\.drom\.ru/i.test(lower)) {
+        if (/\/all\/?$/i.test(path)) return false;
+        return /\d{6,}\.html$/i.test(path);
       }
       if (/\.drom\.ru/i.test(lower)) return false;
       return false;

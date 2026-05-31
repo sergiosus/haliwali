@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
 import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 import type { CatalogSourceOfferDraft, CatalogSourceOfferDraftStatus } from "../../../lib/catalogSourceOfferTypes";
+import { sourceOfferRejectLabel } from "../../../lib/catalogSourceOfferValidation";
 import { AdminCatalogSourceOfferMigrationWarning } from "../AdminCatalogSourceOfferMigrationWarning";
 
 const STATUS_LABEL: Record<CatalogSourceOfferDraftStatus, string> = {
@@ -102,12 +103,15 @@ export function AdminCatalogSourceOfferDraftsPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ids }),
       });
-      const data = (await r.json()) as { ok?: boolean; error?: string };
+      const data = (await r.json()) as { ok?: boolean; error?: string; message?: string };
       if (!data.ok) {
         setMessage(data.error ?? "Ошибка");
         return;
       }
-      setMessage(action === "publish" ? "Опубликовано в «Предложения»" : "Готово");
+      setMessage(
+        data.message ??
+          (action === "publish" ? "Опубликовано в «Предложения»" : "Готово"),
+      );
       await load(tab);
       onChanged?.();
     } catch {
@@ -261,7 +265,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
                 </a>
                 {d.duplicateHint ?
                   <p className="mt-1 text-xs text-blue-800">
-                    {d.duplicateHint}
+                    {sourceOfferRejectLabel(d.duplicateHint) ?? d.duplicateHint}
                     {d.duplicateOfOfferId ?
                       <a
                         href={`/catalogs/predlozheniya#offer-${d.duplicateOfOfferId}`}

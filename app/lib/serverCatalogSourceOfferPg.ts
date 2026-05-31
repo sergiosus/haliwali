@@ -12,6 +12,14 @@ import {
 import type { CatalogSourceOfferListQuery } from "./catalogSourceOfferQuery";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
 import { sanitizeSourceOfferInput } from "./catalogSourceOfferNormalize";
+import {
+  formatSourceOfferRejectHint,
+  inputFromSourceOfferFields,
+  isValidPublishedSourceOffer,
+  validateSourceOfferInput,
+  type SourceOfferRejectReason,
+} from "./catalogSourceOfferValidation";
+import type { CatalogSourceName } from "./catalogSourceOfferTypes";
 
 type DraftRow = {
   id: number;
@@ -85,6 +93,65 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   };
+}
+
+function draftRowToInput(r: DraftRow): ReturnType<typeof inputFromSourceOfferFields> {
+  return inputFromSourceOfferFields({
+    title: r.title,
+    price: r.price,
+    city: r.city,
+    region: r.region,
+    categorySlug: r.category_slug,
+    companyName: r.company_name,
+    sellerName: r.seller_name,
+    brand: r.brand,
+    oemCodes: parseCodes(r.oem_codes),
+    articleCodes: parseCodes(r.article_codes),
+    sourceName: r.source_name as CatalogSourceName,
+    sourceUrl: r.source_url,
+    shortSnippet: r.short_snippet,
+    confidenceScore: r.confidence_score,
+    rawPayload: r.raw_payload ?? {},
+  });
+}
+
+function offerRowToInput(r: OfferRow): ReturnType<typeof inputFromSourceOfferFields> {
+  return inputFromSourceOfferFields({
+    title: r.title,
+    price: r.price,
+    city: r.city,
+    region: r.region,
+    categorySlug: r.category_slug,
+    companyName: r.company_name,
+    sellerName: r.seller_name,
+    brand: r.brand,
+    oemCodes: parseCodes(r.oem_codes),
+    articleCodes: parseCodes(r.article_codes),
+    sourceName: r.source_name as CatalogSourceName,
+    sourceUrl: r.source_url,
+    shortSnippet: r.short_snippet,
+    confidenceScore: r.confidence_score,
+  });
+}
+
+async function pgRejectDraftWithReason(
+  pool: ReturnType<typeof getPool>,
+  id: number,
+  reason: SourceOfferRejectReason,
+): Promise<CatalogSourceOfferDraft | null> {
+  const { rows } = await pool.query<DraftRow>(
+    `
+    UPDATE catalog_source_offer_import_drafts SET
+      status = 'rejected',
+      duplicate_hint = $2,
+      published_offer_id = NULL,
+      updated_at = NOW()
+    WHERE id = $1
+    RETURNING ${DRAFT_COLS}
+    `,
+    [id, formatSourceOfferRejectHint(reason)],
+  );
+  return rows[0] ? rowToDraft(rows[0]) : null;
 }
 
 function rowToOffer(r: OfferRow): CatalogSourceOffer {
@@ -280,6 +347,13 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
     const d = draftRows[0];
     if (!d || normalizeSourceOfferDraftStatus(d.status) !== "approved") continue;
 
+    const publishCheck = validateSourceOfferInput(draftRowToInput(d));
+    if (!publishCheck.ok) {
+      const rejected = await pgRejectDraftWithReason(pool, id, publishCheck.reason);
+      if (rejected) out.push(rejected);
+      continue;
+    }
+
     const { rows: existing } = await pool.query<{ id: number }>(
       `SELECT id FROM catalog_source_offers WHERE lower(trim(source_url)) = lower(trim($1)) LIMIT 1`,
       [d.source_url],
@@ -405,7 +479,26 @@ export async function pgListPublishedSourceOffers(
     `,
     params,
   );
-  return rows.map(rowToOffer);
+  return rows.map(rowToOffer).filter((o) =>
+    isValidPublishedSourceOffer(
+      inputFromSourceOfferFields({
+        title: o.title,
+        price: o.price,
+        city: o.city,
+        region: o.region,
+        categorySlug: o.categorySlug,
+        companyName: o.companyName,
+        sellerName: o.sellerName,
+        brand: o.brand,
+        oemCodes: o.oemCodes,
+        articleCodes: o.articleCodes,
+        sourceName: o.sourceName,
+        sourceUrl: o.sourceUrl,
+        shortSnippet: o.shortSnippet,
+        confidenceScore: o.confidenceScore,
+      }),
+    ),
+  );
 }
 
 export async function pgLoadSourceOfferDedupSeed(): Promise<{

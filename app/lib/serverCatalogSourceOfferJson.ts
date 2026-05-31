@@ -14,6 +14,12 @@ import {
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
 import { sanitizeSourceOfferInput } from "./catalogSourceOfferNormalize";
 import {
+  formatSourceOfferRejectHint,
+  inputFromSourceOfferFields,
+  isValidPublishedSourceOffer,
+  validateSourceOfferInput,
+} from "./catalogSourceOfferValidation";
+import {
   filterSourceOffersInMemory,
   type CatalogSourceOfferListQuery,
 } from "./catalogSourceOfferQuery";
@@ -205,6 +211,56 @@ export async function jsonSetSourceOfferDraftStatuses(
   return n;
 }
 
+function jsonOfferFieldsToInput(
+  d: CatalogSourceOfferInput & { rawPayload?: Record<string, unknown> },
+): CatalogSourceOfferInput {
+  return inputFromSourceOfferFields({
+    title: d.title,
+    price: d.price,
+    city: d.city,
+    region: d.region,
+    categorySlug: d.categorySlug,
+    companyName: d.companyName,
+    sellerName: d.sellerName,
+    brand: d.brand,
+    oemCodes: d.oemCodes,
+    articleCodes: d.articleCodes,
+    sourceName: d.sourceName,
+    sourceUrl: d.sourceUrl,
+    shortSnippet: d.shortSnippet,
+    confidenceScore: d.confidenceScore,
+    rawPayload: d.rawPayload,
+  });
+}
+
+export async function jsonCleanupInvalidPublishedSourceOffers(): Promise<number> {
+  const store = await readStore();
+  const now = new Date().toISOString();
+  let removed = 0;
+  const keep: JsonOffer[] = [];
+  for (const o of store.offers) {
+    const check = validateSourceOfferInput(jsonOfferFieldsToInput(o));
+    if (!check.ok) {
+      removed += 1;
+      for (const d of store.drafts) {
+        if (d.publishedOfferId === o.id) {
+          d.status = "rejected";
+          d.duplicateHint = formatSourceOfferRejectHint(check.reason);
+          d.publishedOfferId = null;
+          d.updatedAt = now;
+        }
+      }
+      continue;
+    }
+    keep.push(o);
+  }
+  if (removed > 0) {
+    store.offers = keep;
+    await writeStore(store);
+  }
+  return removed;
+}
+
 export async function jsonPublishSourceOfferDrafts(ids: number[]): Promise<CatalogSourceOfferDraft[]> {
   const store = await readStore();
   const now = new Date().toISOString();
@@ -213,6 +269,16 @@ export async function jsonPublishSourceOfferDrafts(ids: number[]): Promise<Catal
   for (const id of ids) {
     const d = store.drafts.find((x) => x.id === id);
     if (!d || normalizeSourceOfferDraftStatus(d.status) !== "approved") continue;
+
+    const publishCheck = validateSourceOfferInput(jsonOfferFieldsToInput(d));
+    if (!publishCheck.ok) {
+      d.status = "rejected";
+      d.duplicateHint = formatSourceOfferRejectHint(publishCheck.reason);
+      d.publishedOfferId = null;
+      d.updatedAt = now;
+      out.push(toDraft(d));
+      continue;
+    }
 
     const existingOffer = store.offers.find(
       (o) => o.sourceUrl.trim().toLowerCase() === d.sourceUrl.trim().toLowerCase(),
@@ -269,8 +335,31 @@ export async function jsonPublishSourceOfferDrafts(ids: number[]): Promise<Catal
 export async function jsonListPublishedSourceOffers(
   opts?: CatalogSourceOfferListQuery,
 ): Promise<CatalogSourceOffer[]> {
+  await jsonCleanupInvalidPublishedSourceOffers();
   const store = await readStore();
-  return filterSourceOffersInMemory(store.offers.map(toOffer), opts ?? {});
+  const offers = store.offers
+    .map(toOffer)
+    .filter((o) =>
+      isValidPublishedSourceOffer(
+        inputFromSourceOfferFields({
+          title: o.title,
+          price: o.price,
+          city: o.city,
+          region: o.region,
+          categorySlug: o.categorySlug,
+          companyName: o.companyName,
+          sellerName: o.sellerName,
+          brand: o.brand,
+          oemCodes: o.oemCodes,
+          articleCodes: o.articleCodes,
+          sourceName: o.sourceName,
+          sourceUrl: o.sourceUrl,
+          shortSnippet: o.shortSnippet,
+          confidenceScore: o.confidenceScore,
+        }),
+      ),
+    );
+  return filterSourceOffersInMemory(offers, opts ?? {});
 }
 
 export async function jsonLoadSourceOfferDedupSeed(): Promise<{

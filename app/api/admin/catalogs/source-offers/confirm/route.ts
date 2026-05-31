@@ -34,7 +34,17 @@ export async function POST(req: Request) {
 
   if (action === "publish") {
     const published = await publishSourceOfferDrafts(ids);
-    return NextResponse.json({ ok: true, published });
+    const rejected = published.filter((d) => d.status === "rejected");
+    const ok = published.filter((d) => d.status === "published");
+    return NextResponse.json({
+      ok: true,
+      published: ok,
+      rejected,
+      message:
+        rejected.length > 0 ?
+          `${ok.length} опубликовано, ${rejected.length} отклонено (не объявление)`
+        : undefined,
+    });
   }
 
   const statusMap: Record<Exclude<ConfirmAction, "publish">, CatalogSourceOfferDraftStatus> = {

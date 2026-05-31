@@ -36,6 +36,9 @@ export function parseCatalogSourceName(
   return s && isCatalogSourceName(s) ? s : undefined;
 }
 
+export type { SourceOfferRejectReason } from "./catalogSourceOfferValidation";
+export { SOURCE_OFFER_REJECT_LABELS, sourceOfferRejectLabel } from "./catalogSourceOfferValidation";
+
 /** Canonical draft statuses (maps UI «new» → draft). */
 export type CatalogSourceOfferDraftStatus =
   | "draft"

@@ -1,4 +1,5 @@
 import { CATALOG_SOURCE_NAME_LABEL } from "./catalogSourceName";
+import { isValidPublishedSourceOffer, inputFromSourceOfferFields } from "./catalogSourceOfferValidation";
 import {
   parseCatalogSourceName,
   type CatalogSourceName,
@@ -51,7 +52,26 @@ export function filterSourceOffersInMemory(
   opts: CatalogSourceOfferListQuery,
 ): CatalogSourceOffer[] {
   const limit = opts.limit ?? 48;
-  let list = offers;
+  let list = offers.filter((o) =>
+    isValidPublishedSourceOffer(
+      inputFromSourceOfferFields({
+        title: o.title,
+        price: o.price,
+        city: o.city,
+        region: o.region,
+        categorySlug: o.categorySlug,
+        companyName: o.companyName,
+        sellerName: o.sellerName,
+        brand: o.brand,
+        oemCodes: o.oemCodes,
+        articleCodes: o.articleCodes,
+        sourceName: o.sourceName,
+        sourceUrl: o.sourceUrl,
+        shortSnippet: o.shortSnippet,
+        confidenceScore: o.confidenceScore,
+      }),
+    ),
+  );
 
   if (opts.categorySlug) {
     const cat = opts.categorySlug.trim().toLowerCase();

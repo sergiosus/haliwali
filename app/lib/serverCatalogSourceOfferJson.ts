@@ -347,3 +347,23 @@ export async function jsonDeletePublishedSourceOffers(ids: number[]): Promise<nu
   await writeStore(store);
   return before - store.offers.length;
 }
+
+const CANDIDATE_DRAFT_STATUSES = new Set(["draft", "new", "saved", "approved"]);
+
+export async function jsonCountSourceOfferDraftQueues(): Promise<{
+  candidates: number;
+  rejected: number;
+  duplicate: number;
+}> {
+  const store = await readStore();
+  let candidates = 0;
+  let rejected = 0;
+  let duplicate = 0;
+  for (const d of store.drafts) {
+    const s = normalizeSourceOfferDraftStatus(d.status);
+    if (CANDIDATE_DRAFT_STATUSES.has(s)) candidates += 1;
+    else if (s === "rejected") rejected += 1;
+    else if (s === "duplicate") duplicate += 1;
+  }
+  return { candidates, rejected, duplicate };
+}

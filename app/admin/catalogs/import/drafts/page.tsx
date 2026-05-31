@@ -8,7 +8,7 @@ export default async function AdminCatalogImportDraftsPage(props: {
 }) {
   const { panel } = await props.searchParams;
   if (panel === "source-offers") {
-    redirect("/admin?section=catalog&catalogTab=offer-import");
+    redirect("/admin?section=catalog&catalogTab=offers&offerSub=import");
   }
   redirect("/admin?section=catalog&catalogTab=import");
 }

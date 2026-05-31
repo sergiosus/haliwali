@@ -319,6 +319,6 @@ export async function POST(req: Request) {
     truncated,
     importUrl: "/admin/catalogs/import/drafts",
     sourceOfferDrafts,
-    sourceOfferImportUrl: "/admin?section=catalog&catalogTab=offer-import",
+    sourceOfferImportUrl: "/admin?section=catalog&catalogTab=offers&offerSub=candidates",
   });
 }

@@ -75,29 +75,61 @@ export async function loadSourceOfferDedupSeed() {
 export type CatalogSourceOfferAdminStatus = {
   tablesReady: boolean;
   publishedCount: number;
+  /** @deprecated use candidatesCount */
   importCount: number;
+  candidatesCount: number;
+  rejectedCount: number;
+  duplicateCount: number;
 };
 
 export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdminStatus> {
   if (!usesPostgres()) {
-    const [publishedCount, importCount] = await Promise.all([
+    const [publishedCount, queues] = await Promise.all([
       json.jsonCountPublishedSourceOffers(),
-      json.jsonCountActionableSourceOfferDrafts(),
+      json.jsonCountSourceOfferDraftQueues(),
     ]);
-    return { tablesReady: true, publishedCount, importCount };
+    return {
+      tablesReady: true,
+      publishedCount,
+      importCount: queues.candidates,
+      candidatesCount: queues.candidates,
+      rejectedCount: queues.rejected,
+      duplicateCount: queues.duplicate,
+    };
   }
   try {
     const tablesReady = await pg.pgCheckSourceOffersTablesReady();
     if (!tablesReady) {
-      return { tablesReady: false, publishedCount: 0, importCount: 0 };
+      return {
+        tablesReady: false,
+        publishedCount: 0,
+        importCount: 0,
+        candidatesCount: 0,
+        rejectedCount: 0,
+        duplicateCount: 0,
+      };
     }
-    const [publishedCount, importCount] = await Promise.all([
+    const [publishedCount, queues] = await Promise.all([
       pg.pgCountPublishedSourceOffers(),
-      pg.pgCountActionableSourceOfferDrafts(),
+      pg.pgCountSourceOfferDraftQueues(),
     ]);
-    return { tablesReady: true, publishedCount, importCount };
+    return {
+      tablesReady: true,
+      publishedCount,
+      importCount: queues.candidates,
+      candidatesCount: queues.candidates,
+      rejectedCount: queues.rejected,
+      duplicateCount: queues.duplicate,
+    };
   } catch {
-    return { tablesReady: false, publishedCount: 0, importCount: 0 };
+    return {
+      tablesReady: false,
+      publishedCount: 0,
+      importCount: 0,
+      candidatesCount: 0,
+      rejectedCount: 0,
+      duplicateCount: 0,
+    };
   }
 }
 

@@ -15,14 +15,22 @@ const STATUS_LABEL: Record<CatalogSourceOfferDraftStatus, string> = {
   duplicate: "Дубликаты",
 };
 
-const TABS: CatalogSourceOfferDraftStatus[] = [
-  "draft",
-  "saved",
-  "approved",
-  "published",
-  "duplicate",
-  "rejected",
-];
+const CANDIDATE_TABS: CatalogSourceOfferDraftStatus[] = ["draft", "saved", "approved"];
+
+const QUEUE_HEADING: Record<"candidates" | "rejected" | "duplicate", { title: string; hint: string }> = {
+  candidates: {
+    title: "Кандидаты предложений",
+    hint: "Очередь модерации: новые, сохранённые и одобренные перед публикацией.",
+  },
+  rejected: {
+    title: "Отклонённые",
+    hint: "Предложения, отклонённые при модерации.",
+  },
+  duplicate: {
+    title: "Дубликаты",
+    hint: "Найденные дубликаты уже существующих предложений.",
+  },
+};
 
 function categoryTitle(slug: string): string {
   return CATALOG_CATEGORY_SEED.find((c) => c.slug === slug)?.title ?? slug;
@@ -32,12 +40,18 @@ export function AdminCatalogSourceOfferDraftsPanel({
   onChanged,
   embedded = false,
   refreshSignal,
+  queueMode = "candidates",
 }: {
   onChanged?: () => void;
   embedded?: boolean;
   refreshSignal?: number;
+  queueMode?: "candidates" | "rejected" | "duplicate";
 }) {
-  const [tab, setTab] = useState<CatalogSourceOfferDraftStatus>("draft");
+  const initialTab =
+    queueMode === "rejected" ? "rejected"
+    : queueMode === "duplicate" ? "duplicate"
+    : "draft";
+  const [tab, setTab] = useState<CatalogSourceOfferDraftStatus>(initialTab);
   const [drafts, setDrafts] = useState<CatalogSourceOfferDraft[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -66,9 +80,14 @@ export function AdminCatalogSourceOfferDraftsPanel({
   }, [loadStatus]);
 
   useEffect(() => {
+    if (queueMode === "rejected") setTab("rejected");
+    else if (queueMode === "duplicate") setTab("duplicate");
+  }, [queueMode]);
+
+  useEffect(() => {
     if (!tablesReady) return;
     void load(tab);
-  }, [tab, load, tablesReady, refreshSignal]);
+  }, [tab, load, tablesReady, refreshSignal, queueMode]);
 
   const filtered = useMemo(() => drafts, [drafts]);
 
@@ -108,72 +127,74 @@ export function AdminCatalogSourceOfferDraftsPanel({
 
   return (
     <div className="space-y-4">
-      {!embedded ?
+      {embedded ?
         <div>
-          <h2 className="text-lg font-semibold">Импорт предложений</h2>
-          <p className="mt-1 text-sm text-black/55">
-            Объявления с Avito, Drom и других площадок. Не смешиваются с компаниями и объявлениями пользователей.
-          </p>
+          <h3 className="text-base font-semibold">{QUEUE_HEADING[queueMode].title}</h3>
+          <p className="mt-1 text-sm text-black/55">{QUEUE_HEADING[queueMode].hint}</p>
         </div>
       : (
         <div>
-          <h3 className="text-base font-semibold">Кандидаты предложений</h3>
+          <h2 className="text-lg font-semibold">Кандидаты предложений</h2>
           <p className="mt-1 text-sm text-black/55">
-            Проверьте поля объявления: название, цена, город, категория, продавец, источник, бренд, OEM.
+            Поля объявления: название, цена, город, категория, продавец, источник, бренд, OEM.
           </p>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {TABS.map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={[
-              "rounded-full border px-3 py-1.5 text-xs font-medium",
-              tab === id ? "border-black/20 bg-black/[0.06] text-black" : "border-black/10 text-black/55",
-            ].join(" ")}
-          >
-            {STATUS_LABEL[id]}
-          </button>
-        ))}
-      </div>
+      {queueMode === "candidates" ?
+        <div className="flex flex-wrap gap-2">
+          {CANDIDATE_TABS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={[
+                "rounded-full border px-3 py-1.5 text-xs font-medium",
+                tab === id ? "border-black/20 bg-black/[0.06] text-black" : "border-black/10 text-black/55",
+              ].join(" ")}
+            >
+              {STATUS_LABEL[id]}
+            </button>
+          ))}
+        </div>
+      : null}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={busy || selected.size === 0}
-          onClick={() => void runAction("save")}
-          className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-        >
-          Сохранить
-        </button>
-        <button
-          type="button"
-          disabled={busy || selected.size === 0}
-          onClick={() => void runAction("approve")}
-          className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-        >
-          Одобрить
-        </button>
-        <button
-          type="button"
-          disabled={busy || selected.size === 0 || tab !== "approved"}
-          onClick={() => void runAction("publish")}
-          className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-        >
-          Опубликовать
-        </button>
-        <button
-          type="button"
-          disabled={busy || selected.size === 0}
-          onClick={() => void runAction("reject")}
-          className="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-900 disabled:opacity-40"
-        >
-          Отклонить
-        </button>
-      </div>
+      {queueMode === "candidates" ?
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy || selected.size === 0}
+            onClick={() => void runAction("save")}
+            className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+          >
+            Сохранить
+          </button>
+          <button
+            type="button"
+            disabled={busy || selected.size === 0}
+            onClick={() => void runAction("approve")}
+            className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+          >
+            Одобрить
+          </button>
+          <button
+            type="button"
+            disabled={busy || selected.size === 0 || tab !== "approved"}
+            onClick={() => void runAction("publish")}
+            className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+          >
+            Опубликовать
+          </button>
+          <button
+            type="button"
+            disabled={busy || selected.size === 0}
+            onClick={() => void runAction("reject")}
+            className="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-900 disabled:opacity-40"
+          >
+            Отклонить
+          </button>
+        </div>
+      : null}
 
       {message ?
         <p className="text-sm font-medium text-black/70">{message}</p>
@@ -202,7 +223,13 @@ export function AdminCatalogSourceOfferDraftsPanel({
                   <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
                     {catalogSourceNameLabel(d.sourceName)}
                   </span>
-                  <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-xs">{d.status}</span>
+                  {queueMode === "duplicate" || d.duplicateHint ?
+                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-900">
+                      {d.duplicateHint ? "Дубликат" : d.status}
+                    </span>
+                  : (
+                    <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-xs">{STATUS_LABEL[d.status] ?? d.status}</span>
+                  )}
                 </div>
                 <p className="mt-1 text-black/55">
                   {[d.price, d.city, categoryTitle(d.categorySlug)].filter(Boolean).join(" · ")}

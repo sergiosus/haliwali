@@ -13,7 +13,12 @@ import { listingDealStatusBadgeRu } from "../lib/listingCardMeta";
 import type { Listing, ListingStatus } from "../lib/listings";
 import { useListingsStore } from "../lib/listings";
 import { inferredSupportSenderType, supportMessageLabelAdminPanel } from "../lib/supportUiLabels";
-import { AdminCatalogPanel, type CatalogAdminTab, type CompanySubTab } from "./AdminCatalogPanel";
+import {
+  AdminCatalogPanel,
+  type CatalogAdminTab,
+  type CompanySubTab,
+  type OfferSubTab,
+} from "./AdminCatalogPanel";
 
 const statusLabel: Record<ListingStatus, string> = {
   pending: "На проверке",
@@ -345,15 +350,33 @@ function Tabs({
   );
 }
 
-function normalizeCatalogNav(catalogTab?: string): {
+function normalizeOfferSubTab(value?: string): OfferSubTab | undefined {
+  if (
+    value === "published" ||
+    value === "import" ||
+    value === "candidates" ||
+    value === "rejected" ||
+    value === "duplicates"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeCatalogNav(
+  catalogTab?: string,
+  offerSub?: string,
+): {
   main: CatalogAdminTab;
   companySub?: CompanySubTab;
+  offerSub?: OfferSubTab;
 } {
+  const offerSubTab = normalizeOfferSubTab(offerSub);
   switch (catalogTab) {
     case "offers":
-      return { main: "offers" };
+      return { main: "offers", offerSub: offerSubTab ?? "published" };
     case "offer-import":
-      return { main: "offer-import" };
+      return { main: "offers", offerSub: "import" };
     case "supplier-search":
       return { main: "supplier-search" };
     case "categories":
@@ -374,13 +397,15 @@ function normalizeCatalogNav(catalogTab?: string): {
 export default function AdminClient({
   initialSection,
   initialCatalogTab,
+  initialOfferSubTab,
 }: {
   initialSection?: AdminTab;
   initialCatalogTab?: string;
+  initialOfferSubTab?: string;
 }) {
   const { loaded, listings, setStatus, deleteListing, refreshListings } = useListingsStore();
   const [tab, setTab] = useState<AdminTab>(initialSection ?? "ads");
-  const catalogNav = normalizeCatalogNav(initialCatalogTab);
+  const catalogNav = normalizeCatalogNav(initialCatalogTab, initialOfferSubTab);
   const [listingTab, setListingTab] = useState<ListingModerationTab>("pending");
   const [reportsReload, setReportsReload] = useState(0);
   const [reports, setReports] = useState<AdminReportRow[]>([]);
@@ -1278,7 +1303,11 @@ export default function AdminClient({
           ) : null}
         </div>
       ) : tab === "catalog" ? (
-        <AdminCatalogPanel initialTab={catalogNav.main} initialCompanySubTab={catalogNav.companySub} />
+        <AdminCatalogPanel
+          initialTab={catalogNav.main}
+          initialCompanySubTab={catalogNav.companySub}
+          initialOfferSubTab={catalogNav.offerSub}
+        />
       ) : tab === "support" ? (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1 space-y-3">

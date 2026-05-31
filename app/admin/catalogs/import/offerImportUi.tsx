@@ -7,6 +7,7 @@ import {
   readCatalogDiscoverLocation,
   type CatalogDiscoverLocation,
 } from "../../../lib/catalogDiscoverLocationStorage";
+import { classifySourceUrl } from "../../../lib/catalogSourceClassifier";
 import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 import { useEffect, useState } from "react";
 
@@ -97,6 +98,41 @@ export function OfferImportMetaFields({
         />
       </div>
     </div>
+  );
+}
+
+export function isOfferListingUrl(url: string): boolean {
+  try {
+    return classifySourceUrl(new URL(url.startsWith("http") ? url : `https://${url}`)) === "listing";
+  } catch {
+    return false;
+  }
+}
+
+export function matchesOfferSourceFilter(url: string, filter: OfferSourceFilter): boolean {
+  if (filter === "all") return true;
+  const lower = url.toLowerCase();
+  if (filter === "avito") return lower.includes("avito.ru");
+  if (filter === "drom") return lower.includes("drom.ru") || lower.includes("auto.ru");
+  if (filter === "youla") return lower.includes("youla.ru");
+  if (filter === "vk") return lower.includes("vk.com") || lower.includes("vk.ru");
+  if (filter === "company_site") {
+    return (
+      !lower.includes("avito.ru") &&
+      !lower.includes("drom.ru") &&
+      !lower.includes("auto.ru") &&
+      !lower.includes("youla.ru") &&
+      !lower.includes("vk.com") &&
+      !lower.includes("vk.ru")
+    );
+  }
+  return (
+    !lower.includes("avito.ru") &&
+    !lower.includes("drom.ru") &&
+    !lower.includes("auto.ru") &&
+    !lower.includes("youla.ru") &&
+    !lower.includes("vk.com") &&
+    !lower.includes("vk.ru")
   );
 }
 

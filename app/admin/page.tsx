@@ -37,6 +37,9 @@ export default async function AdminPage({
               initialCatalogTab={
                 typeof sp.catalogTab === "string" ? sp.catalogTab : undefined
               }
+              initialOfferSubTab={
+                typeof sp.offerSub === "string" ? sp.offerSub : undefined
+              }
             />
           ) : view === "login_account" ? (
             <div className="mx-auto max-w-md rounded-3xl border border-black/10 bg-white p-6">

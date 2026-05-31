@@ -516,3 +516,27 @@ export async function pgDeletePublishedSourceOffers(ids: number[]): Promise<numb
   const { rowCount } = await pool.query(`DELETE FROM catalog_source_offers WHERE id = ANY($1::int[])`, [ids]);
   return rowCount ?? 0;
 }
+
+const CANDIDATE_DRAFT_STATUSES = ["draft", "new", "saved", "approved"];
+
+export async function pgCountSourceOfferDraftQueues(): Promise<{
+  candidates: number;
+  rejected: number;
+  duplicate: number;
+}> {
+  const pool = getPool();
+  const { rows } = await pool.query<{ status: string; count: string }>(
+    `SELECT status, COUNT(*)::text AS count FROM catalog_source_offer_import_drafts GROUP BY status`,
+  );
+  let candidates = 0;
+  let rejected = 0;
+  let duplicate = 0;
+  for (const row of rows) {
+    const n = Number(row.count ?? 0);
+    const s = row.status.trim().toLowerCase();
+    if (CANDIDATE_DRAFT_STATUSES.includes(s)) candidates += n;
+    else if (s === "rejected") rejected += n;
+    else if (s === "duplicate") duplicate += n;
+  }
+  return { candidates, rejected, duplicate };
+}

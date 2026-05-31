@@ -1,69 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { CatalogSourceOfferDraftStatus } from "../../../lib/catalogSourceOfferTypes";
+import { useState } from "react";
 import { AdminCatalogOfferCsvImportSection } from "./AdminCatalogOfferCsvImportSection";
 import { AdminCatalogOfferLinksImportSection } from "./AdminCatalogOfferLinksImportSection";
 import { AdminCatalogOfferSearchImportSection } from "./AdminCatalogOfferSearchImportSection";
 import { AdminCatalogOfferTextImportSection } from "./AdminCatalogOfferTextImportSection";
-import { AdminCatalogSourceOfferDraftsPanel } from "./AdminCatalogSourceOfferDraftsPanel";
 
-type OfferImportMode = "links" | "search" | "text" | "csv" | "drafts";
+type OfferImportMode = "links" | "search" | "text" | "csv";
 
-const ACTIONABLE_STATUSES: CatalogSourceOfferDraftStatus[] = [
-  "draft",
-  "saved",
-  "approved",
-  "duplicate",
-];
-
-function countActiveOfferDrafts(drafts: { status?: string }[]): number {
-  return drafts.filter((d) => {
-    const status = String(d.status ?? "").trim().toLowerCase();
-    return (
-      status === "draft" ||
-      status === "new" ||
-      status === "saved" ||
-      status === "approved" ||
-      status === "duplicate"
-    );
-  }).length;
-}
-
-/** Offer import UI — external listings only, not companies. */
-export function AdminCatalogOfferImportClient({ onChanged }: { onChanged?: () => void }) {
+/** Offer-only import forms — writes to catalog_source_offer_import_drafts via parse API. */
+export function AdminCatalogOfferImportClient({
+  onChanged,
+  onGoToCandidates,
+}: {
+  onChanged?: () => void;
+  onGoToCandidates?: () => void;
+}) {
   const [mode, setMode] = useState<OfferImportMode>("links");
-  const [draftRefresh, setDraftRefresh] = useState(0);
-  const [draftCount, setDraftCount] = useState(0);
-
-  const loadDraftCount = useCallback(() => {
-    void Promise.all(
-      ACTIONABLE_STATUSES.map((status) =>
-        fetch(`/api/admin/catalogs/source-offers/drafts?status=${status}`, {
-          credentials: "include",
-          cache: "no-store",
-        }).then((r) => r.json()),
-      ),
-    )
-      .then((results) => {
-        const all = results.flatMap((d: { drafts?: { status?: string }[] }) => d.drafts ?? []);
-        setDraftCount(countActiveOfferDrafts(all));
-      })
-      .catch(() => setDraftCount(0));
-  }, []);
-
-  useEffect(() => {
-    loadDraftCount();
-  }, [loadDraftCount, draftRefresh]);
-
-  const bump = useCallback(() => {
-    onChanged?.();
-    setDraftRefresh((n) => n + 1);
-  }, [onChanged]);
-
-  const goToDrafts = useCallback(() => {
-    setMode("drafts");
-  }, []);
 
   const modeBtn = (id: OfferImportMode, label: string) => {
     const active = mode === id;
@@ -81,9 +34,6 @@ export function AdminCatalogOfferImportClient({ onChanged }: { onChanged?: () =>
         aria-pressed={active}
       >
         {label}
-        {id === "drafts" && draftCount > 0 ?
-          <span className={active ? "text-white/75" : "text-black/45"}> ({draftCount})</span>
-        : null}
       </button>
     );
   };
@@ -91,10 +41,10 @@ export function AdminCatalogOfferImportClient({ onChanged }: { onChanged?: () =>
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Импорт предложений</h2>
+        <h3 className="text-base font-semibold">Импорт предложений</h3>
         <p className="mt-1 text-sm text-black/55">
-          Импорт объявлений с Avito, Drom, Youla, VK и сайтов компаний. Не смешивается с каталогом компаний и
-          объявлениями пользователей Haliwali.
+          Парсер объявлений с внешних площадок. Кандидаты сохраняются только в очередь предложений, не в каталог
+          компаний.
         </p>
       </div>
 
@@ -103,28 +53,23 @@ export function AdminCatalogOfferImportClient({ onChanged }: { onChanged?: () =>
         {modeBtn("search", "По поисковому запросу")}
         {modeBtn("text", "Из текста / VK")}
         {modeBtn("csv", "CSV")}
-        {modeBtn("drafts", "Кандидаты предложений")}
       </div>
 
       <div className="w-full min-w-0 overflow-visible rounded-3xl border border-black/10 bg-white p-4 sm:p-5">
         {mode === "links" ?
-          <AdminCatalogOfferLinksImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
+          <AdminCatalogOfferLinksImportSection onChanged={onChanged} onGoToDrafts={onGoToCandidates} />
         : null}
 
         {mode === "search" ?
-          <AdminCatalogOfferSearchImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
+          <AdminCatalogOfferSearchImportSection onChanged={onChanged} onGoToDrafts={onGoToCandidates} />
         : null}
 
         {mode === "text" ?
-          <AdminCatalogOfferTextImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
+          <AdminCatalogOfferTextImportSection onChanged={onChanged} onGoToDrafts={onGoToCandidates} />
         : null}
 
         {mode === "csv" ?
-          <AdminCatalogOfferCsvImportSection onChanged={bump} onGoToDrafts={goToDrafts} />
-        : null}
-
-        {mode === "drafts" ?
-          <AdminCatalogSourceOfferDraftsPanel embedded onChanged={bump} refreshSignal={draftRefresh} />
+          <AdminCatalogOfferCsvImportSection onChanged={onChanged} onGoToDrafts={onGoToCandidates} />
         : null}
       </div>
     </div>

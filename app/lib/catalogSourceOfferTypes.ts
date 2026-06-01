@@ -62,6 +62,8 @@ export type CatalogSourceOfferInput = {
   sourceName: CatalogSourceName;
   sourceUrl: string;
   shortSnippet: string;
+  /** First image from source page (og:image), when available. */
+  imageUrl: string | null;
   confidenceScore: number;
   rawPayload?: Record<string, unknown>;
 };

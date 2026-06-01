@@ -22,6 +22,7 @@ import {
 import {
   filterSourceOffersInMemory,
   type CatalogSourceOfferListQuery,
+  type CatalogSourceOfferListResult,
 } from "./catalogSourceOfferQuery";
 
 const STORE_PATH = ".data/catalog-source-offers.json";
@@ -106,6 +107,7 @@ function toOffer(o: JsonOffer): CatalogSourceOffer {
     sourceName: o.sourceName,
     sourceUrl: o.sourceUrl,
     shortSnippet: o.shortSnippet,
+    imageUrl: o.imageUrl ?? null,
     confidenceScore: o.confidenceScore,
     haliwaliCompanyId: o.haliwaliCompanyId,
     titleSearch: o.titleSearch,
@@ -116,7 +118,6 @@ function toOffer(o: JsonOffer): CatalogSourceOffer {
     importedAt: o.importedAt,
     createdAt: o.createdAt,
     updatedAt: o.updatedAt,
-    rawPayload: o.rawPayload,
   };
 }
 
@@ -228,6 +229,7 @@ function jsonOfferFieldsToInput(
     sourceName: d.sourceName,
     sourceUrl: d.sourceUrl,
     shortSnippet: d.shortSnippet,
+    imageUrl: d.imageUrl,
     confidenceScore: d.confidenceScore,
     rawPayload: d.rawPayload,
   });
@@ -309,6 +311,7 @@ export async function jsonPublishSourceOfferDrafts(ids: number[]): Promise<Catal
       sourceName: d.sourceName,
       sourceUrl: d.sourceUrl,
       shortSnippet: d.shortSnippet,
+      imageUrl: d.imageUrl ?? null,
       confidenceScore: d.confidenceScore,
       haliwaliCompanyId: null,
       titleSearch: d.titleSearch,
@@ -334,7 +337,7 @@ export async function jsonPublishSourceOfferDrafts(ids: number[]): Promise<Catal
 
 export async function jsonListPublishedSourceOffers(
   opts?: CatalogSourceOfferListQuery,
-): Promise<CatalogSourceOffer[]> {
+): Promise<CatalogSourceOfferListResult> {
   await jsonCleanupInvalidPublishedSourceOffers();
   const store = await readStore();
   const offers = store.offers
@@ -355,6 +358,7 @@ export async function jsonListPublishedSourceOffers(
           sourceName: o.sourceName,
           sourceUrl: o.sourceUrl,
           shortSnippet: o.shortSnippet,
+          imageUrl: o.imageUrl,
           confidenceScore: o.confidenceScore,
         }),
       ),

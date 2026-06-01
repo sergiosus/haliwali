@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { CatalogSourceOffersClient } from "../../components/catalog/CatalogSourceOffersClient";
 import {
   categoriesFromSeed,
@@ -21,5 +22,13 @@ export default async function CatalogSourceOffersPage() {
   let categories = await listCatalogCategories();
   if (categories.length === 0) categories = categoriesFromSeed();
 
-  return <CatalogSourceOffersClient categories={categories} />;
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-3xl px-3 py-10 text-sm text-black/45">Загрузка каталога…</div>
+      }
+    >
+      <CatalogSourceOffersClient categories={categories} />
+    </Suspense>
+  );
 }

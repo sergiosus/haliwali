@@ -111,6 +111,7 @@ export function extractSourceOfferFromHtml(
 
   const ogTitle = metaContent(head, "og:title");
   const ogDesc = metaContent(head, "og:description");
+  const ogImage = metaContent(head, "og:image");
   const pageTitle = titleTag(head);
   const title = sanitizeOfferText((ogTitle || pageTitle).trim()).slice(0, 200);
   if (!title) return null;
@@ -122,6 +123,9 @@ export function extractSourceOfferFromHtml(
   const sellerName = sellerFromTitle(title);
   const city = extractCityFromHead(head, defaults);
   const sourceName = catalogSourceNameFromUrl(sourceUrl);
+
+  const imageUrl =
+    ogImage && /^https?:\/\//i.test(ogImage.trim()) ? ogImage.trim().slice(0, 500) : null;
 
   const draft: CatalogSourceOfferInput = {
     title,
@@ -137,6 +141,7 @@ export function extractSourceOfferFromHtml(
     sourceName: sourceName === "other" ? "company_site" : sourceName,
     sourceUrl,
     shortSnippet,
+    imageUrl,
     confidenceScore: shortSnippet.length > 40 ? 0.65 : 0.45,
     rawPayload: { extractor: "source_offer", host: fetched.url.hostname },
   };

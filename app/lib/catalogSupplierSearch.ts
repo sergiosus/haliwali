@@ -37,7 +37,7 @@ export async function searchCatalogSuppliers(
       city: opts.city,
       categorySlug: opts.categorySlug,
       limit: limit + 12,
-    }),
+    }).then((r) => r.offers),
   ]);
 
   const oemLike = /[a-z0-9]{4,}/i.test(q) && /\d/.test(q);

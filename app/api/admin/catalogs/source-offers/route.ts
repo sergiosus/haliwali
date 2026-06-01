@@ -17,7 +17,7 @@ export async function GET() {
   const deny = restDenyPrivilegedAdminResponse(await getAdminPrivilegedFailure());
   if (deny) return deny;
 
-  const offers = await listPublishedSourceOffers({ limit: 500 });
+  const { offers } = await listPublishedSourceOffers({ limit: 500 });
   return NextResponse.json({ ok: true, offers });
 }
 

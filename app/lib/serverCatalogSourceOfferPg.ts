@@ -9,7 +9,10 @@ import {
   normalizeSourceOfferDraftStatus,
   sourceOfferDraftStatusDbValues,
 } from "./catalogSourceOfferTypes";
-import type { CatalogSourceOfferListQuery } from "./catalogSourceOfferQuery";
+import type {
+  CatalogSourceOfferListQuery,
+  CatalogSourceOfferListResult,
+} from "./catalogSourceOfferQuery";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
 import { sanitizeSourceOfferInput } from "./catalogSourceOfferNormalize";
 import {
@@ -37,6 +40,7 @@ type DraftRow = {
   source_name: string;
   source_url: string;
   short_snippet: string;
+  image_url: string | null;
   confidence_score: number;
   duplicate_hint: string | null;
   duplicate_of_offer_id: number | null;
@@ -79,6 +83,7 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
     sourceName: r.source_name as CatalogSourceOfferDraft["sourceName"],
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
+    imageUrl: r.image_url,
     confidenceScore: r.confidence_score,
     duplicateHint: r.duplicate_hint,
     duplicateOfOfferId: r.duplicate_of_offer_id,
@@ -130,6 +135,7 @@ function offerRowToInput(r: OfferRow): ReturnType<typeof inputFromSourceOfferFie
     sourceName: r.source_name as CatalogSourceName,
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
+    imageUrl: r.image_url,
     confidenceScore: r.confidence_score,
   });
 }
@@ -170,6 +176,7 @@ function rowToOffer(r: OfferRow): CatalogSourceOffer {
     sourceName: r.source_name as CatalogSourceOffer["sourceName"],
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
+    imageUrl: r.image_url ?? null,
     confidenceScore: r.confidence_score,
     haliwaliCompanyId: r.haliwali_company_id,
     titleSearch: r.title_search,
@@ -184,7 +191,7 @@ function rowToOffer(r: OfferRow): CatalogSourceOffer {
 }
 
 const DRAFT_COLS = `id, status, title, price, city, region, category_slug, company_name, seller_name, brand,
-  oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
+  oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
   duplicate_hint, duplicate_of_offer_id, published_offer_id,
   title_search, brand_search, oem_search, company_search, city_search,
   raw_payload, imported_at, created_at, updated_at`;
@@ -233,10 +240,10 @@ export async function pgUpsertSourceOfferDrafts(
           status = $2, title = $3, price = $4, city = $5, region = $6, category_slug = $7,
           company_name = $8, seller_name = $9, brand = $10,
           oem_codes = $11::jsonb, article_codes = $12::jsonb,
-          source_name = $13, source_url = $14, short_snippet = $15, confidence_score = $16,
-          duplicate_hint = $17, duplicate_of_offer_id = $18,
-          title_search = $19, brand_search = $20, oem_search = $21, company_search = $22, city_search = $23,
-          raw_payload = $24::jsonb, imported_at = NOW(), updated_at = NOW()
+          source_name = $13, source_url = $14, short_snippet = $15, image_url = $16, confidence_score = $17,
+          duplicate_hint = $18, duplicate_of_offer_id = $19,
+          title_search = $20, brand_search = $21, oem_search = $22, company_search = $23, city_search = $24,
+          raw_payload = $25::jsonb, imported_at = NOW(), updated_at = NOW()
         WHERE id = $1
         RETURNING ${DRAFT_COLS}
         `,
@@ -256,6 +263,7 @@ export async function pgUpsertSourceOfferDrafts(
           input.sourceName,
           input.sourceUrl,
           input.shortSnippet,
+          input.imageUrl,
           input.confidenceScore,
           item.duplicateHint,
           item.duplicateOfOfferId,
@@ -278,12 +286,12 @@ export async function pgUpsertSourceOfferDrafts(
       `
       INSERT INTO catalog_source_offer_import_drafts (
         status, title, price, city, region, category_slug, company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
+        oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
         duplicate_hint, duplicate_of_offer_id,
         title_search, brand_search, oem_search, company_search, city_search, raw_payload
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15,
-        $16, $17, $18, $19, $20, $21, $22, $23::jsonb
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21, $22, $23, $24::jsonb
       )
       RETURNING ${DRAFT_COLS}
       `,
@@ -302,6 +310,7 @@ export async function pgUpsertSourceOfferDrafts(
         input.sourceName,
         input.sourceUrl,
         input.shortSnippet,
+        input.imageUrl,
         input.confidenceScore,
         item.duplicateHint,
         item.duplicateOfOfferId,
@@ -376,11 +385,11 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
       `
       INSERT INTO catalog_source_offers (
         draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
+        oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
         title_search, brand_search, oem_search, company_search, city_search
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15,
-        $16, $17, $18, $19, $20
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21
       )
       RETURNING id
       `,
@@ -399,6 +408,7 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
         d.source_name,
         d.source_url,
         d.short_snippet,
+        d.image_url,
         d.confidence_score,
         d.title_search,
         d.brand_search,
@@ -425,12 +435,10 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
   return out;
 }
 
-export async function pgListPublishedSourceOffers(
-  opts?: CatalogSourceOfferListQuery,
-): Promise<CatalogSourceOffer[]> {
-  const pool = getPool();
-  const limit = opts?.limit ?? 48;
-  const params: unknown[] = [];
+function buildPublishedOfferWhere(
+  opts: CatalogSourceOfferListQuery | undefined,
+  params: unknown[],
+): string {
   const clauses: string[] = [];
   if (opts?.categorySlug) {
     params.push(opts.categorySlug.trim().toLowerCase());
@@ -443,6 +451,18 @@ export async function pgListPublishedSourceOffers(
   if (opts?.sourceName) {
     params.push(opts.sourceName);
     clauses.push(`source_name = $${params.length}`);
+  }
+  if (opts?.brand?.trim()) {
+    params.push(`%${opts.brand.trim().toLowerCase()}%`);
+    const i = params.length;
+    clauses.push(`(brand_search LIKE $${i} OR lower(COALESCE(brand, '')) LIKE $${i})`);
+  }
+  if (opts?.oemArticle?.trim()) {
+    params.push(`%${opts.oemArticle.trim().toLowerCase()}%`);
+    const i = params.length;
+    clauses.push(
+      `(oem_search LIKE $${i} OR oem_codes::text ILIKE $${i} OR article_codes::text ILIKE $${i} OR lower(short_snippet) LIKE $${i} OR title_search LIKE $${i})`,
+    );
   }
   if (opts?.q && opts.q.trim().length >= 2) {
     params.push(`%${opts.q.trim().toLowerCase()}%`);
@@ -464,41 +484,70 @@ export async function pgListPublishedSourceOffers(
     params.push(opts.priceMax);
     clauses.push(`(${priceExpr} IS NOT NULL AND ${priceExpr} <= $${params.length})`);
   }
-  params.push(limit);
-  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+}
+
+const OFFER_SELECT_COLS = `id, draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,
+  oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
+  haliwali_company_id, title_search, brand_search, oem_search, company_search, city_search,
+  imported_at, created_at, updated_at`;
+
+function filterValidPublishedRows(rows: OfferRow[]): CatalogSourceOffer[] {
+  return rows
+    .map(rowToOffer)
+    .filter((o) =>
+      isValidPublishedSourceOffer(
+        inputFromSourceOfferFields({
+          title: o.title,
+          price: o.price,
+          city: o.city,
+          region: o.region,
+          categorySlug: o.categorySlug,
+          companyName: o.companyName,
+          sellerName: o.sellerName,
+          brand: o.brand,
+          oemCodes: o.oemCodes,
+          articleCodes: o.articleCodes,
+          sourceName: o.sourceName,
+          sourceUrl: o.sourceUrl,
+          shortSnippet: o.shortSnippet,
+          imageUrl: o.imageUrl,
+          confidenceScore: o.confidenceScore,
+        }),
+      ),
+    );
+}
+
+export async function pgListPublishedSourceOffers(
+  opts?: CatalogSourceOfferListQuery,
+): Promise<CatalogSourceOfferListResult> {
+  const pool = getPool();
+  const limit = opts?.limit ?? 20;
+  const offset = opts?.offset ?? 0;
+  const params: unknown[] = [];
+  const where = buildPublishedOfferWhere(opts, params);
+
+  const countRes = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM catalog_source_offers ${where}`,
+    params,
+  );
+  const dbTotal = Number(countRes.rows[0]?.count ?? 0);
+
+  const listParams = [...params, limit, offset];
   const { rows } = await pool.query<OfferRow>(
     `
-    SELECT id, draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,
-      oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
-      haliwali_company_id, title_search, brand_search, oem_search, company_search, city_search,
-      imported_at, created_at, updated_at
+    SELECT ${OFFER_SELECT_COLS}
     FROM catalog_source_offers
     ${where}
     ORDER BY imported_at DESC
-    LIMIT $${params.length}
+    LIMIT $${listParams.length - 1}
+    OFFSET $${listParams.length}
     `,
-    params,
+    listParams,
   );
-  return rows.map(rowToOffer).filter((o) =>
-    isValidPublishedSourceOffer(
-      inputFromSourceOfferFields({
-        title: o.title,
-        price: o.price,
-        city: o.city,
-        region: o.region,
-        categorySlug: o.categorySlug,
-        companyName: o.companyName,
-        sellerName: o.sellerName,
-        brand: o.brand,
-        oemCodes: o.oemCodes,
-        articleCodes: o.articleCodes,
-        sourceName: o.sourceName,
-        sourceUrl: o.sourceUrl,
-        shortSnippet: o.shortSnippet,
-        confidenceScore: o.confidenceScore,
-      }),
-    ),
-  );
+
+  const offers = filterValidPublishedRows(rows);
+  return { offers, total: dbTotal };
 }
 
 export async function pgLoadSourceOfferDedupSeed(): Promise<{

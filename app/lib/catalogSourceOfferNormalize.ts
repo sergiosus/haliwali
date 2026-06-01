@@ -17,6 +17,13 @@ import {
 export const SOURCE_OFFER_SNIPPET_MAX = 280;
 export const SOURCE_OFFER_TITLE_MAX = 200;
 
+function sanitizeOfferImageUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  const t = url.trim();
+  if (!/^https?:\/\//i.test(t) || hasBadEncoding(t)) return null;
+  return t.slice(0, 500);
+}
+
 export { offerListingSourceFromUrl } from "./catalogSourceName";
 
 function trimCodes(codes: string[], limit = 8): string[] {
@@ -81,6 +88,7 @@ export function sanitizeSourceOfferInput(
     sourceName,
     sourceUrl,
     shortSnippet,
+    imageUrl: sanitizeOfferImageUrl(input.imageUrl),
     confidenceScore: Math.min(1, Math.max(0, input.confidenceScore ?? 0.45)),
     rawPayload: input.rawPayload ?? { extractor: "source_offer", host },
   };
@@ -124,6 +132,7 @@ export function sanitizeSourceOfferDraftInput(
     sourceName,
     sourceUrl,
     shortSnippet,
+    imageUrl: sanitizeOfferImageUrl(input.imageUrl),
     confidenceScore: Math.min(1, Math.max(0, input.confidenceScore ?? 0.35)),
     rawPayload: input.rawPayload,
   };

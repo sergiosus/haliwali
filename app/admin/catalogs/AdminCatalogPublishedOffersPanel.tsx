@@ -12,6 +12,7 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [syncDebug, setSyncDebug] = useState<Record<string, unknown> | null>(null);
+  const [schemaMissing, setSchemaMissing] = useState<string[] | undefined>();
 
   const load = useCallback(async () => {
     try {
@@ -21,6 +22,7 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
       ]);
       const statusData = (await statusRes.json()) as {
         tablesReady?: boolean;
+        schemaMissing?: string[];
         publishedOffersCountFromDb?: number;
         publicApiCount?: number;
         draftsApprovedCount?: number;
@@ -31,6 +33,7 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
       };
       const offersData = (await offersRes.json()) as { offers?: CatalogSourceOffer[]; error?: string };
       setTablesReady(statusData.tablesReady !== false);
+      setSchemaMissing(statusData.schemaMissing);
       setOffers(offersData.offers ?? []);
       setSyncDebug({
         publishedOffersCountFromDb: statusData.publishedOffersCountFromDb,
@@ -84,7 +87,7 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
   if (!tablesReady) {
     return (
       <div className="space-y-3">
-        <AdminCatalogSourceOfferMigrationWarning />
+        <AdminCatalogSourceOfferMigrationWarning missing={schemaMissing} />
       </div>
     );
   }

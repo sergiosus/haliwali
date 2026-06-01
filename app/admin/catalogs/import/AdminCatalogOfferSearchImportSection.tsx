@@ -638,143 +638,154 @@ export function AdminCatalogOfferSearchImportSection({
       <div>
         <h3 className="text-base font-semibold">По поисковому запросу</h3>
         <p className="mt-1 text-sm text-black/55">
-          Прямой поиск на Avito, Drom, Youla, VK — без Google и Bing. Результаты и выбор хранятся в
-          браузере (localStorage, 24 ч). Кандидаты — только в базе данных.
+          Прямой поиск на площадках. Результаты — в браузере (24 ч), кандидаты — в PostgreSQL.
         </p>
       </div>
 
-      <label className="block text-sm">
-        <span className="text-black/60">Поисковый запрос</span>
-        <OfferSearchQueryAutocomplete
-          value={query}
-          onChange={setQuery}
-          onSubmit={() => void runSearch()}
-          history={searchHistory}
-          onRemoveHistoryItem={(item) => {
-            setSearchHistory(removeOfferSearchHistoryItem(item));
-          }}
-          onClearHistory={() => {
-            clearOfferSearchHistory();
-            setSearchHistory([]);
-          }}
-          disabled={busy}
-          placeholder="touran Ижевск · насос caterpillar 320 · iphone 12 Казань"
-        />
-      </label>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <aside className="w-full shrink-0 space-y-3 lg:sticky lg:top-4 lg:w-72 xl:w-80">
+          <div className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
+            <label className="block text-sm">
+              <span className="text-black/60">Поисковый запрос</span>
+              <div className="mt-1">
+                <OfferSearchQueryAutocomplete
+                  value={query}
+                  onChange={setQuery}
+                  onSubmit={() => void runSearch()}
+                  history={searchHistory}
+                  onRemoveHistoryItem={(item) => {
+                    setSearchHistory(removeOfferSearchHistoryItem(item));
+                  }}
+                  onClearHistory={() => {
+                    clearOfferSearchHistory();
+                    setSearchHistory([]);
+                  }}
+                  disabled={busy}
+                  placeholder="touran, caterpillar 320…"
+                />
+              </div>
+            </label>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="sm:col-span-2">
-          <SettlementLocationField
-            value={location}
-            onChange={setLocation}
-            onPersist={persistCatalogDiscoverLocation}
-            label="Город / регион (необязательно)"
-            placeholder="Ижевск"
-          />
-        </div>
-        <label className="block text-sm">
-          <span className="text-black/60">Тип предложения</span>
-          <select
-            value={offerTypeFilter}
-            onChange={(e) => setOfferTypeFilter(e.target.value as OfferTypeFilter)}
-            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
-          >
-            {OFFER_TYPE_FILTER_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="sm:col-span-2">
-          <OfferSearchSourceCheckboxes
-            value={sourceSelection}
-            onChange={setSourceSelection}
-            disabled={busy}
-          />
-        </div>
-        <label className="block text-sm">
-          <span className="text-black/60">Сортировка</span>
-          <select
-            value={sortMode}
-            onChange={(e) => setSortMode(e.target.value as OfferSearchSortMode)}
-            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="text-black/60">Цена от, ₽</span>
-          <input
-            type="number"
-            min={0}
-            value={priceMin}
-            onChange={(e) => setPriceMin(e.target.value)}
-            placeholder="0"
-            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="text-black/60">Цена до, ₽</span>
-          <input
-            type="number"
-            min={0}
-            value={priceMax}
-            onChange={(e) => setPriceMax(e.target.value)}
-            placeholder="100000"
-            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="text-black/60">Бренд</span>
-          <input
-            value={brand}
-            onChange={(e) => setBrand(e.target.value)}
-            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="text-black/60">OEM / артикул</span>
-          <input
-            value={oemArticle}
-            onChange={(e) => setOemArticle(e.target.value)}
-            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
-          />
-        </label>
-      </div>
+            <div className="mt-3">
+              <SettlementLocationField
+                value={location}
+                onChange={setLocation}
+                onPersist={persistCatalogDiscoverLocation}
+                label="Город / регион"
+                placeholder="Ижевск"
+              />
+            </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={busy || !query.trim()}
-          onClick={() => void runSearch()}
-          className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {busy ? "Поиск…" : "Найти предложения"}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={clearSearchFilters}
-          className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-medium disabled:opacity-40"
-        >
-          Очистить поиск
-        </button>
-        <button
-          type="button"
-          disabled={busy || (!searched && results.length === 0)}
-          onClick={() => void clearResultsOnly()}
-          className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-medium disabled:opacity-40"
-        >
-          Очистить результаты
-        </button>
-      </div>
+            <label className="mt-3 block text-sm">
+              <span className="text-black/60">Тип предложения</span>
+              <select
+                value={offerTypeFilter}
+                onChange={(e) => setOfferTypeFilter(e.target.value as OfferTypeFilter)}
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+              >
+                {OFFER_TYPE_FILTER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-      <div ref={resultsSectionRef} tabIndex={-1} className="scroll-mt-4 outline-none">
+            <div className="mt-3">
+              <OfferSearchSourceCheckboxes
+                value={sourceSelection}
+                onChange={setSourceSelection}
+                disabled={busy}
+              />
+            </div>
+
+            <label className="mt-3 block text-sm">
+              <span className="text-black/60">Цена от, ₽</span>
+              <input
+                type="number"
+                min={0}
+                value={priceMin}
+                onChange={(e) => setPriceMin(e.target.value)}
+                placeholder="0"
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+              />
+            </label>
+
+            <label className="mt-3 block text-sm">
+              <span className="text-black/60">Цена до, ₽</span>
+              <input
+                type="number"
+                min={0}
+                value={priceMax}
+                onChange={(e) => setPriceMax(e.target.value)}
+                placeholder="100000"
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+              />
+            </label>
+
+            <label className="mt-3 block text-sm">
+              <span className="text-black/60">Бренд</span>
+              <input
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+              />
+            </label>
+
+            <label className="mt-3 block text-sm">
+              <span className="text-black/60">OEM / артикул</span>
+              <input
+                value={oemArticle}
+                onChange={(e) => setOemArticle(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+              />
+            </label>
+
+            <label className="mt-3 block text-sm">
+              <span className="text-black/60">Сортировка</span>
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as OfferSearchSortMode)}
+                className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={busy || !query.trim()}
+                onClick={() => void runSearch()}
+                className="w-full rounded-xl bg-black px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {busy ? "Поиск…" : "Найти предложения"}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={clearSearchFilters}
+                className="w-full rounded-xl border border-black/15 px-4 py-2.5 text-sm font-medium disabled:opacity-40"
+              >
+                Очистить поиск
+              </button>
+              <button
+                type="button"
+                disabled={busy || (!searched && results.length === 0)}
+                onClick={() => void clearResultsOnly()}
+                className="w-full rounded-xl border border-black/15 px-4 py-2.5 text-sm font-medium disabled:opacity-40"
+              >
+                Очистить результаты
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <div ref={resultsSectionRef} tabIndex={-1} className="min-w-0 flex-1 scroll-mt-4 outline-none">
         {searched ?
           <div className="space-y-3 rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3">
             <p className="text-base font-semibold text-black">
@@ -919,7 +930,15 @@ export function AdminCatalogOfferSearchImportSection({
 
         {searched && totalFound > 0 ?
           <div className="mt-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-2 rounded-2xl border border-black/10 bg-white p-3 sm:flex-row sm:flex-wrap sm:items-center">
+              <button
+                type="button"
+                disabled={busy || selected.size === 0}
+                onClick={() => void importSelected()}
+                className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+              >
+                Создать кандидатов предложений ({selected.size})
+              </button>
               <label className="flex items-center gap-2 text-sm text-black/60">
                 На странице
                 <select
@@ -967,14 +986,6 @@ export function AdminCatalogOfferSearchImportSection({
                 className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
               >
                 Снять выбор
-              </button>
-              <button
-                type="button"
-                disabled={busy || selected.size === 0}
-                onClick={() => void importSelected()}
-                className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                Создать кандидатов предложений ({selected.size})
               </button>
             </div>
 
@@ -1054,6 +1065,7 @@ export function AdminCatalogOfferSearchImportSection({
               "Объявления не найдены. Измените запрос, город или источник."}
           </p>
         : null}
+        </div>
       </div>
 
       <OfferImportGoToDraftsBanner count={createdCount} onGoToDrafts={onGoToDrafts} />

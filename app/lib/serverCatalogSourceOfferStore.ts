@@ -73,6 +73,7 @@ export type CatalogSourceOfferAdminStatus = {
   rejectedCount: number;
   duplicateCount: number;
   dbError?: string;
+  schemaMissing?: string[];
   /** Temporary diagnostics — publish vs public list alignment. */
   publishedOffersCountFromDb?: number;
   publicApiCount?: number;
@@ -101,9 +102,20 @@ export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdm
   }
 
   try {
-    const tablesReady = await pg.pgCheckSourceOffersTablesReady();
-    if (!tablesReady) {
-      return { ...empty, dbError: "catalog_source_offers or catalog_source_offer_import_drafts missing" };
+    const schema = await pg.pgCheckSourceOfferSchemaReady();
+    if (!schema.ready) {
+      const hint =
+        schema.missing.length > 0 ?
+          schema.missing.join(", ")
+        : "catalog_source_offers or catalog_source_offer_import_drafts missing";
+      return {
+        ...empty,
+        tablesReady: schema.tablesExist,
+        dbError: schema.tablesExist ?
+          `Missing columns — run db/migrations/20260602_catalog_source_offer_type_cover.sql (${hint})`
+        : `Missing tables — run db/migrations/20260531_catalog_source_offers.sql (${hint})`,
+        schemaMissing: schema.missing,
+      };
     }
 
     let publishedCount = 0;
@@ -134,7 +146,7 @@ export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdm
     }
 
     return {
-      tablesReady: true,
+      tablesReady: schema.ready,
       publishedCount,
       importCount: queues.candidates,
       candidatesCount: queues.candidates,

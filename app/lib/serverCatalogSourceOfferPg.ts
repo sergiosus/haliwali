@@ -788,26 +788,49 @@ export async function pgLoadSourceOfferDedupSeed(): Promise<{
 const ACTIONABLE_DRAFT_STATUSES = ["draft", "new", "saved", "approved", "duplicate"];
 
 export async function pgCheckSourceOffersTablesReady(): Promise<boolean> {
+  const schema = await pgCheckSourceOfferSchemaReady();
+  return schema.ready;
+}
+
+const REQUIRED_SOURCE_OFFER_COLUMNS = ["offer_type", "cover_image_url", "price"] as const;
+
+export type SourceOfferSchemaReady = {
+  ready: boolean;
+  tablesExist: boolean;
+  missing: string[];
+};
+
+/** Tables exist and columns required by app inserts are present. */
+export async function pgCheckSourceOfferSchemaReady(): Promise<SourceOfferSchemaReady> {
   try {
-    const pool = getPool();
-    const { rows } = await pool.query<{ offers: boolean; drafts: boolean }>(
-      `
-      SELECT
-        EXISTS (
-          SELECT 1 FROM information_schema.tables
-          WHERE table_schema = 'public' AND table_name = $1
-        ) AS offers,
-        EXISTS (
-          SELECT 1 FROM information_schema.tables
-          WHERE table_schema = 'public' AND table_name = $2
-        ) AS drafts
-      `,
-      [CATALOG_SOURCE_OFFERS_TABLE, CATALOG_SOURCE_OFFER_DRAFTS_TABLE],
-    );
-    const row = rows[0];
-    return Boolean(row?.offers && row?.drafts);
+    const intro = await pgIntrospectSourceOfferDb();
+    const missing: string[] = [];
+    if (!intro.catalog_source_offers.exists) {
+      missing.push("table catalog_source_offers");
+    } else {
+      for (const col of REQUIRED_SOURCE_OFFER_COLUMNS) {
+        if (!intro.catalog_source_offers.columns.includes(col)) {
+          missing.push(`catalog_source_offers.${col}`);
+        }
+      }
+    }
+    if (!intro.catalog_source_offer_import_drafts.exists) {
+      missing.push("table catalog_source_offer_import_drafts");
+    } else {
+      for (const col of REQUIRED_SOURCE_OFFER_COLUMNS) {
+        if (!intro.catalog_source_offer_import_drafts.columns.includes(col)) {
+          missing.push(`catalog_source_offer_import_drafts.${col}`);
+        }
+      }
+    }
+    return {
+      ready: missing.length === 0,
+      tablesExist:
+        intro.catalog_source_offers.exists && intro.catalog_source_offer_import_drafts.exists,
+      missing,
+    };
   } catch {
-    return false;
+    return { ready: false, tablesExist: false, missing: ["schema_check_failed"] };
   }
 }
 

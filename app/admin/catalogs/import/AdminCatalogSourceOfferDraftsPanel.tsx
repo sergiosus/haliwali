@@ -58,12 +58,14 @@ export function AdminCatalogSourceOfferDraftsPanel({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [tablesReady, setTablesReady] = useState(true);
+  const [schemaMissing, setSchemaMissing] = useState<string[] | undefined>();
 
   const loadStatus = useCallback(async () => {
     try {
       const r = await fetch("/api/admin/catalogs/source-offers/status", { cache: "no-store", credentials: "include" });
-      const data = (await r.json()) as { tablesReady?: boolean };
+      const data = (await r.json()) as { tablesReady?: boolean; schemaMissing?: string[] };
       setTablesReady(data.tablesReady !== false);
+      setSchemaMissing(data.schemaMissing);
     } catch {
       setTablesReady(false);
     }
@@ -124,7 +126,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
   if (!tablesReady) {
     return (
       <div className="space-y-3">
-        <AdminCatalogSourceOfferMigrationWarning />
+        <AdminCatalogSourceOfferMigrationWarning missing={schemaMissing} />
       </div>
     );
   }

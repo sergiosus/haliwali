@@ -30,6 +30,15 @@ export const OFFER_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[]
   { value: "other", label: "Другое" },
 ];
 
+/** Admin offer search — stable sources only in «all», disabled sources labeled. */
+export const OFFER_SEARCH_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[] = [
+  { value: "all", label: "Стабильные (Avito + Drom)" },
+  { value: "avito", label: "Avito — активен" },
+  { value: "drom", label: "Drom — экспериментальный" },
+  { value: "youla", label: "Youla — отключён (капча)" },
+  { value: "vk", label: "VK — не реализован" },
+];
+
 export function useOfferImportLocation() {
   const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
   useEffect(() => {

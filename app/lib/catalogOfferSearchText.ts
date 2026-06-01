@@ -252,13 +252,41 @@ export function extractSellerFromContext(ctx: string): string {
 /** Title from listing URL path when SERP card has no text. */
 export function titleFromListingUrl(url: string): string {
   try {
-    const seg = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+    const u = new URL(url);
+    const parts = u.pathname.split("/").filter(Boolean);
+    const withoutLastId = parts.filter((p) => !/^\d{5,}(?:\.html)?$/i.test(p) && !/^\d{8,}$/.test(p));
+    if (/drom\.ru|auto\.ru/i.test(u.hostname) && withoutLastId.length >= 2) {
+      const slugParts = withoutLastId.slice(-3).map((p) => p.replace(/\.html$/i, ""));
+      const t = slugParts.join(" ").replace(/[-_]+/g, " ").trim();
+      if (t.length >= 3) return t;
+    }
+    const seg = parts.pop() ?? "";
     const withoutId = seg.replace(/_\d{8,}$/, "").replace(/\.html$/i, "");
     const t = withoutId.replace(/[-_]+/g, " ").trim();
     return t.length >= 3 ? t : "";
   } catch {
     return "";
   }
+}
+
+/** Visible listing title from Drom SERP card HTML around the listing link. */
+export function extractDromCardTitle(ctx: string, url: string): string {
+  const patterns: RegExp[] = [
+    /<a[^>]+href="[^"]*\d{6,}\.html"[^>]*\stitle="([^"]{4,220})"/i,
+    /<a[^>]+href="[^"]*\d{6,}\.html"[^>]*>([^<]{4,220})<\/a>/i,
+    /data-title="([^"]{4,220})"/i,
+    /"(?:bullTitle|bull_title|cardTitle)"\s*:\s*"([^"]{4,220})"/i,
+    /<span[^>]*class="[^"]*bull-item[^"]*title[^"]*"[^>]*>([^<]{4,220})/i,
+    /<div[^>]*class="[^"]*b-title[^"]*"[^>]*>([^<]{4,220})/i,
+    /<h3[^>]*>([^<]{4,220})<\/h3>/i,
+  ];
+  for (const re of patterns) {
+    const m = ctx.match(re);
+    if (!m?.[1]) continue;
+    const t = sanitizeOfferText(decodeJsonString(m[1]));
+    if (t.length >= 4 && !/^[\d\s.,]+$/.test(t) && !isGenericOfferTitle(t)) return t;
+  }
+  return titleFromListingUrl(url);
 }
 
 export function validateOfferLinkFromSearchPage(

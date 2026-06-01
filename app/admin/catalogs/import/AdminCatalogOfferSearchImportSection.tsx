@@ -30,7 +30,7 @@ import type { SourceOfferImportError } from "../../../lib/catalogSourceOfferImpo
 import { SOURCE_OFFER_IMPORT_ERROR_LABELS } from "../../../lib/catalogSourceOfferImportErrors";
 import {
   OfferImportGoToDraftsBanner,
-  OFFER_SOURCE_OPTIONS,
+  OFFER_SEARCH_SOURCE_OPTIONS,
   type OfferSourceFilter,
 } from "./offerImportUi";
 import { OfferSearchQueryAutocomplete } from "./OfferSearchQueryAutocomplete";
@@ -63,15 +63,17 @@ const PARSE_QUALITY_LABEL: Record<string, string> = {
 
 const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
   blocked: "Avito blocked search page.",
-  captcha: "капча / антибот",
+  captcha: "Youla blocked by captcha",
+  disabled: "Youla blocked by captcha (источник отключён)",
   no_selector: "ссылки на объявления в HTML не найдены",
   empty_response: "пустой ответ",
   fetch_error: "ошибка загрузки",
   parse_error: "ошибка разбора HTML",
-  unsupported: "источник не поддерживается",
+  unsupported: "VK parser not implemented yet",
   city_unsupported: "город не в URL — ищем широко, фильтр после разбора",
   catalog_only: "Drom returned catalog pages, no real offers.",
   js_shell: "Drom: объявления подгружаются скриптом, ссылок в HTML нет.",
+  source_unreliable_for_query: "Drom: нерелевантная выдача по запросу",
 };
 
 const DEFAULT_CATEGORY = "drugie";
@@ -605,7 +607,7 @@ export function AdminCatalogOfferSearchImportSection({
             onChange={(e) => setSourceFilter(e.target.value as OfferSourceFilter)}
             className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
           >
-            {OFFER_SOURCE_OPTIONS.map((o) => (
+            {OFFER_SEARCH_SOURCE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>

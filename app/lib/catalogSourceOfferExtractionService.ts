@@ -194,12 +194,21 @@ export async function processSourceOfferSearchSelections(
         });
         if (enrichedDraft) {
           input = mergeEnrichedInput(input, enrichedDraft);
+        } else {
+          parseWarnings.push("full_page_parse_failed");
         }
       } else {
         parseWarnings.push("full_page_parse_failed");
       }
     } catch {
       parseWarnings.push("full_page_parse_failed");
+    }
+
+    if (!input.shortSnippet?.trim() || input.shortSnippet.length < 8) {
+      input = {
+        ...input,
+        shortSnippet: sanitizeOfferText(sel.shortSnippet || sel.title || input.title).slice(0, 280),
+      };
     }
 
     if (isGenericOfferTitle(input.title)) {

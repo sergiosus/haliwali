@@ -143,7 +143,11 @@ export function extractSourceOfferFromHtml(
     shortSnippet,
     imageUrl,
     confidenceScore: shortSnippet.length > 40 ? 0.65 : 0.45,
-    rawPayload: { extractor: "source_offer", host: fetched.url.hostname },
+    rawPayload: {
+      extractor: "source_offer",
+      host: fetched.url.hostname,
+      ...(imageUrl ? { imageUrl } : {}),
+    },
   };
 
   return sanitizeSourceOfferInput(draft);

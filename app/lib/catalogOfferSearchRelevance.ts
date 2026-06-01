@@ -79,3 +79,131 @@ export function offerMatchesSearchQuery(query: string, item: OfferSearchRelevanc
   const blob = offerSearchRelevanceBlob(item);
   return tokens.some((token) => blob.includes(token));
 }
+
+/** Stricter: primary token must appear in visible title or snippet (not URL-only). */
+export function offerMatchesSearchQueryInCardText(
+  query: string,
+  item: OfferSearchRelevanceFields,
+): boolean {
+  const tokens = queryTokensForRelevance(query);
+  if (tokens.length === 0) return true;
+  const cardBlob = normBlob(`${item.title} ${item.shortSnippet} ${item.brand ?? ""}`);
+  if (tokens.some((token) => cardBlob.includes(token))) return true;
+  return false;
+}
+
+/** Major auto brands — if title highlights another brand and query is a model, reject. */
+const UNRELATED_AUTO_BRANDS = [
+  "mitsubishi",
+  "cadillac",
+  "mercedes",
+  "mercedes-benz",
+  "bmw",
+  "lexus",
+  "porsche",
+  "bentley",
+  "rolls-royce",
+  "ferrari",
+  "lamborghini",
+  "maserati",
+  "jaguar",
+  "land rover",
+  "range rover",
+  "hummer",
+  "infiniti",
+  "genesis",
+  "lincoln",
+  "chrysler",
+  "dodge",
+  "jeep",
+  "gmc",
+  "honda",
+  "toyota",
+  "nissan",
+  "mazda",
+  "subaru",
+  "hyundai",
+  "kia",
+  "ford",
+  "chevrolet",
+  "opel",
+  "peugeot",
+  "renault",
+  "citroen",
+  "skoda",
+  "seat",
+  "fiat",
+  "volvo",
+  "saab",
+  "audi",
+];
+
+function queryMentionsBrand(query: string, brand: string): boolean {
+  const tokens = queryTokensForRelevance(query);
+  const b = brand.toLowerCase();
+  return tokens.some((t) => b.includes(t) || t.includes(b.slice(0, Math.min(4, b.length))));
+}
+
+/** Reject SERP rows whose visible text is dominated by an unrelated auto brand. */
+export function offerHasUnrelatedAutoBrand(
+  query: string,
+  item: OfferSearchRelevanceFields,
+): boolean {
+  const tokens = queryTokensForRelevance(query);
+  if (tokens.length === 0) return false;
+  const cardBlob = normBlob(`${item.title} ${item.shortSnippet}`);
+  if (!cardBlob.trim()) return false;
+  for (const brand of UNRELATED_AUTO_BRANDS) {
+    if (!cardBlob.includes(brand)) continue;
+    if (queryMentionsBrand(query, brand)) continue;
+    if (tokens.some((t) => cardBlob.includes(t))) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Drom (and strict mode): token in card text, no unrelated brand, optional URL fallback. */
+export function offerMatchesSearchQueryStrict(
+  query: string,
+  item: OfferSearchRelevanceFields,
+  opts?: { allowUrlFallback?: boolean },
+): boolean {
+  if (offerHasUnrelatedAutoBrand(query, item)) return false;
+  if (offerMatchesSearchQueryInCardText(query, item)) return true;
+  if (opts?.allowUrlFallback && offerMatchesSearchQuery(query, item)) return true;
+  return false;
+}
+
+export function filterHitsByQueryRelevance<
+  T extends OfferSearchRelevanceFields & { sourceName?: string },
+>(query: string, hits: T[], opts?: { strictCardText?: boolean }): T[] {
+  const strict = opts?.strictCardText ?? false;
+  return hits.filter((hit) => {
+    const fields: OfferSearchRelevanceFields = {
+      title: hit.title,
+      shortSnippet: hit.shortSnippet,
+      url: hit.url,
+      brand: hit.brand ?? null,
+    };
+    if (strict) {
+      const allowUrl = hit.sourceName === "drom";
+      return offerMatchesSearchQueryStrict(query, fields, { allowUrlFallback: allowUrl });
+    }
+    return offerMatchesSearchQuery(query, fields);
+  });
+}
+
+/** True when most extracted links fail query match — broad unrelated dump. */
+export function isBroadUnrelatedResultSet(
+  query: string,
+  hits: OfferSearchRelevanceFields[],
+  opts?: { minSample?: number; minMatchRatio?: number },
+): boolean {
+  const minSample = opts?.minSample ?? 4;
+  const minMatchRatio = opts?.minMatchRatio ?? 0.35;
+  if (hits.length < minSample) return false;
+  const tokens = queryTokensForRelevance(query);
+  if (tokens.length === 0) return false;
+  const matched = hits.filter((h) => offerMatchesSearchQueryStrict(query, h, { allowUrlFallback: true }));
+  return matched.length / hits.length < minMatchRatio;
+}

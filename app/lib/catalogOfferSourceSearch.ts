@@ -10,9 +10,15 @@ import {
 } from "./catalogCatalogLog";
 import { assertCatalogFetchAllowed } from "./catalogHtmlFetch";
 import {
+  isBroadUnrelatedResultSet,
+  offerHasUnrelatedAutoBrand,
+  offerMatchesSearchQueryStrict,
+} from "./catalogOfferSearchRelevance";
+import {
   decodeHtmlBytes,
   decodeJsonString,
   extractCityFromContext,
+  extractDromCardTitle,
   extractSellerFromContext,
   isRealOfferListingUrl,
   sanitizeOfferText,
@@ -37,10 +43,15 @@ export type OfferSourceZeroReason =
   | "fetch_error"
   | "parse_error"
   | "unsupported"
+  | "disabled"
   | "city_unsupported"
   | "catalog_only"
   | "js_shell"
+  | "source_unreliable_for_query"
   | null;
+
+/** Sources used when admin picks «stable» / any (Avito primary, Drom experimental). */
+export const STABLE_OFFER_SEARCH_SOURCES: OfferListingSourceId[] = ["avito", "drom"];
 
 export type OfferSourceSearchDiagnostic = {
   sourceName: OfferListingSourceId;
@@ -218,7 +229,9 @@ function pushAvitoHit(
   const title = sanitizeOfferText(
     titleHint ||
       decodeJsonString(
-        ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
+        ctx.match(/data-marker="item-title"[^>]*>([^<]{4,200})</i)?.[1] ??
+          ctx.match(/itemprop="name"[^>]*content="([^"]{4,200})"/i)?.[1] ??
+          ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
           ctx.match(/"name"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
           "",
       ) ||
@@ -227,7 +240,9 @@ function pushAvitoHit(
   );
   const price = extractPriceFromBlob(ctx);
   const snippet = sanitizeOfferText(
-    decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") || title,
+    decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") ||
+      decodeJsonString(ctx.match(/data-marker="item-description"[^>]*>([^<]{8,280})/i)?.[1] ?? "") ||
+      title,
   );
   const hit: OfferSourceSearchHit = {
     url,
@@ -324,7 +339,11 @@ export function diagnoseAvitoSearchPage(
   return "На странице поиска Avito нет ссылок на объявления в HTML.";
 }
 
-type DromParseMeta = { catalogOnly: boolean; jsShell: boolean };
+type DromParseMeta = {
+  catalogOnly: boolean;
+  jsShell: boolean;
+  sourceUnreliableForQuery: boolean;
+};
 
 function pushDromHit(
   hits: OfferSourceSearchHit[],
@@ -338,8 +357,8 @@ function pushDromHit(
   if (!url || !isRealOfferListingUrl(url, "drom") || seen.has(url)) return;
   seen.add(url);
   const title = sanitizeOfferText(
-    decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ?? "") ||
-      decodeJsonString(ctx.match(/data-title="([^"]{4,200})"/i)?.[1] ?? "") ||
+    extractDromCardTitle(ctx, url) ||
+      decodeJsonString(ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ?? "") ||
       titleFromListingUrl(url) ||
       "",
   );
@@ -364,6 +383,7 @@ function parseDromSearchHtml(
   html: string,
   baseUrl: string,
   cityDefault: string,
+  query: string,
 ): { hits: OfferSourceSearchHit[]; meta: DromParseMeta } {
   const hits: OfferSourceSearchHit[] = [];
   const seen = new Set<string>();
@@ -375,6 +395,7 @@ function parseDromSearchHtml(
     /https?:\/\/baza\.drom\.ru\/[a-z0-9_./%-]+\d{5,}(?:\.html)?/gi,
     /href="(https?:\/\/auto\.drom\.ru\/[^"]+\d{6,}\.html)"/gi,
     /href="(\/[^"?#]+\d{6,}\.html)"/gi,
+    /data-ftid="bulls-list_bull"[\s\S]{0,1200}?href="([^"]+\d{6,}\.html)"/gi,
   ];
 
   for (const urlRe of patterns) {
@@ -385,7 +406,7 @@ function parseDromSearchHtml(
         catalogHits += 1;
         continue;
       }
-      const ctx = html.slice(Math.max(0, m.index - 400), m.index + 800);
+      const ctx = html.slice(Math.max(0, m.index - 500), m.index + 900);
       pushDromHit(hits, seen, raw, baseUrl, cityDefault, ctx);
     }
   }
@@ -396,11 +417,46 @@ function parseDromSearchHtml(
       (/\/catalog\//i.test(html) && !/\d{6,}\.html/i.test(html)));
   const catalogOnly = hits.length === 0 && catalogHits > 0 && !jsShell;
 
-  return { hits, meta: { catalogOnly, jsShell } };
+  const q = query.trim();
+  let sourceUnreliableForQuery = false;
+  let filtered = hits;
+  if (q.length >= 2) {
+    const relevanceFields = hits.map((h) => ({
+      ...h,
+      shortSnippet: h.snippet,
+      brand: null as string | null,
+    }));
+    if (isBroadUnrelatedResultSet(q, relevanceFields)) {
+      sourceUnreliableForQuery = true;
+      filtered = [];
+    } else {
+      filtered = hits.filter((h) => {
+        const fields = {
+          title: h.title,
+          shortSnippet: h.snippet,
+          url: h.url,
+          brand: null as string | null,
+        };
+        if (offerHasUnrelatedAutoBrand(q, fields)) return false;
+        return offerMatchesSearchQueryStrict(q, fields, { allowUrlFallback: true });
+      });
+      if (hits.length >= 4 && filtered.length === 0) {
+        sourceUnreliableForQuery = true;
+      }
+    }
+  }
+
+  return {
+    hits: sourceUnreliableForQuery ? [] : filtered,
+    meta: { catalogOnly, jsShell, sourceUnreliableForQuery },
+  };
 }
 
 export function diagnoseDromSearchPage(meta: DromParseMeta, hits: OfferSourceSearchHit[]): string | null {
   if (hits.length > 0) return null;
+  if (meta.sourceUnreliableForQuery) {
+    return "Drom: выдача не соответствует запросу (широкий нерелевантный список).";
+  }
   if (meta.catalogOnly) return "Drom returned catalog pages, no real offers.";
   if (meta.jsShell) return "Drom: объявления подгружаются скриптом, ссылок в HTML нет.";
   return "На странице поиска Drom нет ссылок на объявления.";
@@ -550,17 +606,42 @@ function parseSearchHtml(
   html: string,
   baseUrl: string,
   cityDefault: string,
+  query: string,
 ): ParseSearchResult {
   if (source === "avito") {
     const { hits, meta } = parseAvitoSearchHtml(html, baseUrl, cityDefault);
     return { hits, avitoMeta: meta };
   }
   if (source === "drom") {
-    const { hits, meta } = parseDromSearchHtml(html, baseUrl, cityDefault);
+    const { hits, meta } = parseDromSearchHtml(html, baseUrl, cityDefault, query);
     return { hits, dromMeta: meta };
   }
   if (source === "youla") return { hits: parseYoulaSearchHtml(html, baseUrl, cityDefault) };
   return { hits: parseVkSearchHtml(html, baseUrl, cityDefault) };
+}
+
+function disabledSourceDiagnostic(
+  source: OfferListingSourceId,
+  zeroReason: OfferSourceZeroReason,
+  message: string,
+): OfferSourceSearchDiagnostic {
+  return {
+    sourceName: source,
+    searched: false,
+    blocked: zeroReason === "captcha",
+    searchUrls: [],
+    httpStatus: null,
+    pagesScanned: 0,
+    linksExtracted: 0,
+    skippedCount: 0,
+    parserErrors: 0,
+    zeroReason,
+    skipReasons: {},
+    message,
+    errorMessage: message,
+    errorCode: zeroReason,
+    lastRequestUrl: null,
+  };
 }
 
 function zeroReasonFromError(error: string, parsed: number): OfferSourceZeroReason {
@@ -580,8 +661,16 @@ export function offerSourcesForFilter(
   if (filter === "drom") return ["drom"];
   if (filter === "youla") return ["youla"];
   if (filter === "vk") return ["vk"];
-  if (filter === "all") return [...CATALOG_MARKETPLACE_SOURCES];
+  if (filter === "all") return [...STABLE_OFFER_SEARCH_SOURCES];
   return [];
+}
+
+/** Sources not fetched in «all» mode — shown as disabled in diagnostics only. */
+export function disabledOfferSearchSourcesForFilter(
+  filter: "all" | OfferListingSourceId | "company_site" | "other",
+): OfferListingSourceId[] {
+  if (filter !== "all") return [];
+  return CATALOG_MARKETPLACE_SOURCES.filter((s) => !STABLE_OFFER_SEARCH_SOURCES.includes(s));
 }
 
 export async function searchOfferListingSources(opts: {
@@ -601,9 +690,35 @@ export async function searchOfferListingSources(opts: {
 
   logCatalogOfferSearch("search_start", { query: query.slice(0, 60), sources: opts.sources });
 
+  const disabledSources = CATALOG_MARKETPLACE_SOURCES.filter(
+    (s) => !opts.sources.includes(s),
+  );
+  for (const source of disabledSources) {
+    if (source === "youla") {
+      diagnostics.push(
+        disabledSourceDiagnostic(
+          "youla",
+          "disabled",
+          "Youla blocked by captcha (источник отключён).",
+        ),
+      );
+    } else if (source === "vk") {
+      diagnostics.push(
+        disabledSourceDiagnostic("vk", "unsupported", "VK parser not implemented yet"),
+      );
+    }
+  }
+
   await Promise.all(
     opts.sources.map(async (source) => {
       try {
+      if (source === "vk") {
+        diagnostics.push(
+          disabledSourceDiagnostic("vk", "unsupported", "VK parser not implemented yet"),
+        );
+        return;
+      }
+
       const skipReasons: Record<string, number> = {};
       const searchUrls: string[] = [];
       let httpStatus: number | null = null;
@@ -664,12 +779,14 @@ export async function searchOfferListingSources(opts: {
           if (source === "avito" || source === "drom") {
             logOfferSearchHtmlSnippet(source, searchUrl, fetched.html);
           }
-          const parsed = parseSearchHtml(source, fetched.html, fetched.url, city);
+          const parsed = parseSearchHtml(source, fetched.html, fetched.url, city, query);
           if (parsed.dromMeta) {
             dromMeta = dromMeta
               ? {
                   catalogOnly: dromMeta.catalogOnly || parsed.dromMeta.catalogOnly,
                   jsShell: dromMeta.jsShell || parsed.dromMeta.jsShell,
+                  sourceUnreliableForQuery:
+                    dromMeta.sourceUnreliableForQuery || parsed.dromMeta.sourceUnreliableForQuery,
                 }
               : parsed.dromMeta;
           }
@@ -747,7 +864,14 @@ export async function searchOfferListingSources(opts: {
           }
         } else if (source === "drom" && dromMeta) {
           detailMessage = diagnoseDromSearchPage(dromMeta, []) ?? undefined;
-          zeroReason = dromMeta.catalogOnly ? "catalog_only" : dromMeta.jsShell ? "js_shell" : "no_selector";
+          zeroReason =
+            dromMeta.sourceUnreliableForQuery ? "source_unreliable_for_query"
+            : dromMeta.catalogOnly ? "catalog_only"
+            : dromMeta.jsShell ? "js_shell"
+            : "no_selector";
+        } else if (source === "youla" && (lastError === "CAPTCHA" || zeroReason === "captcha")) {
+          detailMessage = "Youla blocked by captcha";
+          zeroReason = "captcha";
         } else {
           zeroReason = zeroReasonFromError(lastError || "NO_SELECTOR", 0);
         }
@@ -762,7 +886,16 @@ export async function searchOfferListingSources(opts: {
       if (!detailMessage && linksExtracted === 0) {
         detailMessage =
           zeroReason === "blocked" ? "Avito blocked search page."
-          : zeroReason === "captcha" ? "Капча на странице источника."
+          : zeroReason === "captcha" ?
+            source === "youla" ?
+              "Youla blocked by captcha"
+            : "Капча на странице источника."
+          : zeroReason === "source_unreliable_for_query" ?
+            "Drom: выдача не соответствует запросу."
+          : zeroReason === "unsupported" ?
+            "VK parser not implemented yet"
+          : zeroReason === "disabled" ?
+            "Youla blocked by captcha (источник отключён)."
           : zeroReason === "catalog_only" ? "Drom returned catalog pages, no real offers."
           : zeroReason === "js_shell" ?
             source === "avito" ?
@@ -839,7 +972,9 @@ export const OFFER_SOURCE_ZERO_LABELS: Record<NonNullable<OfferSourceZeroReason>
   fetch_error: "ошибка загрузки",
   parse_error: "ошибка разбора HTML",
   unsupported: "источник не поддерживается",
+  disabled: "источник отключён",
   city_unsupported: "город не в URL — ищем широко, фильтр после разбора",
   catalog_only: "Drom returned catalog pages, no real offers.",
   js_shell: "Drom: объявления подгружаются скриптом, ссылок в HTML нет.",
+  source_unreliable_for_query: "Drom: нерелевантная выдача по запросу",
 };

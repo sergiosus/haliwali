@@ -2,6 +2,7 @@ import { logCatalogDiscover, logCatalogOfferSearch } from "./catalogCatalogLog";
 import type { OfferSearchApiErrorDetail } from "./catalogOfferSearchApiError";
 import {
   buildDirectMarketplaceSearchUrls,
+  disabledOfferSearchSourcesForFilter,
   offerSourcesForFilter,
   searchOfferListingSources,
   type OfferSourceSearchDiagnostic,
@@ -17,7 +18,11 @@ import {
   CATALOG_MARKETPLACE_SOURCES,
   type CatalogSourceName,
 } from "./catalogSourceOfferTypes";
-import { offerMatchesSearchQuery } from "./catalogOfferSearchRelevance";
+import {
+  offerHasUnrelatedAutoBrand,
+  offerMatchesSearchQuery,
+  offerMatchesSearchQueryStrict,
+} from "./catalogOfferSearchRelevance";
 import { titleFromListingUrl } from "./catalogOfferSearchText";
 
 export type OfferSearchSourceFilter =
@@ -146,6 +151,25 @@ function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
   };
 }
 
+function relevanceFields(item: OfferSearchResultItem) {
+  return {
+    title: item.title,
+    shortSnippet: item.shortSnippet,
+    url: item.url,
+    brand: item.brand,
+  };
+}
+
+function itemPassesRelevance(query: string, item: OfferSearchResultItem): boolean {
+  const fields = relevanceFields(item);
+  const src = listingSourceFromUrl(item.url);
+  if (offerHasUnrelatedAutoBrand(query, fields)) return false;
+  if (src === "drom") {
+    return offerMatchesSearchQueryStrict(query, fields, { allowUrlFallback: true });
+  }
+  return offerMatchesSearchQuery(query, fields);
+}
+
 function applyQueryRelevanceFilter(
   query: string,
   items: OfferSearchResultItem[],
@@ -154,19 +178,30 @@ function applyQueryRelevanceFilter(
   const matched: OfferSearchResultItem[] = [];
   const skipped: OfferSearchResultItem[] = [];
   for (const item of items) {
-    if (
-      offerMatchesSearchQuery(query, {
-        title: item.title,
-        shortSnippet: item.shortSnippet,
-        url: item.url,
-        brand: item.brand,
-      })
-    ) {
+    if (itemPassesRelevance(query, item)) {
       matched.push({ ...item, relevance: "match", skipReason: null });
     } else {
       skipped.push({ ...item, relevance: "skipped", skipReason: "query_mismatch" });
       hidden.query_mismatch = (hidden.query_mismatch ?? 0) + 1;
+      if (listingSourceFromUrl(item.url) === "drom") {
+        hidden.drom_unrelated = (hidden.drom_unrelated ?? 0) + 1;
+      }
     }
+  }
+  return { matched, skipped };
+}
+
+function keepAvitoOnlyOnRelevanceFailure(
+  query: string,
+  items: OfferSearchResultItem[],
+  hidden: Record<string, number>,
+): { matched: OfferSearchResultItem[]; skipped: OfferSearchResultItem[] } {
+  const avitoItems = items.filter((i) => listingSourceFromUrl(i.url) === "avito");
+  const { matched, skipped } = applyQueryRelevanceFilter(query, avitoItems, hidden);
+  const nonAvito = items.filter((i) => listingSourceFromUrl(i.url) !== "avito");
+  for (const item of nonAvito) {
+    skipped.push({ ...item, relevance: "skipped", skipReason: "query_mismatch" });
+    hidden.drom_unreliable = (hidden.drom_unreliable ?? 0) + 1;
   }
   return { matched, skipped };
 }
@@ -185,18 +220,14 @@ function applyQueryRelevanceFilterSafe(
     const { matched, skipped } = applyQueryRelevanceFilter(query, items, hidden);
     if (matched.length === 0 && items.length > 0) {
       const filterError = "no_relevant_matches";
-      logCatalogOfferSearch("relevance_zero_fallback", {
+      logCatalogOfferSearch("relevance_zero_avito_only", {
         query: query.slice(0, 60),
-        kept: items.length,
+        total: items.length,
         rejected: skipped.length,
       });
+      const avitoFallback = keepAvitoOnlyOnRelevanceFailure(query, items, hidden);
       return {
-        matched: items.map((item) => ({
-          ...item,
-          relevance: "relevance_unknown" as const,
-          skipReason: null,
-        })),
-        skipped: [],
+        ...avitoFallback,
         filterFailed: true,
         filterError,
       };
@@ -205,12 +236,8 @@ function applyQueryRelevanceFilterSafe(
   } catch (err) {
     const filterError = err instanceof Error ? err.message : String(err);
     logCatalogOfferSearch("relevance_filter_failed", { error: filterError, kept: items.length });
-    const matched = items.map((item) => ({
-      ...item,
-      relevance: "relevance_unknown" as const,
-      skipReason: null,
-    }));
-    return { matched, skipped: [], filterFailed: true, filterError };
+    const avitoFallback = keepAvitoOnlyOnRelevanceFailure(query, items, hidden);
+    return { ...avitoFallback, filterFailed: true, filterError };
   }
 }
 
@@ -355,6 +382,7 @@ export async function searchOffersForAdmin(opts: {
   }
 
   const sources = offerSourcesForFilter(sourceFilter);
+  const disabledSources = disabledOfferSearchSourcesForFilter(sourceFilter);
   const directSearchUrls = buildDirectMarketplaceSearchUrls(query, city, sources);
 
   logCatalogOfferSearch("admin_search_start", {
@@ -412,14 +440,39 @@ export async function searchOffersForAdmin(opts: {
   };
 
   if (items.length === 0) {
+    const diagLines = diagnostics.map((d) => d.message ?? `${d.sourceName}: ${d.zeroReason ?? "empty"}`);
+    const youlaCaptcha = diagnostics.some(
+      (d) => d.sourceName === "youla" && (d.zeroReason === "captcha" || d.zeroReason === "disabled"),
+    );
+    const vkUnsupported = diagnostics.some(
+      (d) => d.sourceName === "vk" && d.zeroReason === "unsupported",
+    );
+    const parts = [...diagLines];
+    if (youlaCaptcha && !parts.some((p) => /youla/i.test(p))) {
+      parts.push("Youla blocked by captcha");
+    }
+    if (vkUnsupported && !parts.some((p) => /vk/i.test(p))) {
+      parts.push("VK parser not implemented yet");
+    }
+    if (disabledSources.length > 0 && sourceFilter === "all") {
+      for (const s of disabledSources) {
+        if (s === "youla" && !parts.some((p) => /youla/i.test(p))) {
+          parts.push("Youla blocked by captcha (не включён в поиск)");
+        }
+        if (s === "vk" && !parts.some((p) => /vk/i.test(p))) {
+          parts.push("VK parser not implemented yet");
+        }
+      }
+    }
     return {
       ok: true,
       results: [],
       stats,
-      emptyReason: "NO_LINKS_EXTRACTED",
-      message:
-        diagnostics.map((d) => d.message ?? `${d.sourceName}: ${d.zeroReason ?? "empty"}`).join(" · ") ||
-        "На страницах поиска не найдено ссылок на объявления",
+      emptyReason:
+        youlaCaptcha ? "SOURCE_CAPTCHA"
+        : vkUnsupported ? "SOURCE_UNSUPPORTED"
+        : "NO_LINKS_EXTRACTED",
+      message: parts.join(" · ") || "На страницах поиска не найдено ссылок на объявления",
     };
   }
 
@@ -515,7 +568,7 @@ export async function searchOffersForAdmin(opts: {
       : null,
     message:
       filterFailed ?
-        `Фильтр релевантности недоступен — показаны все ${items.length} ссылок (${filterError ?? "ошибка"})`
+        `Релевантных совпадений нет — показаны только Avito (${items.length}). Drom и прочие нерелевантные скрыты.`
       : items.length === 0 && skipped.length > 0 ?
         `Релевантных: 0. Скрыто по запросу: ${skipped.length} (всего с площадок: ${rawLinkCount})`
       : items.length === 0 ?

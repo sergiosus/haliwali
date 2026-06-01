@@ -23,6 +23,14 @@ import {
   type SourceOfferRejectReason,
 } from "./catalogSourceOfferValidation";
 import type { CatalogSourceName } from "./catalogSourceOfferTypes";
+import {
+  imageUrlFromRawPayload,
+  rawPayloadForDb,
+  SOURCE_OFFER_DRAFT_SELECT_COLS,
+  SOURCE_OFFER_PUBLISHED_SELECT_COLS,
+  CATALOG_SOURCE_OFFERS_TABLE,
+  CATALOG_SOURCE_OFFER_DRAFTS_TABLE,
+} from "./catalogSourceOfferDbColumns";
 
 type DraftRow = {
   id: number;
@@ -40,7 +48,6 @@ type DraftRow = {
   source_name: string;
   source_url: string;
   short_snippet: string;
-  image_url: string | null;
   confidence_score: number;
   duplicate_hint: string | null;
   duplicate_of_offer_id: number | null;
@@ -83,7 +90,7 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
     sourceName: r.source_name as CatalogSourceOfferDraft["sourceName"],
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
-    imageUrl: r.image_url,
+    imageUrl: imageUrlFromRawPayload(r.raw_payload),
     confidenceScore: r.confidence_score,
     duplicateHint: r.duplicate_hint,
     duplicateOfOfferId: r.duplicate_of_offer_id,
@@ -135,7 +142,7 @@ function offerRowToInput(r: OfferRow): ReturnType<typeof inputFromSourceOfferFie
     sourceName: r.source_name as CatalogSourceName,
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
-    imageUrl: r.image_url,
+    imageUrl: null,
     confidenceScore: r.confidence_score,
   });
 }
@@ -176,7 +183,7 @@ function rowToOffer(r: OfferRow): CatalogSourceOffer {
     sourceName: r.source_name as CatalogSourceOffer["sourceName"],
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
-    imageUrl: r.image_url ?? null,
+    imageUrl: null,
     confidenceScore: r.confidence_score,
     haliwaliCompanyId: r.haliwali_company_id,
     titleSearch: r.title_search,
@@ -190,11 +197,7 @@ function rowToOffer(r: OfferRow): CatalogSourceOffer {
   };
 }
 
-const DRAFT_COLS = `id, status, title, price, city, region, category_slug, company_name, seller_name, brand,
-  oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
-  duplicate_hint, duplicate_of_offer_id, published_offer_id,
-  title_search, brand_search, oem_search, company_search, city_search,
-  raw_payload, imported_at, created_at, updated_at`;
+const DRAFT_COLS = SOURCE_OFFER_DRAFT_SELECT_COLS;
 
 export async function pgListSourceOfferDrafts(
   status?: CatalogSourceOfferDraftStatus,
@@ -240,10 +243,10 @@ export async function pgUpsertSourceOfferDrafts(
           status = $2, title = $3, price = $4, city = $5, region = $6, category_slug = $7,
           company_name = $8, seller_name = $9, brand = $10,
           oem_codes = $11::jsonb, article_codes = $12::jsonb,
-          source_name = $13, source_url = $14, short_snippet = $15, image_url = $16, confidence_score = $17,
-          duplicate_hint = $18, duplicate_of_offer_id = $19,
-          title_search = $20, brand_search = $21, oem_search = $22, company_search = $23, city_search = $24,
-          raw_payload = $25::jsonb, imported_at = NOW(), updated_at = NOW()
+          source_name = $13, source_url = $14, short_snippet = $15, confidence_score = $16,
+          duplicate_hint = $17, duplicate_of_offer_id = $18,
+          title_search = $19, brand_search = $20, oem_search = $21, company_search = $22, city_search = $23,
+          raw_payload = $24::jsonb, imported_at = NOW(), updated_at = NOW()
         WHERE id = $1
         RETURNING ${DRAFT_COLS}
         `,
@@ -263,7 +266,6 @@ export async function pgUpsertSourceOfferDrafts(
           input.sourceName,
           input.sourceUrl,
           input.shortSnippet,
-          input.imageUrl,
           input.confidenceScore,
           item.duplicateHint,
           item.duplicateOfOfferId,
@@ -272,7 +274,7 @@ export async function pgUpsertSourceOfferDrafts(
           search.oemSearch,
           search.companySearch,
           search.citySearch,
-          JSON.stringify(input.rawPayload ?? {}),
+          JSON.stringify(rawPayloadForDb(input.rawPayload, input.imageUrl)),
         ],
       );
       if (rows[0]) {
@@ -286,12 +288,12 @@ export async function pgUpsertSourceOfferDrafts(
       `
       INSERT INTO catalog_source_offer_import_drafts (
         status, title, price, city, region, category_slug, company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
+        oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
         duplicate_hint, duplicate_of_offer_id,
         title_search, brand_search, oem_search, company_search, city_search, raw_payload
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16,
-        $17, $18, $19, $20, $21, $22, $23, $24::jsonb
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22, $23::jsonb
       )
       RETURNING ${DRAFT_COLS}
       `,
@@ -310,7 +312,6 @@ export async function pgUpsertSourceOfferDrafts(
         input.sourceName,
         input.sourceUrl,
         input.shortSnippet,
-        input.imageUrl,
         input.confidenceScore,
         item.duplicateHint,
         item.duplicateOfOfferId,
@@ -319,7 +320,7 @@ export async function pgUpsertSourceOfferDrafts(
         search.oemSearch,
         search.companySearch,
         search.citySearch,
-        JSON.stringify(input.rawPayload ?? {}),
+        JSON.stringify(rawPayloadForDb(input.rawPayload, input.imageUrl)),
       ],
     );
     if (rows[0]) {
@@ -385,11 +386,11 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
       `
       INSERT INTO catalog_source_offers (
         draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
+        oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
         title_search, brand_search, oem_search, company_search, city_search
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16,
-        $17, $18, $19, $20, $21
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20
       )
       RETURNING id
       `,
@@ -408,7 +409,6 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
         d.source_name,
         d.source_url,
         d.short_snippet,
-        d.image_url,
         d.confidence_score,
         d.title_search,
         d.brand_search,
@@ -487,10 +487,7 @@ function buildPublishedOfferWhere(
   return clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 }
 
-const OFFER_SELECT_COLS = `id, draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,
-  oem_codes, article_codes, source_name, source_url, short_snippet, image_url, confidence_score,
-  haliwali_company_id, title_search, brand_search, oem_search, company_search, city_search,
-  imported_at, created_at, updated_at`;
+const OFFER_SELECT_COLS = SOURCE_OFFER_PUBLISHED_SELECT_COLS;
 
 function filterValidPublishedRows(rows: OfferRow[]): CatalogSourceOffer[] {
   return rows
@@ -633,12 +630,86 @@ const ACTIONABLE_DRAFT_STATUSES = ["draft", "new", "saved", "approved", "duplica
 export async function pgCheckSourceOffersTablesReady(): Promise<boolean> {
   try {
     const pool = getPool();
-    await pool.query(`SELECT 1 FROM catalog_source_offers LIMIT 1`);
-    await pool.query(`SELECT 1 FROM catalog_source_offer_import_drafts LIMIT 1`);
-    return true;
+    const { rows } = await pool.query<{ offers: boolean; drafts: boolean }>(
+      `
+      SELECT
+        EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = $1
+        ) AS offers,
+        EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = $2
+        ) AS drafts
+      `,
+      [CATALOG_SOURCE_OFFERS_TABLE, CATALOG_SOURCE_OFFER_DRAFTS_TABLE],
+    );
+    const row = rows[0];
+    return Boolean(row?.offers && row?.drafts);
   } catch {
     return false;
   }
+}
+
+export type SourceOfferDbIntrospection = {
+  catalog_source_offers: { exists: boolean; columns: string[] };
+  catalog_source_offer_import_drafts: { exists: boolean; columns: string[] };
+  image_url_column_present: {
+    offers: boolean;
+    drafts: boolean;
+  };
+};
+
+export async function pgIntrospectSourceOfferDb(): Promise<SourceOfferDbIntrospection> {
+  const pool = getPool();
+  const tableNames = [CATALOG_SOURCE_OFFERS_TABLE, CATALOG_SOURCE_OFFER_DRAFTS_TABLE] as const;
+
+  const { rows: tableRows } = await pool.query<{ table_name: string }>(
+    `
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = ANY($1::text[])
+    `,
+    [tableNames],
+  );
+  const existing = new Set(tableRows.map((r) => r.table_name));
+
+  const { rows: colRows } = await pool.query<{ table_name: string; column_name: string }>(
+    `
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = ANY($1::text[])
+    ORDER BY table_name, ordinal_position
+    `,
+    [tableNames],
+  );
+
+  const colsByTable: Record<string, string[]> = {
+    [CATALOG_SOURCE_OFFERS_TABLE]: [],
+    [CATALOG_SOURCE_OFFER_DRAFTS_TABLE]: [],
+  };
+  for (const r of colRows) {
+    const list = colsByTable[r.table_name];
+    if (list) list.push(r.column_name);
+  }
+
+  const offersCols = colsByTable[CATALOG_SOURCE_OFFERS_TABLE] ?? [];
+  const draftsCols = colsByTable[CATALOG_SOURCE_OFFER_DRAFTS_TABLE] ?? [];
+
+  return {
+    catalog_source_offers: {
+      exists: existing.has(CATALOG_SOURCE_OFFERS_TABLE),
+      columns: offersCols,
+    },
+    catalog_source_offer_import_drafts: {
+      exists: existing.has(CATALOG_SOURCE_OFFER_DRAFTS_TABLE),
+      columns: draftsCols,
+    },
+    image_url_column_present: {
+      offers: offersCols.includes("image_url"),
+      drafts: draftsCols.includes("image_url"),
+    },
+  };
 }
 
 export async function pgCountPublishedSourceOffers(): Promise<number> {

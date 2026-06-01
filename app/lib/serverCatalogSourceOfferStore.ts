@@ -73,6 +73,14 @@ export type CatalogSourceOfferAdminStatus = {
   rejectedCount: number;
   duplicateCount: number;
   dbError?: string;
+  /** Temporary diagnostics — publish vs public list alignment. */
+  publishedOffersCountFromDb?: number;
+  publicApiCount?: number;
+  draftsApprovedCount?: number;
+  draftsPublishedCount?: number;
+  tableUsedByAdmin?: string;
+  tableUsedByPublicApi?: string;
+  listQueryError?: string;
 };
 
 export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdminStatus> {
@@ -118,6 +126,13 @@ export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdm
       };
     }
 
+    let syncDebug: Awaited<ReturnType<typeof pg.pgGetSourceOfferSyncDebug>> | undefined;
+    try {
+      syncDebug = await pg.pgGetSourceOfferSyncDebug();
+    } catch {
+      syncDebug = undefined;
+    }
+
     return {
       tablesReady: true,
       publishedCount,
@@ -125,6 +140,13 @@ export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdm
       candidatesCount: queues.candidates,
       rejectedCount: queues.rejected,
       duplicateCount: queues.duplicate,
+      publishedOffersCountFromDb: syncDebug?.publishedOffersCountFromDb ?? publishedCount,
+      publicApiCount: syncDebug?.publicApiCount,
+      draftsApprovedCount: syncDebug?.draftsApprovedCount,
+      draftsPublishedCount: syncDebug?.draftsPublishedCount,
+      tableUsedByAdmin: syncDebug?.tableUsedByAdmin ?? "catalog_source_offers",
+      tableUsedByPublicApi: syncDebug?.tableUsedByPublicApi ?? "catalog_source_offers",
+      listQueryError: syncDebug?.listQueryError,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

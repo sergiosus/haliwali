@@ -263,7 +263,18 @@ export function CatalogSourceOffersClient() {
       try {
         const params = buildParams(query, f, p, ps);
         const r = await fetch(`/api/catalogs/source-offers?${params.toString()}`, { cache: "no-store" });
-        const data = (await r.json()) as { offers?: CatalogSourceOffer[]; total?: number };
+        const data = (await r.json()) as {
+          ok?: boolean;
+          offers?: CatalogSourceOffer[];
+          total?: number;
+          error?: string;
+        };
+        if (!r.ok || data.ok === false) {
+          console.error("[source-offers]", data.error ?? r.statusText);
+          setOffers([]);
+          setTotal(0);
+          return;
+        }
         setOffers(data.offers ?? []);
         setTotal(data.total ?? data.offers?.length ?? 0);
       } catch {

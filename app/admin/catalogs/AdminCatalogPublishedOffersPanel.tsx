@@ -11,6 +11,7 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [syncDebug, setSyncDebug] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -18,10 +19,28 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
         fetch("/api/admin/catalogs/source-offers/status", { cache: "no-store", credentials: "include" }),
         fetch("/api/admin/catalogs/source-offers", { cache: "no-store", credentials: "include" }),
       ]);
-      const statusData = (await statusRes.json()) as { tablesReady?: boolean };
-      const offersData = (await offersRes.json()) as { offers?: CatalogSourceOffer[] };
+      const statusData = (await statusRes.json()) as {
+        tablesReady?: boolean;
+        publishedOffersCountFromDb?: number;
+        publicApiCount?: number;
+        draftsApprovedCount?: number;
+        draftsPublishedCount?: number;
+        tableUsedByAdmin?: string;
+        tableUsedByPublicApi?: string;
+        listQueryError?: string;
+      };
+      const offersData = (await offersRes.json()) as { offers?: CatalogSourceOffer[]; error?: string };
       setTablesReady(statusData.tablesReady !== false);
       setOffers(offersData.offers ?? []);
+      setSyncDebug({
+        publishedOffersCountFromDb: statusData.publishedOffersCountFromDb,
+        publicApiCount: statusData.publicApiCount,
+        draftsApprovedCount: statusData.draftsApprovedCount,
+        draftsPublishedCount: statusData.draftsPublishedCount,
+        tableUsedByAdmin: statusData.tableUsedByAdmin,
+        tableUsedByPublicApi: statusData.tableUsedByPublicApi,
+        listQueryError: statusData.listQueryError ?? offersData.error,
+      });
       setSelected(new Set());
     } catch {
       setOffers([]);
@@ -77,6 +96,11 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
         <p className="mt-1 text-sm text-black/55">
           Опубликованные объявления из внешних источников. Отображаются в каталоге на сайте.
         </p>
+        {syncDebug ?
+          <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-black/[0.04] p-2 text-[11px] leading-snug text-black/60">
+            {JSON.stringify(syncDebug, null, 2)}
+          </pre>
+        : null}
       </div>
 
       <div className="flex flex-wrap gap-2">

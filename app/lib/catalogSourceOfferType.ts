@@ -99,12 +99,22 @@ export function resolveOfferTypeForStorage(
   return inferred;
 }
 
+const AUTO_TITLE_NEEDLE_SQL = `(
+  title_search LIKE '%volkswagen%' OR title_search LIKE '%toyota%' OR title_search LIKE '%bmw%'
+  OR title_search LIKE '%mercedes%' OR title_search LIKE '%touran%' OR title_search LIKE '%camry%'
+  OR title_search LIKE '%polo%' OR title_search LIKE '%golf%' OR title_search LIKE '%octavia%'
+  OR title_search LIKE '%solaris%' OR title_search LIKE '%lada%' OR title_search LIKE '%hyundai%'
+  OR title_search LIKE '%kia%' OR title_search LIKE '%nissan%' OR title_search LIKE '%honda%'
+  OR title_search LIKE '%ford%' OR title_search LIKE '%audi%' OR title_search LIKE '%skoda%'
+  OR title_search LIKE '%renault%' OR title_search LIKE '%ваз%' OR title_search LIKE '%уаз%'
+)`;
+
 const AUTO_HEURISTIC_SQL = `(
   lower(source_url) LIKE '%auto.drom.ru%'
   OR lower(source_url) LIKE '%//auto.ru/%'
   OR lower(source_url) LIKE '%avito.ru%avtomobil%'
   OR lower(source_url) LIKE '%/avtomobili/%'
-  OR title_search ~* '\\y(volkswagen|toyota|bmw|mercedes|touran|camry|polo|golf|octavia|solaris|rio|creta|lada|hyundai|kia|nissan|honda|ford|audi|skoda|renault|ваз|уаз)\\y'
+  OR ${AUTO_TITLE_NEEDLE_SQL}
 )`;
 
 const PARTS_HEURISTIC_SQL = `(
@@ -114,11 +124,14 @@ const PARTS_HEURISTIC_SQL = `(
 )`;
 
 const ELECTRONICS_HEURISTIC_SQL = `(
-  title_search ~* '\\y(iphone|samsung|xiaomi|ноутбук|macbook|playstation|телефон|планшет)\\y'
+  title_search LIKE '%iphone%' OR title_search LIKE '%samsung%' OR title_search LIKE '%xiaomi%'
+  OR title_search LIKE '%ноутбук%' OR title_search LIKE '%macbook%' OR title_search LIKE '%playstation%'
+  OR title_search LIKE '%телефон%' OR title_search LIKE '%планшет%'
 )`;
 
 const REAL_ESTATE_HEURISTIC_SQL = `(
-  title_search ~* '\\y(квартир|недвижим|участок|аренд|комнат)\\y'
+  title_search LIKE '%квартир%' OR title_search LIKE '%недвижим%' OR title_search LIKE '%участок%'
+  OR title_search LIKE '%аренд%' OR title_search LIKE '%комнат%'
 )`;
 
 function storedIsOtherSql(): string {

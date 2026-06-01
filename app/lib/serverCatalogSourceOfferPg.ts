@@ -15,10 +15,11 @@ import type {
 } from "./catalogSourceOfferQuery";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
 import { sanitizeSourceOfferInput } from "./catalogSourceOfferNormalize";
+import { resolveOfferTypeForStorage } from "./catalogSourceOfferType";
 import {
   formatSourceOfferRejectHint,
   inputFromSourceOfferFields,
-  isValidPublishedSourceOffer,
+  isPublicListableSourceOffer,
   validateSourceOfferInput,
   type SourceOfferRejectReason,
 } from "./catalogSourceOfferValidation";
@@ -33,6 +34,7 @@ import {
   resolveCoverImageUrl,
   SOURCE_OFFER_DRAFT_SELECT_COLS,
   SOURCE_OFFER_PUBLISHED_SELECT_COLS,
+  SOURCE_OFFER_PUBLISHED_SELECT_COLS_LEGACY,
   CATALOG_SOURCE_OFFERS_TABLE,
   CATALOG_SOURCE_OFFER_DRAFTS_TABLE,
 } from "./catalogSourceOfferDbColumns";
@@ -70,10 +72,49 @@ type DraftRow = {
   updated_at: Date;
 };
 
-type OfferRow = Omit<DraftRow, "status" | "duplicate_hint" | "duplicate_of_offer_id" | "published_offer_id" | "raw_payload"> & {
+type OfferRow = Omit<
+  DraftRow,
+  "status" | "duplicate_hint" | "duplicate_of_offer_id" | "published_offer_id" | "raw_payload" | "offer_type" | "cover_image_url"
+> & {
   draft_id: number | null;
   haliwali_company_id: number | null;
+  offer_type?: string;
+  cover_image_url?: string | null;
 };
+
+function isMissingColumnDbError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /column .* does not exist/i.test(msg) || /undefined column/i.test(msg);
+}
+
+async function queryPublishedOfferRows(
+  pool: ReturnType<typeof getPool>,
+  where: string,
+  params: unknown[],
+  limit: number,
+  offset: number,
+): Promise<OfferRow[]> {
+  const listParams = [...params, limit, offset];
+  const limitIdx = listParams.length - 1;
+  const offsetIdx = listParams.length;
+  const sql = (cols: string) => `
+    SELECT ${cols}
+    FROM catalog_source_offers
+    ${where}
+    ORDER BY imported_at DESC
+    LIMIT $${limitIdx}
+    OFFSET $${offsetIdx}
+  `;
+
+  try {
+    const { rows } = await pool.query<OfferRow>(sql(SOURCE_OFFER_PUBLISHED_SELECT_COLS), listParams);
+    return rows;
+  } catch (err) {
+    if (!isMissingColumnDbError(err)) throw err;
+    const { rows } = await pool.query<OfferRow>(sql(SOURCE_OFFER_PUBLISHED_SELECT_COLS_LEGACY), listParams);
+    return rows;
+  }
+}
 
 function parseCodes(v: unknown): string[] {
   if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
@@ -204,10 +245,10 @@ async function pgRejectDraftWithReason(
 }
 
 function rowToOffer(r: OfferRow): CatalogSourceOffer {
-  const coverImageUrl = resolveCoverImageUrl({ coverImageUrl: r.cover_image_url });
+  const coverImageUrl = resolveCoverImageUrl({ coverImageUrl: r.cover_image_url ?? null });
   return {
     id: r.id,
-    offerType: effectiveOfferType(r.offer_type, {
+    offerType: effectiveOfferType(r.offer_type ?? "other", {
       title: r.title,
       sourceUrl: r.source_url,
       brand: r.brand,
@@ -412,9 +453,23 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
       continue;
     }
 
+    const sanitized = sanitizeSourceOfferInput(publishCheck.input);
+    if (!sanitized) {
+      const rejected = await pgRejectDraftWithReason(pool, id, "missing_required_fields");
+      if (rejected) out.push(rejected);
+      continue;
+    }
+
+    const offerType = resolveOfferTypeForStorage(sanitized);
+    const cover = resolveCoverImageUrl({
+      coverImageUrl: sanitized.coverImageUrl,
+      rawPayload: sanitized.rawPayload,
+    });
+    const search = buildSourceOfferSearchFields(sanitized);
+
     const { rows: existing } = await pool.query<{ id: number }>(
       `SELECT id FROM catalog_source_offers WHERE lower(trim(source_url)) = lower(trim($1)) LIMIT 1`,
-      [d.source_url],
+      [sanitized.sourceUrl],
     );
     if (existing[0]) {
       const { rows: updated } = await pool.query<DraftRow>(
@@ -430,44 +485,89 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
       continue;
     }
 
-    const { rows: ins } = await pool.query<{ id: number }>(
-      `
-      INSERT INTO catalog_source_offers (
-        draft_id, offer_type, title, price, city, region, category_slug, company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
-        title_search, brand_search, oem_search, company_search, city_search
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17,
-        $18, $19, $20, $21, $22
-      )
-      RETURNING id
-      `,
-      [
+    const insertParams = [
+      d.id,
+      offerType,
+      sanitized.title,
+      sanitized.price,
+      sanitized.city,
+      sanitized.region,
+      sanitized.categorySlug,
+      sanitized.companyName,
+      sanitized.sellerName,
+      sanitized.brand,
+      JSON.stringify(sanitized.oemCodes),
+      JSON.stringify(sanitized.articleCodes),
+      sanitized.sourceName,
+      sanitized.sourceUrl,
+      sanitized.shortSnippet,
+      cover,
+      sanitized.confidenceScore,
+      search.titleSearch,
+      search.brandSearch,
+      search.oemSearch,
+      search.companySearch,
+      search.citySearch,
+    ];
+
+    let offerId: number | undefined;
+    try {
+      const { rows: ins } = await pool.query<{ id: number }>(
+        `
+        INSERT INTO catalog_source_offers (
+          draft_id, offer_type, title, price, city, region, category_slug, company_name, seller_name, brand,
+          oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
+          title_search, brand_search, oem_search, company_search, city_search
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17,
+          $18, $19, $20, $21, $22
+        )
+        RETURNING id
+        `,
+        insertParams,
+      );
+      offerId = ins[0]?.id;
+    } catch (insertErr) {
+      if (!isMissingColumnDbError(insertErr)) throw insertErr;
+      const legacyParams = [
         d.id,
-        parseCatalogSourceOfferType(d.offer_type),
-        d.title,
-        d.price,
-        d.city,
-        d.region,
-        d.category_slug,
-        d.company_name,
-        d.seller_name,
-        d.brand,
-        JSON.stringify(parseCodes(d.oem_codes)),
-        JSON.stringify(parseCodes(d.article_codes)),
-        d.source_name,
-        d.source_url,
-        d.short_snippet,
-        resolveCoverImageUrl({ coverImageUrl: d.cover_image_url, rawPayload: d.raw_payload }),
-        d.confidence_score,
-        d.title_search,
-        d.brand_search,
-        d.oem_search,
-        d.company_search,
-        d.city_search,
-      ],
-    );
-    const offerId = ins[0]?.id;
+        sanitized.title,
+        sanitized.price,
+        sanitized.city,
+        sanitized.region,
+        sanitized.categorySlug,
+        sanitized.companyName,
+        sanitized.sellerName,
+        sanitized.brand,
+        JSON.stringify(sanitized.oemCodes),
+        JSON.stringify(sanitized.articleCodes),
+        sanitized.sourceName,
+        sanitized.sourceUrl,
+        sanitized.shortSnippet,
+        sanitized.confidenceScore,
+        search.titleSearch,
+        search.brandSearch,
+        search.oemSearch,
+        search.companySearch,
+        search.citySearch,
+      ];
+      const { rows: ins } = await pool.query<{ id: number }>(
+        `
+        INSERT INTO catalog_source_offers (
+          draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,
+          oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
+          title_search, brand_search, oem_search, company_search, city_search
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16,
+          $17, $18, $19, $20, $21
+        )
+        RETURNING id
+        `,
+        legacyParams,
+      );
+      offerId = ins[0]?.id;
+    }
+
     if (!offerId) continue;
 
     const { rows: published } = await pool.query<DraftRow>(
@@ -536,33 +636,10 @@ function buildPublishedOfferWhere(
   return clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 }
 
-const OFFER_SELECT_COLS = SOURCE_OFFER_PUBLISHED_SELECT_COLS;
-
-function filterValidPublishedRows(rows: OfferRow[]): CatalogSourceOffer[] {
+function mapPublicPublishedRows(rows: OfferRow[]): CatalogSourceOffer[] {
   return rows
     .map(rowToOffer)
-    .filter((o) =>
-      isValidPublishedSourceOffer(
-        inputFromSourceOfferFields({
-          title: o.title,
-          price: o.price,
-          city: o.city,
-          region: o.region,
-          categorySlug: o.categorySlug,
-          companyName: o.companyName,
-          sellerName: o.sellerName,
-          brand: o.brand,
-          oemCodes: o.oemCodes,
-          articleCodes: o.articleCodes,
-          sourceName: o.sourceName,
-          sourceUrl: o.sourceUrl,
-          shortSnippet: o.shortSnippet,
-          offerType: o.offerType,
-          coverImageUrl: o.coverImageUrl,
-          confidenceScore: o.confidenceScore,
-        }),
-      ),
-    );
+    .filter((o) => isPublicListableSourceOffer({ title: o.title, sourceUrl: o.sourceUrl }));
 }
 
 export async function pgListPublishedSourceOffers(
@@ -580,21 +657,54 @@ export async function pgListPublishedSourceOffers(
   );
   const dbTotal = Number(countRes.rows[0]?.count ?? 0);
 
-  const listParams = [...params, limit, offset];
-  const { rows } = await pool.query<OfferRow>(
-    `
-    SELECT ${OFFER_SELECT_COLS}
-    FROM catalog_source_offers
-    ${where}
-    ORDER BY imported_at DESC
-    LIMIT $${listParams.length - 1}
-    OFFSET $${listParams.length}
-    `,
-    listParams,
-  );
-
-  const offers = filterValidPublishedRows(rows);
+  const rows = await queryPublishedOfferRows(pool, where, params, limit, offset);
+  const offers = mapPublicPublishedRows(rows);
   return { offers, total: dbTotal };
+}
+
+export type SourceOfferSyncDebug = {
+  publishedOffersCountFromDb: number;
+  publicApiCount: number;
+  draftsApprovedCount: number;
+  draftsPublishedCount: number;
+  tableUsedByAdmin: string;
+  tableUsedByPublicApi: string;
+  listQueryError?: string;
+};
+
+export async function pgGetSourceOfferSyncDebug(): Promise<SourceOfferSyncDebug> {
+  const table = CATALOG_SOURCE_OFFERS_TABLE;
+  const publishedOffersCountFromDb = await pgCountPublishedSourceOffers();
+  const draftsApprovedCount = await pgCountDraftsByStatus("approved");
+  const draftsPublishedCount = await pgCountDraftsByStatus("published");
+
+  let publicApiCount = 0;
+  let listQueryError: string | undefined;
+  try {
+    const listed = await pgListPublishedSourceOffers({ limit: 500, offset: 0 });
+    publicApiCount = listed.total;
+  } catch (err) {
+    listQueryError = err instanceof Error ? err.message : String(err);
+  }
+
+  return {
+    publishedOffersCountFromDb,
+    publicApiCount,
+    draftsApprovedCount,
+    draftsPublishedCount,
+    tableUsedByAdmin: table,
+    tableUsedByPublicApi: table,
+    listQueryError,
+  };
+}
+
+async function pgCountDraftsByStatus(status: string): Promise<number> {
+  const pool = getPool();
+  const { rows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM catalog_source_offer_import_drafts WHERE status = $1`,
+    [status],
+  );
+  return Number(rows[0]?.count ?? 0);
 }
 
 export async function pgLoadSourceOfferDedupSeed(): Promise<{

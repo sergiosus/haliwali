@@ -160,6 +160,18 @@ export function isValidPublishedSourceOffer(input: CatalogSourceOfferInput): boo
   return validateSourceOfferInput(input).ok;
 }
 
+/** Public catalog list — rows already in catalog_source_offers; do not re-apply strict import gates. */
+export function isPublicListableSourceOffer(input: {
+  title: string;
+  sourceUrl: string;
+}): boolean {
+  const title = sanitizeOfferText(input.title);
+  const sourceUrl = input.sourceUrl?.trim() ?? "";
+  if (!title || title.length < 3 || hasBadEncoding(title)) return false;
+  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return false;
+  return true;
+}
+
 /** Candidate from admin search — real listing URL + title; extra fields optional. */
 export function validateSourceOfferDraftCandidate(
   input: CatalogSourceOfferInput,

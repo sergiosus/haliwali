@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 export type OfferSourceFilter =
   | "all"
   | "avito"
+  | "auto_ru"
   | "drom"
   | "youla"
   | "vk"
@@ -32,8 +33,9 @@ export const OFFER_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[]
 
 /** Admin offer search — stable sources only in «all», disabled sources labeled. */
 export const OFFER_SEARCH_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[] = [
-  { value: "all", label: "Стабильные (Avito + Drom)" },
+  { value: "all", label: "Авто: Avito + Auto.ru" },
   { value: "avito", label: "Avito — активен" },
+  { value: "auto_ru", label: "Auto.ru — активен" },
   { value: "drom", label: "Drom — экспериментальный" },
   { value: "youla", label: "Youla — отключён (капча)" },
   { value: "vk", label: "VK — не реализован" },
@@ -122,7 +124,8 @@ export function matchesOfferSourceFilter(url: string, filter: OfferSourceFilter)
   if (filter === "all") return true;
   const lower = url.toLowerCase();
   if (filter === "avito") return lower.includes("avito.ru");
-  if (filter === "drom") return lower.includes("drom.ru") || lower.includes("auto.ru");
+  if (filter === "auto_ru") return /\bauto\.ru\b/.test(lower);
+  if (filter === "drom") return lower.includes("drom.ru");
   if (filter === "youla") return lower.includes("youla.ru");
   if (filter === "vk") return lower.includes("vk.com") || lower.includes("vk.ru");
   if (filter === "company_site") {

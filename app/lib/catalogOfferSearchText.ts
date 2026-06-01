@@ -98,6 +98,15 @@ export function decodeJsonString(s: string): string {
   return sanitizeOfferText(tryRepairMojibake(raw));
 }
 
+export function extractPriceFromBlob(blob: string): string | null {
+  const m =
+    blob.match(/([0-9][0-9\s\u00a0]{2,12})\s*(?:₽|руб\.?|р\.)/i) ??
+    blob.match(/"price"\s*:\s*"?(\d[\d\s]{2,})"?/i);
+  if (!m?.[1]) return null;
+  const digits = m[1].replace(/\D/g, "");
+  return digits ? digits : null;
+}
+
 export function sanitizeOfferText(text: string): string {
   return tryRepairMojibake(text)
     .replace(/\uFFFD/g, "")
@@ -161,20 +170,23 @@ export function isRealOfferListingUrl(url: string, source: OfferListingSourceId)
       return /_\d{8,}$/.test(pathOnly) || /\/\d{8,}$/.test(pathOnly);
     }
 
+    if (source === "auto_ru") {
+      if (!/(^|\.)auto\.ru$/i.test(u.hostname)) return false;
+      if (/\/catalog(\/|$)/i.test(path)) return false;
+      if (/\/search\b/i.test(path)) return false;
+      return (
+        /\/sale\//i.test(path) ||
+        /\/cars\/used\//i.test(path) ||
+        /\/\d{7,}\/?(?:\?|$)/.test(path)
+      );
+    }
+
     if (source === "drom") {
       if (/\/catalog(\/|$|\?)/i.test(path)) return false;
       if (/\/(model|generation|wheel|specs|reviews|faq|compare)\b/i.test(path)) return false;
       if (/\/search\b/i.test(path)) return false;
       if (/baza\.drom\.ru/i.test(lower)) {
         return /\/sell_|\/buy_|\/zapchasti\//i.test(path) && /\d{5,}/.test(path);
-      }
-      if (/auto\.ru/i.test(lower)) {
-        if (/\/catalog\//i.test(path)) return false;
-        return (
-          /\/sale\//i.test(path) ||
-          /\/cars\/used\//i.test(path) ||
-          /\/\d{7,}\/?(?:\?|$)/.test(path)
-        );
       }
       if (/auto\.drom\.ru/i.test(lower)) {
         if (/\/all\/?$/i.test(path)) return false;

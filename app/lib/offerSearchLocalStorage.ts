@@ -3,6 +3,7 @@ import type { OfferSearchResultItem, OfferSearchStats } from "./catalogOfferAdmi
 export type OfferSearchSourceFilter =
   | "all"
   | "avito"
+  | "auto_ru"
   | "drom"
   | "youla"
   | "vk"

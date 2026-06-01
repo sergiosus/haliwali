@@ -1,14 +1,28 @@
 import { logCatalogDiscover, logCatalogOfferSearch } from "./catalogCatalogLog";
 import type { OfferSearchApiErrorDetail } from "./catalogOfferSearchApiError";
 import {
+  disabledSourcesForResolved,
+  isAutomotiveOfferSearch,
+  resolveOfferSearchSources,
+  shouldRunDromFallback,
+} from "./catalogOfferAutoRouting";
+import {
+  passesAutomotiveRelevance,
+  scoreAutomotiveOffer,
+} from "./catalogOfferAutoRelevance";
+import {
+  getCachedOfferSearch,
+  setCachedOfferSearch,
+  type OfferSearchCacheKey,
+} from "./catalogOfferSearchCache";
+import {
   buildDirectMarketplaceSearchUrls,
-  disabledOfferSearchSourcesForFilter,
-  offerSourcesForFilter,
   searchOfferListingSources,
   type OfferSourceSearchDiagnostic,
   type OfferSourceSearchHit,
   type OfferListingSourceId,
 } from "./catalogOfferSourceSearch";
+import { offerListingSourceFromUrl } from "./catalogSourceName";
 import {
   hasBadEncoding,
   isRealOfferListingUrl,
@@ -28,13 +42,16 @@ import { titleFromListingUrl } from "./catalogOfferSearchText";
 export type OfferSearchSourceFilter =
   | "all"
   | "avito"
+  | "auto_ru"
   | "drom"
   | "youla"
   | "vk"
   | "company_site"
   | "other";
 
-export type OfferParseQuality = "link_only";
+export type OfferParseQuality = "link_only" | "search_card";
+
+export type OfferSearchSortMode = "exact_match" | "price" | "newest";
 
 export type OfferSearchRelevance = "match" | "skipped" | "relevance_unknown";
 
@@ -56,6 +73,10 @@ export type OfferSearchResultItem = {
   parseQuality: OfferParseQuality;
   relevance: OfferSearchRelevance;
   skipReason?: OfferSearchSkipReason | null;
+  imageUrl?: string | null;
+  year?: number | null;
+  mileageKm?: number | null;
+  relevanceScore?: number;
 };
 
 function brandFromListingUrl(url: string): string | null {
@@ -103,6 +124,9 @@ export type OfferSearchResponse = {
   stats: OfferSearchStats;
   sessionId?: number | null;
   searchError?: OfferSearchApiErrorDetail;
+  fromCache?: boolean;
+  automotive?: boolean;
+  sort?: OfferSearchSortMode;
 };
 
 const MAX_RESULTS = 100;
@@ -121,17 +145,13 @@ function parsePriceNumber(raw: string | null | undefined): number | null {
 }
 
 function listingSourceFromUrl(url: string): OfferListingSourceId | null {
-  const lower = url.toLowerCase();
-  if (lower.includes("avito.ru")) return "avito";
-  if (lower.includes("drom.ru") || lower.includes("auto.ru")) return "drom";
-  if (lower.includes("youla.ru")) return "youla";
-  if (lower.includes("vk.com") || lower.includes("vk.ru")) return "vk";
-  return null;
+  return offerListingSourceFromUrl(url);
 }
 
 function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
   const title =
     sanitizeOfferText(hit.title) || titleFromListingUrl(hit.url) || "";
+  const cardComplete = Boolean(hit.cardComplete || (hit.sourceName === "auto_ru" && hit.title && hit.price));
   return {
     url: hit.url,
     title,
@@ -144,11 +164,67 @@ function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
     brand: brandFromListingUrl(hit.url),
     oemCodes: [],
     articleCodes: [],
-    parsed: false,
-    parseQuality: "link_only",
+    parsed: cardComplete,
+    parseQuality: cardComplete ? "search_card" : "link_only",
     relevance: "match",
     skipReason: null,
+    imageUrl: hit.imageUrl ?? null,
+    year: hit.year ?? null,
+    mileageKm: hit.mileageKm ?? null,
   };
+}
+
+function sortOfferResults(
+  items: OfferSearchResultItem[],
+  sort: OfferSearchSortMode,
+): OfferSearchResultItem[] {
+  const list = [...items];
+  if (sort === "price") {
+    list.sort((a, b) => {
+      const pa = parsePriceNumber(a.price) ?? Number.MAX_SAFE_INTEGER;
+      const pb = parsePriceNumber(b.price) ?? Number.MAX_SAFE_INTEGER;
+      return pa - pb;
+    });
+    return list;
+  }
+  if (sort === "newest") {
+    list.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+    return list;
+  }
+  list.sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
+  return list;
+}
+
+function applyAutomotiveRelevanceFilter(
+  query: string,
+  items: OfferSearchResultItem[],
+  city: string,
+  hidden: Record<string, number>,
+): { matched: OfferSearchResultItem[]; skipped: OfferSearchResultItem[] } {
+  const matched: OfferSearchResultItem[] = [];
+  const skipped: OfferSearchResultItem[] = [];
+  for (const item of items) {
+    const score = scoreAutomotiveOffer(
+      query,
+      {
+        title: item.title,
+        shortSnippet: item.shortSnippet,
+        url: item.url,
+        city: item.city,
+        brand: item.brand,
+        year: item.year,
+      },
+      city,
+    );
+    if (passesAutomotiveRelevance(query, { title: item.title, shortSnippet: item.shortSnippet, url: item.url, city: item.city, brand: item.brand, year: item.year }, city)) {
+      matched.push({ ...item, relevance: "match", relevanceScore: score, skipReason: null });
+    } else {
+      skipped.push({ ...item, relevance: "skipped", relevanceScore: score, skipReason: "query_mismatch" });
+      hidden.query_mismatch = (hidden.query_mismatch ?? 0) + 1;
+      if (item.sourceName === "drom") hidden.drom_unrelated = (hidden.drom_unrelated ?? 0) + 1;
+    }
+  }
+  return { matched, skipped };
 }
 
 function relevanceFields(item: OfferSearchResultItem) {
@@ -191,15 +267,21 @@ function applyQueryRelevanceFilter(
   return { matched, skipped };
 }
 
-function keepAvitoOnlyOnRelevanceFailure(
+function keepStableSourcesOnRelevanceFailure(
   query: string,
   items: OfferSearchResultItem[],
   hidden: Record<string, number>,
+  automotive: boolean,
 ): { matched: OfferSearchResultItem[]; skipped: OfferSearchResultItem[] } {
-  const avitoItems = items.filter((i) => listingSourceFromUrl(i.url) === "avito");
-  const { matched, skipped } = applyQueryRelevanceFilter(query, avitoItems, hidden);
-  const nonAvito = items.filter((i) => listingSourceFromUrl(i.url) !== "avito");
-  for (const item of nonAvito) {
+  const stable = new Set<OfferListingSourceId>(
+    automotive ? ["avito", "auto_ru"] : ["avito"],
+  );
+  const keep = items.filter((i) => stable.has(listingSourceFromUrl(i.url) ?? "avito"));
+  const { matched, skipped } = automotive ?
+    applyAutomotiveRelevanceFilter(query, keep, "", hidden)
+  : applyQueryRelevanceFilter(query, keep, hidden);
+  const drop = items.filter((i) => !stable.has(listingSourceFromUrl(i.url) ?? "avito"));
+  for (const item of drop) {
     skipped.push({ ...item, relevance: "skipped", skipReason: "query_mismatch" });
     hidden.drom_unreliable = (hidden.drom_unreliable ?? 0) + 1;
   }
@@ -225,9 +307,9 @@ function applyQueryRelevanceFilterSafe(
         total: items.length,
         rejected: skipped.length,
       });
-      const avitoFallback = keepAvitoOnlyOnRelevanceFailure(query, items, hidden);
+      const stableFallback = keepStableSourcesOnRelevanceFailure(query, items, hidden, false);
       return {
-        ...avitoFallback,
+        ...stableFallback,
         filterFailed: true,
         filterError,
       };
@@ -236,8 +318,37 @@ function applyQueryRelevanceFilterSafe(
   } catch (err) {
     const filterError = err instanceof Error ? err.message : String(err);
     logCatalogOfferSearch("relevance_filter_failed", { error: filterError, kept: items.length });
-    const avitoFallback = keepAvitoOnlyOnRelevanceFailure(query, items, hidden);
-    return { ...avitoFallback, filterFailed: true, filterError };
+    const stableFallback = keepStableSourcesOnRelevanceFailure(query, items, hidden, false);
+    return { ...stableFallback, filterFailed: true, filterError };
+  }
+}
+
+function applyQueryRelevanceFilterSafeAutomotive(
+  query: string,
+  items: OfferSearchResultItem[],
+  city: string,
+  hidden: Record<string, number>,
+): {
+  matched: OfferSearchResultItem[];
+  skipped: OfferSearchResultItem[];
+  filterFailed: boolean;
+  filterError?: string;
+} {
+  try {
+    const { matched, skipped } = applyAutomotiveRelevanceFilter(query, items, city, hidden);
+    if (matched.length === 0 && items.length > 0) {
+      const stableFallback = keepStableSourcesOnRelevanceFailure(query, items, hidden, true);
+      return {
+        ...stableFallback,
+        filterFailed: true,
+        filterError: "no_relevant_matches",
+      };
+    }
+    return { matched, skipped, filterFailed: false };
+  } catch (err) {
+    const filterError = err instanceof Error ? err.message : String(err);
+    const stableFallback = keepStableSourcesOnRelevanceFailure(query, items, hidden, true);
+    return { ...stableFallback, filterFailed: true, filterError };
   }
 }
 
@@ -349,8 +460,11 @@ export async function searchOffersForAdmin(opts: {
   brand?: string;
   oemArticle?: string;
   sourceFilter?: OfferSearchSourceFilter;
+  categorySlug?: string;
   priceMin?: number;
   priceMax?: number;
+  sort?: OfferSearchSortMode;
+  skipCache?: boolean;
 }): Promise<OfferSearchResponse> {
   const query = opts.query.trim();
   if (!query) {
@@ -368,7 +482,29 @@ export async function searchOffersForAdmin(opts: {
   const brand = (opts.brand ?? "").trim();
   const oemArticle = (opts.oemArticle ?? "").trim();
   const sourceFilter = opts.sourceFilter ?? "all";
+  const categorySlug = (opts.categorySlug ?? "").trim();
+  const sortMode: OfferSearchSortMode = opts.sort ?? "exact_match";
+  const automotive = isAutomotiveOfferSearch(query, categorySlug);
   const hidden: Record<string, number> = {};
+
+  const cacheKey: OfferSearchCacheKey = {
+    query,
+    city,
+    brand,
+    oemArticle,
+    sourceFilter,
+    categorySlug,
+    priceMin: opts.priceMin,
+    priceMax: opts.priceMax,
+    sort: sortMode,
+  };
+
+  if (!opts.skipCache) {
+    const cached = getCachedOfferSearch(cacheKey);
+    if (cached) {
+      return { ...cached, fromCache: true, automotive, sort: sortMode };
+    }
+  }
 
   if (sourceFilter === "company_site" || sourceFilter === "other") {
     return {
@@ -381,8 +517,23 @@ export async function searchOffersForAdmin(opts: {
     };
   }
 
-  const sources = offerSourcesForFilter(sourceFilter);
-  const disabledSources = disabledOfferSearchSourcesForFilter(sourceFilter);
+  const resolved: import("./catalogOfferAutoRouting").ResolvedOfferSearchSources =
+    sourceFilter === "all" ?
+      resolveOfferSearchSources({ sourceFilter, query, categorySlug })
+    : {
+        primary: (
+          sourceFilter === "avito" ? ["avito"]
+          : sourceFilter === "auto_ru" ? ["auto_ru"]
+          : sourceFilter === "drom" ? ["drom"]
+          : sourceFilter === "youla" ? ["youla"]
+          : sourceFilter === "vk" ? ["vk"]
+          : []
+        ) as OfferListingSourceId[],
+        fallback: [],
+        automotive: sourceFilter === "auto_ru" || automotive,
+      };
+
+  let sources: OfferListingSourceId[] = [...resolved.primary];
   const directSearchUrls = buildDirectMarketplaceSearchUrls(query, city, sources);
 
   logCatalogOfferSearch("admin_search_start", {
@@ -390,6 +541,7 @@ export async function searchOffersForAdmin(opts: {
     city: city.slice(0, 40),
     sourceFilter,
     sources,
+    automotive: resolved.automotive,
   });
 
   logCatalogDiscover("offer_direct_search", {
@@ -398,13 +550,76 @@ export async function searchOffersForAdmin(opts: {
     urls: Object.fromEntries(sources.map((s) => [s, directSearchUrls[s]?.[0] ?? ""])),
   });
 
-  const { hits, diagnostics } = await searchOfferListingSources({
+  let { hits, diagnostics } = await searchOfferListingSources({
     query,
     city,
     sources,
     maxPages: PAGES_PER_SOURCE,
     maxTotal: MAX_RESULTS,
   });
+
+  if (shouldRunDromFallback(resolved, hits.length)) {
+    const fallback = await searchOfferListingSources({
+      query,
+      city,
+      sources: ["drom"],
+      maxPages: 1,
+      maxTotal: MAX_RESULTS,
+    });
+    hits = [...hits, ...fallback.hits];
+    diagnostics = [...diagnostics, ...fallback.diagnostics];
+  }
+
+  const disabledSources = disabledSourcesForResolved(resolved, sources);
+  for (const s of disabledSources) {
+    if (diagnostics.some((d) => d.sourceName === s)) continue;
+    if (s === "youla") {
+      diagnostics.push({
+        sourceName: "youla",
+        searched: false,
+        blocked: true,
+        searchUrls: [],
+        httpStatus: null,
+        pagesScanned: 0,
+        linksExtracted: 0,
+        skippedCount: 0,
+        parserErrors: 0,
+        zeroReason: "disabled",
+        skipReasons: {},
+        message: "Youla blocked by captcha (не включён в авто-поиск).",
+      });
+    } else if (s === "vk") {
+      diagnostics.push({
+        sourceName: "vk",
+        searched: false,
+        blocked: false,
+        searchUrls: [],
+        httpStatus: null,
+        pagesScanned: 0,
+        linksExtracted: 0,
+        skippedCount: 0,
+        parserErrors: 0,
+        zeroReason: "unsupported",
+        skipReasons: {},
+        message: "VK parser not implemented yet",
+      });
+    } else if (s === "drom" && resolved.automotive) {
+      diagnostics.push({
+        sourceName: "drom",
+        searched: false,
+        blocked: false,
+        searchUrls: [],
+        httpStatus: null,
+        pagesScanned: 0,
+        linksExtracted: 0,
+        skippedCount: 0,
+        parserErrors: 0,
+        zeroReason: "disabled",
+        skipReasons: {},
+        message: "Drom — экспериментальный (резерв, не использован).",
+      });
+    }
+  }
 
   const pagesScanned = diagnostics.reduce((n, d) => n + d.pagesScanned, 0);
   const rawLinkCount = hits.length;
@@ -551,11 +766,13 @@ export async function searchOffersForAdmin(opts: {
     rejected: skipped.length,
   });
 
-  return {
+  const response: OfferSearchResponse = {
     ok: true,
     results: items,
     skipped,
     stats,
+    automotive: resolved.automotive || automotive,
+    sort: sortMode,
     emptyReason:
       items.length === 0 ?
         city ?
@@ -568,11 +785,16 @@ export async function searchOffersForAdmin(opts: {
       : null,
     message:
       filterFailed ?
-        `Релевантных совпадений нет — показаны только Avito (${items.length}). Drom и прочие нерелевантные скрыты.`
+        resolved.automotive ?
+          `Релевантных совпадений мало — показаны Avito и Auto.ru (${items.length}). Drom скрыт.`
+        : `Релевантных совпадений нет — показаны только Avito (${items.length}). Drom и прочие нерелевантные скрыты.`
       : items.length === 0 && skipped.length > 0 ?
         `Релевантных: 0. Скрыто по запросу: ${skipped.length} (всего с площадок: ${rawLinkCount})`
       : items.length === 0 ?
         `Ссылок после фильтров: 0 (с площадок: ${rawLinkCount})`
-      : `Найдено ${items.length} ссылок. Выберите и создайте кандидатов — поля объявления разберутся при импорте.`,
+      : `Найдено ${items.length} ссылок. Выберите и создайте кандидатов — поля с карточки поиска, без открытия объявления.`,
   };
+
+  setCachedOfferSearch(cacheKey, response);
+  return response;
 }

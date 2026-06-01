@@ -7,20 +7,23 @@ import {
 export function offerListingSourceFromUrl(url: string): OfferListingSourceId | null {
   const lower = url.toLowerCase();
   if (lower.includes("avito.ru")) return "avito";
+  if (/\bauto\.ru\b/.test(lower)) return "auto_ru";
   if (lower.includes("youla.ru")) return "youla";
-  if (lower.includes("drom.ru") || lower.includes("auto.ru")) return "drom";
+  if (lower.includes("drom.ru")) return "drom";
   if (lower.includes("vk.com") || lower.includes("vk.ru")) return "vk";
   return null;
 }
 
 const AVITO = /(^|\.)avito\.ru$/i;
-const DROM = /(^|\.)(drom\.ru|auto\.ru)$/i;
+const AUTO_RU = /(^|\.)auto\.ru$/i;
+const DROM = /(^|\.)drom\.ru$/i;
 const VK = /(^|\.)vk\.(com|ru)$/i;
 const YOULA = /(^|\.)youla\.ru$/i;
 
 export function catalogSourceNameFromHostname(hostname: string): CatalogSourceName {
   const host = hostname.trim().toLowerCase();
   if (AVITO.test(host)) return "avito";
+  if (AUTO_RU.test(host)) return "auto_ru";
   if (DROM.test(host)) return "drom";
   if (VK.test(host)) return "vk";
   if (YOULA.test(host)) return "youla";
@@ -43,6 +46,7 @@ export function catalogSourceNameFromUrl(rawUrl: string): CatalogSourceName {
 
 export const CATALOG_SOURCE_NAME_LABEL: Record<CatalogSourceName, string> = {
   avito: "Avito",
+  auto_ru: "Auto.ru",
   drom: "Drom",
   vk: "VK",
   youla: "Юла",

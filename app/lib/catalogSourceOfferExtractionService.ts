@@ -39,6 +39,10 @@ export type SourceOfferSearchSelection = {
   brand?: string | null;
   oemCodes?: string[];
   articleCodes?: string[];
+  imageUrl?: string | null;
+  year?: number | null;
+  mileageKm?: number | null;
+  parseQuality?: "link_only" | "search_card";
 };
 
 function resolveSourceName(url: string, hint: CatalogSourceName): CatalogSourceName | "" {
@@ -183,25 +187,52 @@ export async function processSourceOfferSearchSelections(
       parseWarnings,
     );
 
-    try {
-      const fetched = await fetchPublicHtml(rawUrl);
-      const enriched = extractSourceOfferFromHtml(fetched, defaults);
-      if (enriched) {
-        const enrichedDraft = sanitizeSourceOfferDraftInput({
-          ...enriched,
-          sourceName: sourceNameHint,
-          sourceUrl: rawUrl,
-        });
-        if (enrichedDraft) {
-          input = mergeEnrichedInput(input, enrichedDraft);
+    if (sel.imageUrl && /^https?:\/\//i.test(sel.imageUrl)) {
+      input = { ...input, imageUrl: sel.imageUrl.trim().slice(0, 500) };
+    }
+
+    const serpCardComplete =
+      sel.parseQuality === "search_card" ||
+      (sourceNameHint === "auto_ru" &&
+        Boolean(
+          input.title &&
+            input.title.length >= 5 &&
+            input.sourceUrl &&
+            (input.price || input.shortSnippet.length > 12),
+        ));
+
+    if (serpCardComplete) {
+      input = {
+        ...input,
+        rawPayload: {
+          ...input.rawPayload,
+          parseQuality: "search_card",
+          year: sel.year ?? undefined,
+          mileageKm: sel.mileageKm ?? undefined,
+        },
+      };
+      parseWarnings.push("serp_card_only");
+    } else {
+      try {
+        const fetched = await fetchPublicHtml(rawUrl);
+        const enriched = extractSourceOfferFromHtml(fetched, defaults);
+        if (enriched) {
+          const enrichedDraft = sanitizeSourceOfferDraftInput({
+            ...enriched,
+            sourceName: sourceNameHint,
+            sourceUrl: rawUrl,
+          });
+          if (enrichedDraft) {
+            input = mergeEnrichedInput(input, enrichedDraft);
+          } else {
+            parseWarnings.push("full_page_parse_failed");
+          }
         } else {
           parseWarnings.push("full_page_parse_failed");
         }
-      } else {
+      } catch {
         parseWarnings.push("full_page_parse_failed");
       }
-    } catch {
-      parseWarnings.push("full_page_parse_failed");
     }
 
     if (!input.shortSnippet?.trim() || input.shortSnippet.length < 8) {

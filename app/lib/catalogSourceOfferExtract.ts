@@ -1,5 +1,6 @@
 import type { FetchedHtml } from "./catalogHtmlFetch";
 import type { ExtractionDefaults } from "./catalogExtractionTypes";
+import { inferOfferType } from "./catalogSourceOfferType";
 import type { CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
 import { catalogSourceNameFromUrl } from "./catalogSourceName";
 import { metaContent, titleTag } from "./catalogExtractShared";
@@ -124,7 +125,7 @@ export function extractSourceOfferFromHtml(
   const city = extractCityFromHead(head, defaults);
   const sourceName = catalogSourceNameFromUrl(sourceUrl);
 
-  const imageUrl =
+  const coverImageUrl =
     ogImage && /^https?:\/\//i.test(ogImage.trim()) ? ogImage.trim().slice(0, 500) : null;
 
   const draft: CatalogSourceOfferInput = {

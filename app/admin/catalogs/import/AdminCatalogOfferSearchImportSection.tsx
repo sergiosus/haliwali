@@ -11,8 +11,10 @@ import {
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
 import type {
   OfferSearchResultItem,
+  OfferSearchSortMode,
   OfferSearchStats,
 } from "../../../lib/catalogOfferAdminSearch";
+import { isAutomotiveSearchQuery } from "../../../lib/catalogOfferAutoRouting";
 import type { OfferSearchApiErrorDetail } from "../../../lib/catalogOfferSearchApiError";
 import {
   clearOfferSearchFiltersInStorage,
@@ -39,10 +41,25 @@ type OfferSourceSearchDiagnostic = OfferSearchStats["diagnostics"][number];
 
 const SOURCE_DIAG_LABEL: Record<string, string> = {
   avito: "Avito",
+  auto_ru: "Auto.ru",
   drom: "Drom",
   youla: "Youla",
   vk: "VK",
 };
+
+const SOURCE_BADGE_CLASS: Record<string, string> = {
+  avito: "bg-sky-50 text-sky-900",
+  auto_ru: "bg-blue-50 text-blue-900",
+  drom: "bg-amber-50 text-amber-900",
+  youla: "bg-black/5 text-black/50",
+  vk: "bg-black/5 text-black/50",
+};
+
+const SORT_OPTIONS: { value: OfferSearchSortMode; label: string }[] = [
+  { value: "exact_match", label: "Точное совпадение" },
+  { value: "price", label: "Цена" },
+  { value: "newest", label: "Новее (год)" },
+];
 
 const HIDDEN_REASON_LABEL: Record<string, string> = {
   city_mismatch: "город",
@@ -59,6 +76,7 @@ const HIDDEN_REASON_LABEL: Record<string, string> = {
 
 const PARSE_QUALITY_LABEL: Record<string, string> = {
   link_only: "ссылка с поиска",
+  search_card: "карточка поиска",
 };
 
 const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
@@ -173,6 +191,8 @@ export function AdminCatalogOfferSearchImportSection({
   const [lastHttpStatus, setLastHttpStatus] = useState<number | null>(null);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [restored, setRestored] = useState(false);
+  const [sortMode, setSortMode] = useState<OfferSearchSortMode>("exact_match");
+  const [fromCache, setFromCache] = useState(false);
 
   const resultsSectionRef = useRef<HTMLDivElement>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -324,6 +344,9 @@ export function AdminCatalogOfferSearchImportSection({
           brand: brand.trim(),
           oemArticle: oemArticle.trim(),
           source: sourceFilter,
+          categorySlug:
+            isAutomotiveSearchQuery(query.trim()) || sourceFilter === "auto_ru" ? "auto" : DEFAULT_CATEGORY,
+          sort: sortMode,
           priceMin: priceMin.trim() ? Number(priceMin) : undefined,
           priceMax: priceMax.trim() ? Number(priceMax) : undefined,
         }),
@@ -339,6 +362,8 @@ export function AdminCatalogOfferSearchImportSection({
         skipped?: OfferSearchResultItem[];
         stats?: OfferSearchStats;
         searchError?: OfferSearchApiErrorDetail;
+        fromCache?: boolean;
+        automotive?: boolean;
       };
       try {
         d = JSON.parse(rawBody) as typeof d;
@@ -396,6 +421,7 @@ export function AdminCatalogOfferSearchImportSection({
 
       const list = d.results ?? [];
       const skipped = d.skipped ?? [];
+      setFromCache(Boolean(d.fromCache));
       setResults(list);
       setSkippedResults(skipped);
       setSearchStats(d.stats ?? null);
@@ -447,9 +473,13 @@ export function AdminCatalogOfferSearchImportSection({
     sourceFilter,
     priceMin,
     priceMax,
+    sortMode,
     persistNow,
     focusResults,
   ]);
+
+  const sourceBadgeClass = (source: string) =>
+    SOURCE_BADGE_CLASS[source] ?? "bg-violet-50 text-violet-900";
 
   const importSelected = useCallback(async () => {
     const urlSet = selected;
@@ -615,6 +645,20 @@ export function AdminCatalogOfferSearchImportSection({
           </select>
         </label>
         <label className="block text-sm">
+          <span className="text-black/60">Сортировка</span>
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as OfferSearchSortMode)}
+            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
           <span className="text-black/60">Цена от, ₽</span>
           <input
             type="number"
@@ -698,6 +742,18 @@ export function AdminCatalogOfferSearchImportSection({
               {searchStats?.linksExtracted != null ?
                 ` · с площадок извлечено: ${searchStats.linksExtracted}`
               : null}
+              {fromCache ? " · кэш 30 мин" : null}
+            </p>
+            <p className="flex flex-wrap gap-2 text-xs">
+              <span className={`rounded-full px-2 py-0.5 font-semibold ${sourceBadgeClass("avito")}`}>
+                Avito
+              </span>
+              <span className={`rounded-full px-2 py-0.5 font-semibold ${sourceBadgeClass("auto_ru")}`}>
+                Auto.ru
+              </span>
+              <span className={`rounded-full px-2 py-0.5 font-semibold ${sourceBadgeClass("drom")}`}>
+                Drom (эксп.)
+              </span>
             </p>
             {searchStats?.hidden && Object.keys(searchStats.hidden).length > 0 ?
               <p className="text-xs text-amber-900">
@@ -858,9 +914,21 @@ export function AdminCatalogOfferSearchImportSection({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-black">{item.title}</span>
-                        <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${sourceBadgeClass(item.sourceName)}`}
+                        >
                           {catalogSourceNameLabel(item.sourceName)}
                         </span>
+                        {item.parseQuality === "search_card" ?
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
+                            {PARSE_QUALITY_LABEL.search_card}
+                          </span>
+                        : null}
+                        {item.relevanceScore != null && item.relevanceScore > 0 ?
+                          <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs text-black/55">
+                            score {item.relevanceScore}
+                          </span>
+                        : null}
                         {item.relevance === "match" ?
                           <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
                             релевантно
@@ -874,6 +942,10 @@ export function AdminCatalogOfferSearchImportSection({
                       <p className="mt-1 text-black/55">
                         {[
                           item.price ? `${Number(item.price).toLocaleString("ru-RU")} ₽` : null,
+                          item.year ? `${item.year} г.` : null,
+                          item.mileageKm ?
+                            `${item.mileageKm.toLocaleString("ru-RU")} км`
+                          : null,
                           item.city || null,
                         ]
                           .filter(Boolean)

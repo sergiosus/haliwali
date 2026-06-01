@@ -14,6 +14,7 @@ function parseSourceFilter(v: unknown): OfferSearchSourceFilter {
   const s = String(v ?? "all").trim().toLowerCase();
   if (
     s === "avito" ||
+    s === "auto_ru" ||
     s === "drom" ||
     s === "youla" ||
     s === "vk" ||
@@ -67,14 +68,22 @@ export async function POST(req: Request) {
       city: city.slice(0, 40),
     });
 
+    const categorySlug = String(body.categorySlug ?? body.category ?? "").trim();
+    const sortRaw = String(body.sort ?? "exact_match").trim();
+    const sort =
+      sortRaw === "price" || sortRaw === "newest" ? sortRaw : "exact_match";
+
     const out = await searchOffersForAdmin({
       query,
       city,
       brand,
       oemArticle,
       sourceFilter,
+      categorySlug: categorySlug || undefined,
       priceMin: Number.isFinite(priceMin) ? priceMin : undefined,
       priceMax: Number.isFinite(priceMax) ? priceMax : undefined,
+      sort,
+      skipCache: body.skipCache === true,
     });
 
     if (!out.ok) {

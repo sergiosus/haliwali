@@ -14,11 +14,13 @@ import {
   offerHasUnrelatedAutoBrand,
   offerMatchesSearchQueryStrict,
 } from "./catalogOfferSearchRelevance";
+import { buildAutoRuSearchUrls, parseAutoRuSearchHtml } from "./catalogOfferAutoRuParser";
 import {
   decodeHtmlBytes,
   decodeJsonString,
   extractCityFromContext,
   extractDromCardTitle,
+  extractPriceFromBlob,
   extractSellerFromContext,
   isRealOfferListingUrl,
   sanitizeOfferText,
@@ -50,8 +52,10 @@ export type OfferSourceZeroReason =
   | "source_unreliable_for_query"
   | null;
 
-/** Sources used when admin picks «stable» / any (Avito primary, Drom experimental). */
+/** Non-automotive «all» search (Avito + Drom). Automotive uses routing in catalogOfferAutoRouting. */
 export const STABLE_OFFER_SEARCH_SOURCES: OfferListingSourceId[] = ["avito", "drom"];
+
+export const AUTOMOTIVE_OFFER_SEARCH_SOURCES: OfferListingSourceId[] = ["avito", "auto_ru"];
 
 export type OfferSourceSearchDiagnostic = {
   sourceName: OfferListingSourceId;
@@ -88,6 +92,11 @@ export type OfferSourceSearchHit = {
   sellerHint: string;
   sourceName: OfferListingSourceId;
   fromSearchPage: boolean;
+  imageUrl?: string | null;
+  year?: number | null;
+  mileageKm?: number | null;
+  /** SERP card has enough fields to create a draft without opening the listing. */
+  cardComplete?: boolean;
 };
 
 const MAX_PAGES_PER_SOURCE = 3;
@@ -101,7 +110,7 @@ const BROWSER_UA =
 
 function sourceUserAgent(id: OfferListingSourceId): string {
   if (id === "avito" || id === "youla") return MOBILE_UA;
-  if (id === "vk" || id === "drom") return BROWSER_UA;
+  if (id === "vk" || id === "drom" || id === "auto_ru") return BROWSER_UA;
   return MOBILE_UA;
 }
 
@@ -179,15 +188,6 @@ function normalizeListingUrl(raw: string, base: string): string | null {
   } catch {
     return null;
   }
-}
-
-function extractPriceFromBlob(blob: string): string | null {
-  const m =
-    blob.match(/([0-9][0-9\s\u00a0]{2,12})\s*(?:₽|руб\.?|р\.)/i) ??
-    blob.match(/"price"\s*:\s*"?(\d[\d\s]{2,})"?/i);
-  if (!m?.[1]) return null;
-  const digits = m[1].replace(/\D/g, "");
-  return digits ? digits : null;
 }
 
 /** Item id is the last `_digits` segment (ignore mileage like `_470_000_km`). */
@@ -391,7 +391,6 @@ function parseDromSearchHtml(
 
   const patterns: RegExp[] = [
     /https?:\/\/auto\.drom\.ru\/[a-z0-9_./%-]+\d{6,}\.html/gi,
-    /https?:\/\/(?:www\.)?auto\.ru\/[a-z0-9_./%-]+\/sale\/[a-z0-9_./%-]+\d{6,}\/?/gi,
     /https?:\/\/baza\.drom\.ru\/[a-z0-9_./%-]+\d{5,}(?:\.html)?/gi,
     /href="(https?:\/\/auto\.drom\.ru\/[^"]+\d{6,}\.html)"/gi,
     /href="(\/[^"?#]+\d{6,}\.html)"/gi,
@@ -616,6 +615,9 @@ function parseSearchHtml(
     const { hits, meta } = parseDromSearchHtml(html, baseUrl, cityDefault, query);
     return { hits, dromMeta: meta };
   }
+  if (source === "auto_ru") {
+    return { hits: parseAutoRuSearchHtml(html, baseUrl, cityDefault) };
+  }
   if (source === "youla") return { hits: parseYoulaSearchHtml(html, baseUrl, cityDefault) };
   return { hits: parseVkSearchHtml(html, baseUrl, cityDefault) };
 }
@@ -658,11 +660,16 @@ export function offerSourcesForFilter(
   filter: "all" | OfferListingSourceId | "company_site" | "other",
 ): OfferListingSourceId[] {
   if (filter === "avito") return ["avito"];
+  if (filter === "auto_ru") return ["auto_ru"];
   if (filter === "drom") return ["drom"];
   if (filter === "youla") return ["youla"];
   if (filter === "vk") return ["vk"];
   if (filter === "all") return [...STABLE_OFFER_SEARCH_SOURCES];
   return [];
+}
+
+export function offerSourcesForAutomotiveAll(): OfferListingSourceId[] {
+  return [...AUTOMOTIVE_OFFER_SEARCH_SOURCES];
 }
 
 /** Sources not fetched in «all» mode — shown as disabled in diagnostics only. */
@@ -776,7 +783,7 @@ export async function searchOfferListingSources(opts: {
           pagesScanned += 1;
           pageOk = true;
           lastHtml = fetched.html;
-          if (source === "avito" || source === "drom") {
+          if (source === "avito" || source === "drom" || source === "auto_ru") {
             logOfferSearchHtmlSnippet(source, searchUrl, fetched.html);
           }
           const parsed = parseSearchHtml(source, fetched.html, fetched.url, city, query);

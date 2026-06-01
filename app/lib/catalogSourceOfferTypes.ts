@@ -1,5 +1,5 @@
 /** Marketplace sources — single canonical list for search, parsers, and URL classification. */
-export const CATALOG_MARKETPLACE_SOURCES = ["avito", "drom", "vk", "youla"] as const;
+export const CATALOG_MARKETPLACE_SOURCES = ["avito", "auto_ru", "drom", "vk", "youla"] as const;
 
 export type CatalogMarketplaceSourceName = (typeof CATALOG_MARKETPLACE_SOURCES)[number];
 
@@ -39,6 +39,14 @@ export function parseCatalogSourceName(
 export type { SourceOfferRejectReason } from "./catalogSourceOfferValidation";
 export { SOURCE_OFFER_REJECT_LABELS, sourceOfferRejectLabel } from "./catalogSourceOfferValidation";
 
+export type { CatalogSourceOfferType, OfferTypeFilter } from "./catalogSourceOfferType";
+export {
+  CATALOG_SOURCE_OFFER_TYPES,
+  OFFER_TYPE_LABELS,
+  inferOfferType,
+  parseCatalogSourceOfferType,
+} from "./catalogSourceOfferType";
+
 /** Canonical draft statuses (maps UI «new» → draft). */
 export type CatalogSourceOfferDraftStatus =
   | "draft"
@@ -62,10 +70,13 @@ export type CatalogSourceOfferInput = {
   sourceName: CatalogSourceName;
   sourceUrl: string;
   shortSnippet: string;
-  /** First image from source page (og:image), when available. */
-  imageUrl: string | null;
+  offerType: import("./catalogSourceOfferType").CatalogSourceOfferType;
+  /** Single cover thumbnail — no galleries. */
+  coverImageUrl: string | null;
   confidenceScore: number;
   rawPayload?: Record<string, unknown>;
+  /** @deprecated use coverImageUrl */
+  imageUrl?: string | null;
 };
 
 export type CatalogSourceOfferDraft = CatalogSourceOfferInput & {

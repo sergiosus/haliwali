@@ -8,6 +8,8 @@ import {
   isRealOfferListingUrl,
   sanitizeOfferText,
 } from "./catalogOfferSearchText";
+import { parseCatalogSourceOfferType, type CatalogSourceOfferType } from "./catalogSourceOfferType";
+import { resolveCoverImageUrl, slimSourceOfferRawPayload } from "./catalogSourceOfferCoverImage";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
 import {
   validateSourceOfferDraftCandidate,
@@ -17,11 +19,16 @@ import {
 export const SOURCE_OFFER_SNIPPET_MAX = 280;
 export const SOURCE_OFFER_TITLE_MAX = 200;
 
-function sanitizeOfferImageUrl(url: unknown): string | null {
-  if (typeof url !== "string") return null;
-  const t = url.trim();
-  if (!/^https?:\/\//i.test(t) || hasBadEncoding(t)) return null;
-  return t.slice(0, 500);
+function pickOfferType(input: CatalogSourceOfferInput): CatalogSourceOfferType {
+  return parseCatalogSourceOfferType(input.offerType);
+}
+
+function pickCoverImage(input: CatalogSourceOfferInput): string | null {
+  return resolveCoverImageUrl({
+    coverImageUrl: input.coverImageUrl,
+    imageUrl: input.imageUrl,
+    rawPayload: input.rawPayload,
+  });
 }
 
 export { offerListingSourceFromUrl } from "./catalogSourceName";
@@ -88,9 +95,13 @@ export function sanitizeSourceOfferInput(
     sourceName,
     sourceUrl,
     shortSnippet,
-    imageUrl: sanitizeOfferImageUrl(input.imageUrl),
+    offerType: pickOfferType(input),
+    coverImageUrl: pickCoverImage(input),
     confidenceScore: Math.min(1, Math.max(0, input.confidenceScore ?? 0.45)),
-    rawPayload: input.rawPayload ?? { extractor: "source_offer", host },
+    rawPayload: slimSourceOfferRawPayload(
+      input.rawPayload ?? { extractor: "source_offer", host },
+      pickCoverImage(input),
+    ),
   };
 
   const validated = validateSourceOfferInput(candidate);
@@ -132,9 +143,10 @@ export function sanitizeSourceOfferDraftInput(
     sourceName,
     sourceUrl,
     shortSnippet,
-    imageUrl: sanitizeOfferImageUrl(input.imageUrl),
+    offerType: pickOfferType(input),
+    coverImageUrl: pickCoverImage(input),
     confidenceScore: Math.min(1, Math.max(0, input.confidenceScore ?? 0.35)),
-    rawPayload: input.rawPayload,
+    rawPayload: slimSourceOfferRawPayload(input.rawPayload, pickCoverImage(input)),
   };
 
   const validated = validateSourceOfferDraftCandidate(candidate);

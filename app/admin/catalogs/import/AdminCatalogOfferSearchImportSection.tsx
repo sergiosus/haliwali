@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SettlementLocationField } from "../../../components/location/SettlementLocationField";
 import {
   catalogDiscoverCityLabel,
@@ -14,6 +14,18 @@ import type {
   OfferSearchStats,
 } from "../../../lib/catalogOfferAdminSearch";
 import type { OfferSearchApiErrorDetail } from "../../../lib/catalogOfferSearchApiError";
+import {
+  clearOfferSearchFiltersInStorage,
+  clearOfferSearchHistory,
+  clearOfferSearchResultsInStorage,
+  pushOfferSearchHistory,
+  readOfferSearchHistory,
+  readOfferSearchState,
+  removeOfferSearchHistoryItem,
+  writeOfferSearchState,
+  type OfferSearchPageSize,
+  type PersistedOfferSearchState,
+} from "../../../lib/offerSearchLocalStorage";
 import type { SourceOfferImportError } from "../../../lib/catalogSourceOfferImportErrors";
 import { SOURCE_OFFER_IMPORT_ERROR_LABELS } from "../../../lib/catalogSourceOfferImportErrors";
 import {
@@ -21,6 +33,7 @@ import {
   OFFER_SOURCE_OPTIONS,
   type OfferSourceFilter,
 } from "./offerImportUi";
+import { OfferSearchQueryAutocomplete } from "./OfferSearchQueryAutocomplete";
 
 type OfferSourceSearchDiagnostic = OfferSearchStats["diagnostics"][number];
 
@@ -63,8 +76,6 @@ const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
 
 const DEFAULT_CATEGORY = "drugie";
 
-type PageSize = 20 | 50;
-
 const EMPTY_REASON_LABEL: Record<string, string> = {
   EMPTY_QUERY: "Введите поисковый запрос",
   UNSUPPORTED_SOURCE: "Для этого источника используйте «По ссылкам»",
@@ -76,6 +87,57 @@ const EMPTY_REASON_LABEL: Record<string, string> = {
   ALL_FILTERED_CITY: "Все ссылки отфильтрованы по городу",
   SOURCE_BLOCKED: "Площадки заблокировали загрузку (капча / 403)",
 };
+
+function locationFromCity(city: string): CatalogDiscoverLocation | null {
+  const c = city.trim();
+  if (!c) return null;
+  return {
+    city: c,
+    region: "",
+    displayName: c,
+    source: "suggestion",
+    settlementId: null,
+  };
+}
+
+function buildPersistedState(args: {
+  query: string;
+  cityLabel: string;
+  sourceFilter: OfferSourceFilter;
+  priceMin: string;
+  priceMax: string;
+  brand: string;
+  oemArticle: string;
+  page: number;
+  pageSize: OfferSearchPageSize;
+  results: OfferSearchResultItem[];
+  skippedResults: OfferSearchResultItem[];
+  selected: Set<string>;
+  searchStats: OfferSearchStats | null;
+  message: string | null;
+  emptyReason: string | null;
+  searched: boolean;
+}): PersistedOfferSearchState {
+  return {
+    query: args.query,
+    city: args.cityLabel,
+    source: args.sourceFilter,
+    priceFrom: args.priceMin,
+    priceTo: args.priceMax,
+    brand: args.brand,
+    oem: args.oemArticle,
+    page: args.page,
+    perPage: args.pageSize,
+    results: args.results,
+    skipped: args.skippedResults,
+    selectedIds: [...args.selected],
+    stats: args.searchStats,
+    message: args.message,
+    emptyReason: args.emptyReason,
+    searched: args.searched,
+    timestamp: Date.now(),
+  };
+}
 
 /** Offer web search — dedicated API, no company import sessions. */
 export function AdminCatalogOfferSearchImportSection({
@@ -100,146 +162,155 @@ export function AdminCatalogOfferSearchImportSection({
   const [createdCount, setCreatedCount] = useState(0);
   const [importErrors, setImportErrors] = useState<SourceOfferImportError[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(20);
+  const [pageSize, setPageSize] = useState<OfferSearchPageSize>(20);
   const [searched, setSearched] = useState(false);
   const [searchStats, setSearchStats] = useState<OfferSearchStats | null>(null);
   const [diagnostics, setDiagnostics] = useState<OfferSourceSearchDiagnostic[]>([]);
   const [skippedResults, setSkippedResults] = useState<OfferSearchResultItem[]>([]);
   const [searchError, setSearchError] = useState<OfferSearchApiErrorDetail | null>(null);
   const [lastHttpStatus, setLastHttpStatus] = useState<number | null>(null);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [restored, setRestored] = useState(false);
 
-  const applySessionPayload = useCallback(
-    (d: {
-      query?: string;
-      city?: string;
-      brand?: string;
-      oemArticle?: string;
-      sourceFilter?: OfferSourceFilter;
-      priceMin?: number;
-      priceMax?: number;
-      results?: OfferSearchResultItem[];
-      skipped?: OfferSearchResultItem[];
-      stats?: OfferSearchStats;
-      message?: string;
-      emptyReason?: string | null;
-    }) => {
-      if (d.query != null) setQuery(d.query);
-      if (d.city) {
-        setLocation({
-          city: d.city,
-          region: "",
-          displayName: d.city,
-          source: "suggestion",
-          settlementId: null,
-        });
-      }
-      if (d.brand != null) setBrand(d.brand);
-      if (d.oemArticle != null) setOemArticle(d.oemArticle);
-      if (d.sourceFilter) setSourceFilter(d.sourceFilter);
-      if (d.priceMin != null) setPriceMin(String(d.priceMin));
-      if (d.priceMax != null) setPriceMax(String(d.priceMax));
-      setResults(d.results ?? []);
-      setSkippedResults(d.skipped ?? []);
-      setSearchStats(d.stats ?? null);
-      setDiagnostics(d.stats?.diagnostics ?? []);
-      setMessage(d.message ?? null);
-      setEmptyReason(d.emptyReason ?? null);
-      setSearched(true);
-      setPage(1);
-      setSelected(new Set());
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const saved = readCatalogDiscoverLocation();
-    if (saved) setLocation(saved);
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const r = await fetch("/api/admin/catalogs/source-offers/search-session", {
-          credentials: "include",
-          cache: "no-store",
-        });
-        const d = (await r.json()) as {
-          ok?: boolean;
-          session?: { results?: OfferSearchResultItem[]; skipped?: OfferSearchResultItem[] } | null;
-          results?: OfferSearchResultItem[];
-          skipped?: OfferSearchResultItem[];
-          query?: string;
-          city?: string;
-          brand?: string;
-          oemArticle?: string;
-          sourceFilter?: OfferSourceFilter;
-          priceMin?: number;
-          priceMax?: number;
-          stats?: OfferSearchStats;
-          message?: string;
-          emptyReason?: string | null;
-        };
-        if (!d.ok || !d.session && !(d.results?.length)) return;
-        applySessionPayload(d);
-      } catch {
-        /* no saved session */
-      }
-    })();
-  }, [applySessionPayload]);
-
-  const clearSearchResults = useCallback(async () => {
-    setBusy(true);
-    try {
-      await fetch("/api/admin/catalogs/source-offers/search-session", {
-        method: "DELETE",
-        credentials: "include",
-      });
-      setResults([]);
-      setSkippedResults([]);
-      setSearchStats(null);
-      setDiagnostics([]);
-      setSelected(new Set());
-      setSearched(false);
-      setMessage(null);
-      setEmptyReason(null);
-      setImportErrors([]);
-      setCreatedCount(0);
-      setPage(1);
-      setSearchError(null);
-      setLastHttpStatus(null);
-    } catch {
-      setMessage("Не удалось очистить результаты");
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const resultsSectionRef = useRef<HTMLDivElement>(null);
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cityLabel = catalogDiscoverCityLabel(location);
 
+  const persistNow = useCallback(
+    (overrides?: Partial<Parameters<typeof buildPersistedState>[0]>) => {
+      const state = buildPersistedState({
+        query,
+        cityLabel,
+        sourceFilter,
+        priceMin,
+        priceMax,
+        brand,
+        oemArticle,
+        page,
+        pageSize,
+        results,
+        skippedResults,
+        selected,
+        searchStats,
+        message,
+        emptyReason,
+        searched,
+        ...overrides,
+      });
+      writeOfferSearchState(state);
+    },
+    [
+      query,
+      cityLabel,
+      sourceFilter,
+      priceMin,
+      priceMax,
+      brand,
+      oemArticle,
+      page,
+      pageSize,
+      results,
+      skippedResults,
+      selected,
+      searchStats,
+      message,
+      emptyReason,
+      searched,
+    ],
+  );
+
+  const schedulePersist = useCallback(() => {
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => persistNow(), 250);
+  }, [persistNow]);
+
+  const applyPersistedState = useCallback((s: PersistedOfferSearchState) => {
+    setQuery(s.query);
+    setLocation(s.city ? locationFromCity(s.city) : null);
+    setSourceFilter(s.source);
+    setPriceMin(s.priceFrom);
+    setPriceMax(s.priceTo);
+    setBrand(s.brand);
+    setOemArticle(s.oem);
+    setPage(s.page);
+    setPageSize(s.perPage);
+    setResults(s.results);
+    setSkippedResults(s.skipped);
+    setSelected(new Set(s.selectedIds));
+    setSearchStats(s.stats);
+    setDiagnostics(s.stats?.diagnostics ?? []);
+    setMessage(s.message);
+    setEmptyReason(s.emptyReason);
+    setSearched(s.searched);
+  }, []);
+
+  useEffect(() => {
+    setSearchHistory(readOfferSearchHistory());
+    const local = readOfferSearchState();
+    if (local) applyPersistedState(local);
+    setRestored(true);
+  }, [applyPersistedState]);
+
+  useEffect(() => {
+    if (!restored) return;
+    const saved = readCatalogDiscoverLocation();
+    if (saved && !location) setLocation(saved);
+  }, [restored, location]);
+
+  useEffect(() => {
+    if (!restored) return;
+    schedulePersist();
+    return () => {
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    };
+  }, [
+    restored,
+    schedulePersist,
+    query,
+    cityLabel,
+    sourceFilter,
+    priceMin,
+    priceMax,
+    brand,
+    oemArticle,
+    page,
+    pageSize,
+    results,
+    skippedResults,
+    selected,
+    searchStats,
+    message,
+    emptyReason,
+    searched,
+  ]);
+
   const totalFound = results.length;
+  const hiddenCount = skippedResults.length;
   const totalPages = Math.max(1, Math.ceil(totalFound / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageResults = useMemo(() => {
     const start = (safePage - 1) * pageSize;
     return results.slice(start, start + pageSize);
   }, [results, safePage, pageSize]);
+  const displayedCount = pageResults.length;
+  const selectedCount = selected.size;
 
-  const shownCount = pageResults.length;
+  const focusResults = useCallback(() => {
+    requestAnimationFrame(() => {
+      resultsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
 
   const runSearch = useCallback(async () => {
     if (!query.trim()) return;
     setBusy(true);
     setMessage(null);
     setEmptyReason(null);
-    setResults([]);
-    setSearchStats(null);
-    setDiagnostics([]);
-    setSelected(new Set());
-    setPage(1);
-    setCreatedCount(0);
-    setImportErrors([]);
     setSearchError(null);
     setLastHttpStatus(null);
+    setCreatedCount(0);
+    setImportErrors([]);
     try {
       const r = await fetch("/api/admin/catalogs/source-offers/search", {
         method: "POST",
@@ -280,11 +351,16 @@ export function AdminCatalogOfferSearchImportSection({
         setSearchError(errDetail);
         setMessage(errDetail.message);
         setEmptyReason("INVALID_RESPONSE");
-        setResults([]);
-        setSkippedResults([]);
-        setSearchStats(null);
-        setDiagnostics([]);
         setSearched(true);
+        setPage(1);
+        persistNow({
+          results: [],
+          skippedResults: [],
+          searchStats: null,
+          searched: true,
+          page: 1,
+          selected: new Set(),
+        });
         return;
       }
 
@@ -293,35 +369,59 @@ export function AdminCatalogOfferSearchImportSection({
       if (!r.ok || !d.ok) {
         const err = d.searchError;
         const detail =
-          err?.message ??
-          d.message ??
-          d.error ??
-          `HTTP ${r.status}`;
+          err?.message ?? d.message ?? d.error ?? `HTTP ${r.status}`;
         setMessage(detail);
         setEmptyReason(d.error ?? d.emptyReason ?? "SEARCH_FAILED");
-        setResults(d.results ?? []);
+        const list = d.results ?? [];
+        setResults(list);
         setSkippedResults(d.skipped ?? []);
         setSearchStats(d.stats ?? null);
         setDiagnostics(d.stats?.diagnostics ?? []);
         setSearched(true);
+        setPage(1);
+        persistNow({
+          results: list,
+          skippedResults: d.skipped ?? [],
+          searchStats: d.stats ?? null,
+          message: detail,
+          emptyReason: d.error ?? d.emptyReason ?? "SEARCH_FAILED",
+          searched: true,
+          page: 1,
+        });
+        focusResults();
         return;
       }
+
       const list = d.results ?? [];
+      const skipped = d.skipped ?? [];
       setResults(list);
-      setSkippedResults(d.skipped ?? []);
+      setSkippedResults(skipped);
       setSearchStats(d.stats ?? null);
       setDiagnostics(d.stats?.diagnostics ?? []);
       setSearched(true);
+      setPage(1);
       setEmptyReason(d.emptyReason ?? (list.length === 0 ? "NO_RESULTS" : null));
-      if (list.length > 0) {
-        setMessage(d.message ?? null);
-      } else {
-        setMessage(
-          d.message ??
-            EMPTY_REASON_LABEL[d.emptyReason ?? ""] ??
-            "Объявления не найдены",
-        );
-      }
+      const msg =
+        list.length > 0 ?
+          (d.message ?? null)
+        : (d.message ??
+          EMPTY_REASON_LABEL[d.emptyReason ?? ""] ??
+          "Объявления не найдены");
+      setMessage(msg);
+
+      const hist = pushOfferSearchHistory(query.trim());
+      setSearchHistory(hist);
+
+      persistNow({
+        results: list,
+        skippedResults: skipped,
+        searchStats: d.stats ?? null,
+        message: msg,
+        emptyReason: d.emptyReason ?? (list.length === 0 ? "NO_RESULTS" : null),
+        searched: true,
+        page: 1,
+      });
+      focusResults();
     } catch (transportErr) {
       const transportMessage =
         transportErr instanceof Error ? transportErr.message : String(transportErr);
@@ -332,22 +432,28 @@ export function AdminCatalogOfferSearchImportSection({
       setSearchError(errDetail);
       setMessage(errDetail.message);
       setEmptyReason("TRANSPORT_ERROR");
-      setResults([]);
-      setSkippedResults([]);
-      setSearchStats(null);
-      setDiagnostics([]);
       setSearched(true);
+      persistNow({ searched: true });
     } finally {
       setBusy(false);
     }
-  }, [query, cityLabel, brand, oemArticle, sourceFilter, priceMin, priceMax]);
+  }, [
+    query,
+    cityLabel,
+    brand,
+    oemArticle,
+    sourceFilter,
+    priceMin,
+    priceMax,
+    persistNow,
+    focusResults,
+  ]);
 
   const importSelected = useCallback(async () => {
     const urlSet = selected;
     if (urlSet.size === 0) return;
     const selections = results.filter((item) => urlSet.has(item.url));
     setBusy(true);
-    setMessage(null);
     setCreatedCount(0);
     setImportErrors([]);
     try {
@@ -385,13 +491,51 @@ export function AdminCatalogOfferSearchImportSection({
       } else {
         setMessage(`Создано кандидатов предложений: ${offerCount}`);
       }
+      persistNow();
       onChanged?.();
     } catch {
-      setMessage("Ошибка сети");
+      setMessage("Ошибка сети при импорте");
     } finally {
       setBusy(false);
     }
-  }, [selected, cityLabel, results, onChanged]);
+  }, [selected, cityLabel, results, onChanged, persistNow]);
+
+  const clearSearchFilters = useCallback(() => {
+    setQuery("");
+    setLocation(null);
+    setSourceFilter("all");
+    setPriceMin("");
+    setPriceMax("");
+    setBrand("");
+    setOemArticle("");
+    clearOfferSearchFiltersInStorage();
+    persistNow({
+      query: "",
+      cityLabel: "",
+      sourceFilter: "all",
+      priceMin: "",
+      priceMax: "",
+      brand: "",
+      oemArticle: "",
+    });
+  }, [persistNow]);
+
+  const clearResultsOnly = useCallback(() => {
+    setResults([]);
+    setSkippedResults([]);
+    setSearchStats(null);
+    setDiagnostics([]);
+    setSelected(new Set());
+    setSearched(false);
+    setMessage(null);
+    setEmptyReason(null);
+    setImportErrors([]);
+    setCreatedCount(0);
+    setPage(1);
+    setSearchError(null);
+    setLastHttpStatus(null);
+    clearOfferSearchResultsInStorage();
+  }, []);
 
   function toggleUrl(url: string) {
     setSelected((prev) => {
@@ -410,23 +554,37 @@ export function AdminCatalogOfferSearchImportSection({
     });
   }
 
+  function setPageLocal(next: number) {
+    const p = Math.max(1, Math.min(totalPages, next));
+    setPage(p);
+  }
+
   return (
     <div className="space-y-4">
       <div>
         <h3 className="text-base font-semibold">По поисковому запросу</h3>
         <p className="mt-1 text-sm text-black/55">
-          Прямой поиск на Avito, Drom, Youla, VK — без Google и Bing. Открываем страницы поиска площадок,
-          извлекаем ссылки на объявления. Выберите ссылки → «Создать кандидатов» разберёт карточки.
+          Прямой поиск на Avito, Drom, Youla, VK — без Google и Bing. Результаты и выбор хранятся в
+          браузере (localStorage, 24 ч). Кандидаты — только в базе данных.
         </p>
       </div>
 
       <label className="block text-sm">
         <span className="text-black/60">Поисковый запрос</span>
-        <input
+        <OfferSearchQueryAutocomplete
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={setQuery}
+          onSubmit={() => void runSearch()}
+          history={searchHistory}
+          onRemoveHistoryItem={(item) => {
+            setSearchHistory(removeOfferSearchHistoryItem(item));
+          }}
+          onClearHistory={() => {
+            clearOfferSearchHistory();
+            setSearchHistory([]);
+          }}
+          disabled={busy}
           placeholder="touran Ижевск · насос caterpillar 320 · iphone 12 Казань"
-          className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
         />
       </label>
 
@@ -505,338 +663,247 @@ export function AdminCatalogOfferSearchImportSection({
         </button>
         <button
           type="button"
-          disabled={busy || (!searched && results.length === 0)}
-          onClick={() => void clearSearchResults()}
+          disabled={busy}
+          onClick={clearSearchFilters}
           className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-medium disabled:opacity-40"
         >
-          Очистить результаты поиска
+          Очистить поиск
+        </button>
+        <button
+          type="button"
+          disabled={busy || (!searched && results.length === 0)}
+          onClick={() => void clearResultsOnly()}
+          className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-medium disabled:opacity-40"
+        >
+          Очистить результаты
         </button>
       </div>
 
-      {searched ?
-        <div className="space-y-3 rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3 text-sm text-black/70">
-          <p>
-            <span className="font-medium text-black">Релевантных:</span> {totalFound}
-            {skippedResults.length > 0 ?
-              <>
-                <span className="mx-2 text-black/30">·</span>
-                <span className="font-medium text-black">Скрыто (запрос):</span> {skippedResults.length}
-              </>
-            : null}
-            <span className="mx-2 text-black/30">·</span>
-            <span className="font-medium text-black">Показано:</span> {shownCount} из {totalFound}
-            <span className="mx-2 text-black/30">·</span>
-            <span className="font-medium text-black">Страница:</span> {safePage} из {totalPages}
-          </p>
-          {searchStats ?
-            <p className="text-xs text-black/50">
-              Ссылок: {searchStats.linksExtracted}
-              <span className="mx-1 text-black/30">·</span>
-              До релевантности: {searchStats.beforeRelevanceFilter}
-              <span className="mx-1 text-black/30">·</span>
-              Релевантных: {searchStats.relevantCount}
-              {searchStats.relevanceRejected > 0 ?
-                <>
-                  <span className="mx-1 text-black/30">·</span>
-                  Отклонено: {searchStats.relevanceRejected}
-                </>
+      <div ref={resultsSectionRef} tabIndex={-1} className="scroll-mt-4 outline-none">
+        {searched ?
+          <div className="space-y-3 rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3">
+            <p className="text-base font-semibold text-black">
+              <span className="text-black/55">Найдено:</span> {totalFound}
+              <span className="mx-2 font-normal text-black/25">·</span>
+              <span className="text-black/55">Показано:</span> {displayedCount}
+              <span className="mx-2 font-normal text-black/25">·</span>
+              <span className="text-black/55">Скрыто:</span> {hiddenCount}
+              <span className="mx-2 font-normal text-black/25">·</span>
+              <span className="text-black/55">Выбрано:</span> {selectedCount}
+            </p>
+            <p className="text-xs text-black/45">
+              Страница {safePage} из {totalPages}
+              {searchStats?.linksExtracted != null ?
+                ` · с площадок извлечено: ${searchStats.linksExtracted}`
               : null}
-              <span className="mx-1 text-black/30">·</span>
-              Страниц поиска: {searchStats.pagesScanned}
-              {searchStats.afterCityFilter !== searchStats.linksExtracted ?
-                ` → после города: ${searchStats.afterCityFilter}`
-              : ""}
-              {searchStats.afterPriceFilter !== searchStats.afterCityFilter ?
-                ` → после цены: ${searchStats.afterPriceFilter}`
-              : ""}
-              {searchStats.pagesPerSource ?
-                ` · до ${searchStats.pagesPerSource} стр./источник`
-              : ""}
             </p>
-          : null}
-          {searchStats?.sourceCounts ?
-            <p>
-              <span className="font-medium text-black">Источники:</span>{" "}
-              {(["avito", "drom", "youla", "vk"] as const)
-                .map((k) => `${SOURCE_DIAG_LABEL[k]}: ${searchStats.sourceCounts[k] ?? 0}`)
-                .join(" · ")}
-            </p>
-          : null}
-          {searchStats?.hidden && Object.keys(searchStats.hidden).length > 0 ?
-            <p className="text-xs text-amber-900">
-              <span className="font-medium">Скрыто:</span>{" "}
-              {Object.entries(searchStats.hidden)
-                .map(([k, v]) => `${HIDDEN_REASON_LABEL[k] ?? k}: ${v}`)
-                .join(" · ")}
-            </p>
-          : null}
-          {diagnostics.length > 0 ?
-            <div className="overflow-x-auto rounded-lg border border-black/10 bg-white">
-              <table className="w-full min-w-[32rem] text-left text-xs">
-                <thead className="border-b border-black/10 bg-black/[0.03] text-black/60">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Источник</th>
-                    <th className="px-3 py-2 font-medium">Найдено</th>
-                    <th className="px-3 py-2 font-medium">Релевантно</th>
-                    <th className="px-3 py-2 font-medium">Отклонено</th>
-                    <th className="px-3 py-2 font-medium">Ошибка</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {diagnostics.map((diag) => {
-                    const errText =
-                      diag.errorMessage ??
-                      (diag.linksExtracted === 0 ?
-                        diag.message ??
-                          OFFER_SOURCE_ZERO_LABELS[diag.zeroReason ?? ""] ??
-                          diag.zeroReason ??
-                          (diag.blocked ? "заблокирован" : null)
-                      : null) ??
-                      "—";
-                    return (
-                      <tr key={diag.sourceName} className="border-t border-black/5 align-top">
-                        <td className="px-3 py-2 font-medium text-black">
-                          {SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}
-                          <div className="mt-0.5 font-normal text-black/45">
-                            HTTP {diag.httpStatus ?? "—"}
-                            {diag.pagesScanned > 0 ? ` · стр. ${diag.pagesScanned}` : ""}
-                          </div>
-                          {diag.lastRequestUrl ?
-                            <div className="mt-1 max-w-xs break-all font-normal text-black/40">
-                              {diag.lastRequestUrl}
-                            </div>
-                          : diag.searchUrls[0] ?
-                            <div className="mt-1 max-w-xs break-all font-normal text-black/40">
-                              {diag.searchUrls[0]}
-                            </div>
-                          : null}
-                        </td>
-                        <td className="px-3 py-2">{diag.linksExtracted}</td>
-                        <td className="px-3 py-2">{diag.relevantCount ?? "—"}</td>
-                        <td className="px-3 py-2">{diag.rejectedByRelevance ?? "—"}</td>
-                        <td className="px-3 py-2 text-amber-900">{errText}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          : null}
-          {searchStats?.relevanceFilterFailed ?
-            <p className="text-xs text-amber-900">
-              Фильтр релевантности не применён — показаны все ссылки после остальных фильтров (
-              {searchStats.beforeRelevanceFilter} шт.).
-            </p>
-          : null}
-        </div>
-      : null}
-
-      {searchError || lastHttpStatus != null ?
-        <div className="rounded-2xl border border-red-200 bg-red-50/90 p-4 text-sm text-red-950">
-          <p className="font-semibold">Ошибка поиска (детали)</p>
-          {lastHttpStatus != null ?
-            <p className="mt-1">
-              <span className="font-medium">HTTP:</span> {lastHttpStatus}
-            </p>
-          : null}
-          {searchError?.source ?
-            <p className="mt-1">
-              <span className="font-medium">Источник:</span> {searchError.source}
-            </p>
-          : null}
-          {searchError?.requestUrl ?
-            <p className="mt-1 break-all">
-              <span className="font-medium">URL запроса:</span> {searchError.requestUrl}
-            </p>
-          : null}
-          <p className="mt-1">
-            <span className="font-medium">Сообщение:</span>{" "}
-            {searchError?.message ?? message ?? "—"}
-          </p>
-          {searchError?.file ?
-            <p className="mt-1 font-mono text-xs">
-              {searchError.file}
-              {searchError.line != null ? `:${searchError.line}` : ""}
-            </p>
-          : null}
-          {searchError?.stack ?
-            <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-white/80 p-2 font-mono text-[10px] leading-snug text-black/70">
-              {searchError.stack}
-            </pre>
-          : null}
-        </div>
-      : null}
-
-      {message && !searchError ?
-        <p className="text-sm font-medium text-amber-900">{message}</p>
-      : null}
-      {message && searchError && !searchError.message.includes(message) ?
-        <p className="text-sm text-amber-900">{message}</p>
-      : null}
-
-      {importErrors.length > 0 ?
-        <div className="rounded-2xl border border-red-200 bg-red-50/80 p-4 text-sm">
-          <p className="font-semibold text-red-950">Не удалось создать кандидатов</p>
-          <ul className="mt-2 space-y-2">
-            {importErrors.map((err) => (
-              <li key={err.url} className="rounded-xl border border-red-100 bg-white/80 p-3">
-                <p className="break-all font-medium text-black">{err.url}</p>
-                <p className="mt-1 text-xs text-black/55">
-                  {err.sourceName ?
-                    catalogSourceNameLabel(err.sourceName)
-                  : "Источник не определён"}
-                  {" · "}
-                  <span className="font-mono text-[11px]">{err.error}</span>
-                </p>
-                <p className="mt-1 text-red-900">
-                  {err.message || SOURCE_OFFER_IMPORT_ERROR_LABELS[err.error]}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      : null}
-
-      {searched && totalFound > 0 ?
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 text-sm text-black/60">
-              На странице
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value) as PageSize);
-                  setPage(1);
-                }}
-                className="rounded-lg border border-black/15 px-2 py-1"
-              >
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              disabled={busy || safePage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-            >
-              ← Назад
-            </button>
-            <button
-              type="button"
-              disabled={busy || safePage >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-            >
-              Вперёд →
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={selectAllVisible}
-              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
-            >
-              Выбрать на странице
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setSelected(new Set())}
-              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
-            >
-              Снять выбор
-            </button>
-            <button
-              type="button"
-              disabled={busy || selected.size === 0}
-              onClick={() => void importSelected()}
-              className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-            >
-              Создать кандидатов предложений ({selected.size})
-            </button>
+            {searchStats?.hidden && Object.keys(searchStats.hidden).length > 0 ?
+              <p className="text-xs text-amber-900">
+                <span className="font-medium">Фильтры:</span>{" "}
+                {Object.entries(searchStats.hidden)
+                  .map(([k, v]) => `${HIDDEN_REASON_LABEL[k] ?? k}: ${v}`)
+                  .join(" · ")}
+              </p>
+            : null}
+            {diagnostics.length > 0 ?
+              <div className="overflow-x-auto rounded-lg border border-black/10 bg-white">
+                <table className="w-full min-w-[32rem] text-left text-xs">
+                  <thead className="border-b border-black/10 bg-black/[0.03] text-black/60">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Источник</th>
+                      <th className="px-3 py-2 font-medium">Найдено</th>
+                      <th className="px-3 py-2 font-medium">Релевантно</th>
+                      <th className="px-3 py-2 font-medium">Отклонено</th>
+                      <th className="px-3 py-2 font-medium">Ошибка</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diagnostics.map((diag) => {
+                      const errText =
+                        diag.errorMessage ??
+                        (diag.linksExtracted === 0 ?
+                          diag.message ??
+                            OFFER_SOURCE_ZERO_LABELS[diag.zeroReason ?? ""] ??
+                            diag.zeroReason ??
+                            (diag.blocked ? "заблокирован" : null)
+                        : null) ??
+                        "—";
+                      return (
+                        <tr key={diag.sourceName} className="border-t border-black/5 align-top">
+                          <td className="px-3 py-2 font-medium text-black">
+                            {SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}
+                          </td>
+                          <td className="px-3 py-2">{diag.linksExtracted}</td>
+                          <td className="px-3 py-2">{diag.relevantCount ?? "—"}</td>
+                          <td className="px-3 py-2">{diag.rejectedByRelevance ?? "—"}</td>
+                          <td className="px-3 py-2 text-amber-900">{errText}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            : null}
           </div>
+        : null}
 
-          <ul className="space-y-3">
-            {pageResults.map((item) => (
-              <li key={item.url} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
-                <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(item.url)}
-                    onChange={() => toggleUrl(item.url)}
-                    className="mt-1 shrink-0"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-black">{item.title}</span>
-                      <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
-                        {catalogSourceNameLabel(item.sourceName)}
-                      </span>
-                      <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-xs text-black/55">
-                        {PARSE_QUALITY_LABEL[item.parseQuality] ?? item.parseQuality}
-                      </span>
-                      {item.relevance === "match" ?
-                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
-                          релевантно
+        {searchError || lastHttpStatus != null ?
+          <div className="mt-3 rounded-2xl border border-red-200 bg-red-50/90 p-4 text-sm text-red-950">
+            <p className="font-semibold">Ошибка поиска (детали)</p>
+            {lastHttpStatus != null ?
+              <p className="mt-1">
+                <span className="font-medium">HTTP:</span> {lastHttpStatus}
+              </p>
+            : null}
+            <p className="mt-1">
+              <span className="font-medium">Сообщение:</span>{" "}
+              {searchError?.message ?? message ?? "—"}
+            </p>
+          </div>
+        : null}
+
+        {message && !searchError ?
+          <p className="mt-3 text-sm font-medium text-amber-900">{message}</p>
+        : null}
+
+        {importErrors.length > 0 ?
+          <div className="mt-3 rounded-2xl border border-red-200 bg-red-50/80 p-4 text-sm">
+            <p className="font-semibold text-red-950">Не удалось создать кандидатов</p>
+            <ul className="mt-2 space-y-2">
+              {importErrors.map((err) => (
+                <li key={err.url} className="rounded-xl border border-red-100 bg-white/80 p-3">
+                  <p className="break-all font-medium text-black">{err.url}</p>
+                  <p className="mt-1 text-red-900">
+                    {err.message || SOURCE_OFFER_IMPORT_ERROR_LABELS[err.error]}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        : null}
+
+        {searched && totalFound > 0 ?
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 text-sm text-black/60">
+                На странице
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    const ps = Number(e.target.value) as OfferSearchPageSize;
+                    setPageSize(ps);
+                    setPageLocal(1);
+                  }}
+                  className="rounded-lg border border-black/15 px-2 py-1"
+                >
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={busy || safePage <= 1}
+                onClick={() => setPageLocal(safePage - 1)}
+                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+              >
+                ← Назад
+              </button>
+              <button
+                type="button"
+                disabled={busy || safePage >= totalPages}
+                onClick={() => setPageLocal(safePage + 1)}
+                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+              >
+                Вперёд →
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={selectAllVisible}
+                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+              >
+                Выбрать на странице
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setSelected(new Set())}
+                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+              >
+                Снять выбор
+              </button>
+              <button
+                type="button"
+                disabled={busy || selected.size === 0}
+                onClick={() => void importSelected()}
+                className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Создать кандидатов предложений ({selected.size})
+              </button>
+            </div>
+
+            <ul className="space-y-3">
+              {pageResults.map((item) => (
+                <li key={item.url} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(item.url)}
+                      onChange={() => toggleUrl(item.url)}
+                      className="mt-1 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-black">{item.title}</span>
+                        <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
+                          {catalogSourceNameLabel(item.sourceName)}
                         </span>
-                      : item.relevance === "relevance_unknown" ?
-                        <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-900">
-                          релевантность не проверена
-                        </span>
-                      : item.skipReason === "query_mismatch" ?
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900">
-                          не по запросу
-                        </span>
+                        {item.relevance === "match" ?
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
+                            релевантно
+                          </span>
+                        : item.relevance === "relevance_unknown" ?
+                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-900">
+                            релевантность не проверена
+                          </span>
+                        : null}
+                      </div>
+                      <p className="mt-1 text-black/55">
+                        {[
+                          item.price ? `${Number(item.price).toLocaleString("ru-RU")} ₽` : null,
+                          item.city || null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </p>
+                      {item.shortSnippet ?
+                        <p className="mt-1 line-clamp-2 text-black/45">{item.shortSnippet}</p>
                       : null}
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-block break-all text-xs font-medium text-[#c25a00] underline"
+                      >
+                        {item.url}
+                      </a>
                     </div>
-                    <p className="mt-1 text-black/55">
-                      {[
-                        item.price ? `${Number(item.price).toLocaleString("ru-RU")} ₽` : null,
-                        item.city || null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
-                    </p>
-                    {(item.companyName || item.sellerName) && (
-                      <p className="mt-1 text-xs text-black/50">
-                        {item.companyName ? `Компания: ${item.companyName}` : ""}
-                        {item.companyName && item.sellerName ? " · " : ""}
-                        {item.sellerName ? `Продавец: ${item.sellerName}` : ""}
-                      </p>
-                    )}
-                    {item.shortSnippet ?
-                      <p className="mt-1 line-clamp-2 text-black/45">{item.shortSnippet}</p>
-                    : null}
-                    {(item.brand || item.oemCodes.length > 0 || item.articleCodes.length > 0) && (
-                      <p className="mt-1 text-xs text-black/40">
-                        {item.brand ? `Бренд: ${item.brand}` : ""}
-                        {item.oemCodes.length > 0 ? ` · OEM: ${item.oemCodes.join(", ")}` : ""}
-                        {item.articleCodes.length > 0 ? ` · Арт.: ${item.articleCodes.join(", ")}` : ""}
-                      </p>
-                    )}
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 inline-block break-all text-xs font-medium text-[#c25a00] underline"
-                    >
-                      {item.url}
-                    </a>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        : null}
 
-      {searched && totalFound === 0 && !busy ?
-        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          {EMPTY_REASON_LABEL[emptyReason ?? ""] ??
-            message ??
-            "Объявления не найдены. Измените запрос, город или источник."}
-        </p>
-      : null}
+        {searched && totalFound === 0 && !busy ?
+          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            {EMPTY_REASON_LABEL[emptyReason ?? ""] ??
+              message ??
+              "Объявления не найдены. Измените запрос, город или источник."}
+          </p>
+        : null}
+      </div>
 
       <OfferImportGoToDraftsBanner count={createdCount} onGoToDrafts={onGoToDrafts} />
     </div>

@@ -5,7 +5,6 @@ import {
 } from "../../../../../lib/catalogOfferAdminSearch";
 import { formatOfferSearchApiError } from "../../../../../lib/catalogOfferSearchApiError";
 import { logCatalogOfferSearch } from "../../../../../lib/catalogCatalogLog";
-import { saveOfferSearchSession } from "../../../../../lib/serverCatalogOfferSearchSessionStore";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 
 export const runtime = "nodejs";
@@ -82,29 +81,7 @@ export async function POST(req: Request) {
       return NextResponse.json(out, { status: 400 });
     }
 
-    let sessionId: number | null = null;
-    try {
-      const session = await saveOfferSearchSession({
-        query,
-        city,
-        brand,
-        oemArticle,
-        sourceFilter,
-        priceMin: Number.isFinite(priceMin) ? priceMin : undefined,
-        priceMax: Number.isFinite(priceMax) ? priceMax : undefined,
-        results: out.results,
-        skipped: out.skipped ?? [],
-        message: out.message,
-        emptyReason: out.emptyReason,
-        stats: out.stats,
-      });
-      sessionId = session?.id ?? null;
-    } catch (saveErr) {
-      const saveMsg = saveErr instanceof Error ? saveErr.message : String(saveErr);
-      logCatalogOfferSearch("session_save_failed", { error: saveMsg });
-    }
-
-    return NextResponse.json({ ...out, sessionId });
+    return NextResponse.json(out);
   } catch (err) {
     const searchError = formatOfferSearchApiError(err, { includeStack: true });
     logCatalogOfferSearch("api_search_failed", {

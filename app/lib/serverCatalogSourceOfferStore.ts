@@ -2,6 +2,7 @@ import type {
   CatalogSourceOfferListQuery,
   CatalogSourceOfferListResult,
 } from "./catalogSourceOfferQuery";
+import { isProduction } from "./productionGuards";
 import { usesPostgres } from "./pgPool";
 import type {
   CatalogSourceOffer,
@@ -13,11 +14,24 @@ import type {
 import * as json from "./serverCatalogSourceOfferJson";
 import * as pg from "./serverCatalogSourceOfferPg";
 
+function requirePgInProduction(): void {
+  if (isProduction() && !usesPostgres()) {
+    throw new Error(
+      "[haliwali] DATABASE_URL is required for catalog source offers in production (no file store).",
+    );
+  }
+}
+
+/** Postgres in production; JSON file store only in local dev when DATABASE_URL is unset. */
 async function withStore<T>(pgFn: () => Promise<T>, jsonFn: () => Promise<T>): Promise<T> {
-  if (!usesPostgres()) return jsonFn();
+  requirePgInProduction();
+  if (!usesPostgres()) {
+    return jsonFn();
+  }
   try {
     return await pgFn();
-  } catch {
+  } catch (err) {
+    if (isProduction()) throw err;
     return jsonFn();
   }
 }
@@ -86,7 +100,17 @@ export type CatalogSourceOfferAdminStatus = {
 };
 
 export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdminStatus> {
+  const empty = {
+    tablesReady: false,
+    publishedCount: 0,
+    importCount: 0,
+    candidatesCount: 0,
+    rejectedCount: 0,
+    duplicateCount: 0,
+  };
+
   if (!usesPostgres()) {
+    if (isProduction()) return empty;
     const [publishedCount, queues] = await Promise.all([
       json.jsonCountPublishedSourceOffers(),
       json.jsonCountSourceOfferDraftQueues(),
@@ -100,18 +124,11 @@ export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdm
       duplicateCount: queues.duplicate,
     };
   }
+
   try {
     const tablesReady = await pg.pgCheckSourceOffersTablesReady();
-    if (!tablesReady) {
-      return {
-        tablesReady: false,
-        publishedCount: 0,
-        importCount: 0,
-        candidatesCount: 0,
-        rejectedCount: 0,
-        duplicateCount: 0,
-      };
-    }
+    if (!tablesReady) return empty;
+
     const [publishedCount, queues] = await Promise.all([
       pg.pgCountPublishedSourceOffers(),
       pg.pgCountSourceOfferDraftQueues(),
@@ -125,14 +142,7 @@ export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdm
       duplicateCount: queues.duplicate,
     };
   } catch {
-    return {
-      tablesReady: false,
-      publishedCount: 0,
-      importCount: 0,
-      candidatesCount: 0,
-      rejectedCount: 0,
-      duplicateCount: 0,
-    };
+    return empty;
   }
 }
 

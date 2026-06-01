@@ -17,6 +17,7 @@ export type OfferSearchCacheKey = {
   oemArticle: string;
   sourceFilter: string;
   categorySlug: string;
+  offerType: string;
   priceMin?: number;
   priceMax?: number;
   sort: string;
@@ -30,6 +31,7 @@ function stableKey(parts: OfferSearchCacheKey): string {
     oem: parts.oemArticle.trim().toLowerCase(),
     source: parts.sourceFilter,
     cat: parts.categorySlug,
+    offerType: parts.offerType,
     pmin: parts.priceMin ?? null,
     pmax: parts.priceMax ?? null,
     sort: parts.sort,

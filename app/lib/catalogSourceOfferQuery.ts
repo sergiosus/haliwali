@@ -1,20 +1,23 @@
 import { CATALOG_SOURCE_NAME_LABEL } from "./catalogSourceName";
 import { isValidPublishedSourceOffer, inputFromSourceOfferFields } from "./catalogSourceOfferValidation";
+import { effectiveOfferType } from "./catalogSourceOfferType";
 import {
   parseCatalogSourceName,
+  parseCatalogSourceOfferType,
   type CatalogSourceName,
   type CatalogSourceOffer,
+  type CatalogSourceOfferType,
 } from "./catalogSourceOfferTypes";
 
 export type CatalogSourceOfferPageSize = 20 | 50 | 100;
 
 export type CatalogSourceOfferListQuery = {
   q?: string;
-  categorySlug?: string;
   city?: string;
   brand?: string;
   oemArticle?: string;
   sourceName?: CatalogSourceName;
+  offerType?: CatalogSourceOfferType;
   priceMin?: number;
   priceMax?: number;
   limit?: number;
@@ -90,7 +93,8 @@ function filterValidPublished(offers: CatalogSourceOffer[]): CatalogSourceOffer[
         sourceName: o.sourceName,
         sourceUrl: o.sourceUrl,
         shortSnippet: o.shortSnippet,
-        imageUrl: o.imageUrl,
+        offerType: o.offerType,
+        coverImageUrl: o.coverImageUrl,
         confidenceScore: o.confidenceScore,
       }),
     ),
@@ -105,16 +109,25 @@ export function filterSourceOffersInMemory(
   const offset = opts.offset ?? 0;
   let list = filterValidPublished(offers);
 
-  if (opts.categorySlug) {
-    const cat = opts.categorySlug.trim().toLowerCase();
-    list = list.filter((o) => o.categorySlug === cat);
-  }
   if (opts.city) {
     const c = opts.city.trim().toLowerCase();
     list = list.filter((o) => o.citySearch.includes(c) || o.city.toLowerCase().includes(c));
   }
   if (opts.sourceName) {
     list = list.filter((o) => o.sourceName === opts.sourceName);
+  }
+  if (opts.offerType) {
+    const want = opts.offerType;
+    list = list.filter(
+      (o) =>
+        effectiveOfferType(o.offerType, {
+          title: o.title,
+          sourceUrl: o.sourceUrl,
+          brand: o.brand,
+          oemCodes: o.oemCodes,
+          articleCodes: o.articleCodes,
+        }) === want,
+    );
   }
   if (opts.brand?.trim()) {
     list = list.filter((o) => matchesBrand(o, opts.brand!));
@@ -150,13 +163,17 @@ export function parseSourceOfferPageSize(raw: string | null): CatalogSourceOffer
 
 export function parseSourceOfferListQuery(searchParams: URLSearchParams): CatalogSourceOfferListQuery {
   const q = searchParams.get("q") ?? undefined;
-  const categorySlug = searchParams.get("category") ?? searchParams.get("categorySlug") ?? undefined;
   const city = searchParams.get("city") ?? undefined;
   const brand = searchParams.get("brand") ?? undefined;
   const oemArticle =
     searchParams.get("oem") ?? searchParams.get("oemArticle") ?? searchParams.get("article") ?? undefined;
   const sourceRaw = searchParams.get("sourceName") ?? searchParams.get("source") ?? undefined;
   const sourceName = parseCatalogSourceName(sourceRaw);
+  const offerTypeRaw = searchParams.get("offerType") ?? undefined;
+  const offerType =
+    offerTypeRaw && offerTypeRaw !== "all" ?
+      parseCatalogSourceOfferType(offerTypeRaw)
+    : undefined;
   const priceMin = Number(searchParams.get("priceMin") ?? searchParams.get("priceFrom"));
   const priceMax = Number(searchParams.get("priceMax") ?? searchParams.get("priceTo"));
   const pageSize = parseSourceOfferPageSize(searchParams.get("pageSize"));
@@ -165,11 +182,11 @@ export function parseSourceOfferListQuery(searchParams: URLSearchParams): Catalo
 
   return {
     q: q?.trim() || undefined,
-    categorySlug: categorySlug?.trim().toLowerCase() || undefined,
     city: city?.trim() || undefined,
     brand: brand?.trim() || undefined,
     oemArticle: oemArticle?.trim() || undefined,
     sourceName,
+    offerType,
     priceMin: Number.isFinite(priceMin) && priceMin > 0 ? priceMin : undefined,
     priceMax: Number.isFinite(priceMax) && priceMax > 0 ? priceMax : undefined,
     limit: pageSize,

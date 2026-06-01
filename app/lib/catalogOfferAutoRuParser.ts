@@ -103,6 +103,7 @@ function pushAutoRuHit(
     sourceName: "auto_ru",
     fromSearchPage: true,
     imageUrl,
+    coverImageUrl: imageUrl,
     year,
     mileageKm,
     cardComplete: Boolean(title && priceRaw && url),

@@ -22,4 +22,8 @@ export const SOURCE_OFFER_PUBLISHED_SELECT_COLS = `
   imported_at, created_at, updated_at
 `.trim();
 
-export { resolveCoverImageUrl, slimSourceOfferRawPayload } from "./catalogSourceOfferCoverImage";
+export {
+  resolveCoverImageUrl,
+  slimSourceOfferRawPayload,
+  rawPayloadForDb,
+} from "./catalogSourceOfferCoverImage";

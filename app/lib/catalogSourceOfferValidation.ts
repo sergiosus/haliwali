@@ -211,7 +211,8 @@ export function inputFromSourceOfferFields(fields: {
   sourceName: CatalogSourceName;
   sourceUrl: string;
   shortSnippet: string;
-  imageUrl?: string | null;
+  offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
+  coverImageUrl?: string | null;
   confidenceScore?: number;
   rawPayload?: Record<string, unknown>;
 }): CatalogSourceOfferInput {
@@ -229,7 +230,8 @@ export function inputFromSourceOfferFields(fields: {
     sourceName: fields.sourceName,
     sourceUrl: fields.sourceUrl,
     shortSnippet: fields.shortSnippet,
-    imageUrl: fields.imageUrl ?? null,
+    offerType: fields.offerType ?? "other",
+    coverImageUrl: fields.coverImageUrl ?? null,
     confidenceScore: fields.confidenceScore ?? 0.5,
     rawPayload: fields.rawPayload,
   };

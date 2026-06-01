@@ -22,10 +22,15 @@ import {
   validateSourceOfferInput,
   type SourceOfferRejectReason,
 } from "./catalogSourceOfferValidation";
+import {
+  effectiveOfferType,
+  parseCatalogSourceOfferType,
+  sqlEffectiveOfferTypeMatch,
+} from "./catalogSourceOfferType";
 import type { CatalogSourceName } from "./catalogSourceOfferTypes";
 import {
-  imageUrlFromRawPayload,
   rawPayloadForDb,
+  resolveCoverImageUrl,
   SOURCE_OFFER_DRAFT_SELECT_COLS,
   SOURCE_OFFER_PUBLISHED_SELECT_COLS,
   CATALOG_SOURCE_OFFERS_TABLE,
@@ -35,6 +40,7 @@ import {
 type DraftRow = {
   id: number;
   status: string;
+  offer_type: string;
   title: string;
   price: string | null;
   city: string;
@@ -48,6 +54,7 @@ type DraftRow = {
   source_name: string;
   source_url: string;
   short_snippet: string;
+  cover_image_url: string | null;
   confidence_score: number;
   duplicate_hint: string | null;
   duplicate_of_offer_id: number | null;
@@ -74,9 +81,20 @@ function parseCodes(v: unknown): string[] {
 }
 
 function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
+  const coverImageUrl = resolveCoverImageUrl({
+    coverImageUrl: r.cover_image_url,
+    rawPayload: r.raw_payload,
+  });
   return {
     id: r.id,
     status: normalizeSourceOfferDraftStatus(r.status),
+    offerType: effectiveOfferType(r.offer_type, {
+      title: r.title,
+      sourceUrl: r.source_url,
+      brand: r.brand,
+      oemCodes: parseCodes(r.oem_codes),
+      articleCodes: parseCodes(r.article_codes),
+    }),
     title: r.title,
     price: r.price,
     city: r.city,
@@ -90,7 +108,7 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
     sourceName: r.source_name as CatalogSourceOfferDraft["sourceName"],
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
-    imageUrl: imageUrlFromRawPayload(r.raw_payload),
+    coverImageUrl,
     confidenceScore: r.confidence_score,
     duplicateHint: r.duplicate_hint,
     duplicateOfOfferId: r.duplicate_of_offer_id,
@@ -109,6 +127,13 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
 
 function draftRowToInput(r: DraftRow): ReturnType<typeof inputFromSourceOfferFields> {
   return inputFromSourceOfferFields({
+    offerType: effectiveOfferType(r.offer_type, {
+      title: r.title,
+      sourceUrl: r.source_url,
+      brand: r.brand,
+      oemCodes: parseCodes(r.oem_codes),
+      articleCodes: parseCodes(r.article_codes),
+    }),
     title: r.title,
     price: r.price,
     city: r.city,
@@ -122,6 +147,10 @@ function draftRowToInput(r: DraftRow): ReturnType<typeof inputFromSourceOfferFie
     sourceName: r.source_name as CatalogSourceName,
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
+    coverImageUrl: resolveCoverImageUrl({
+      coverImageUrl: r.cover_image_url,
+      rawPayload: r.raw_payload,
+    }),
     confidenceScore: r.confidence_score,
     rawPayload: r.raw_payload ?? {},
   });
@@ -129,6 +158,13 @@ function draftRowToInput(r: DraftRow): ReturnType<typeof inputFromSourceOfferFie
 
 function offerRowToInput(r: OfferRow): ReturnType<typeof inputFromSourceOfferFields> {
   return inputFromSourceOfferFields({
+    offerType: effectiveOfferType(r.offer_type, {
+      title: r.title,
+      sourceUrl: r.source_url,
+      brand: r.brand,
+      oemCodes: parseCodes(r.oem_codes),
+      articleCodes: parseCodes(r.article_codes),
+    }),
     title: r.title,
     price: r.price,
     city: r.city,
@@ -142,7 +178,7 @@ function offerRowToInput(r: OfferRow): ReturnType<typeof inputFromSourceOfferFie
     sourceName: r.source_name as CatalogSourceName,
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
-    imageUrl: null,
+    coverImageUrl: resolveCoverImageUrl({ coverImageUrl: r.cover_image_url }),
     confidenceScore: r.confidence_score,
   });
 }
@@ -168,8 +204,16 @@ async function pgRejectDraftWithReason(
 }
 
 function rowToOffer(r: OfferRow): CatalogSourceOffer {
+  const coverImageUrl = resolveCoverImageUrl({ coverImageUrl: r.cover_image_url });
   return {
     id: r.id,
+    offerType: effectiveOfferType(r.offer_type, {
+      title: r.title,
+      sourceUrl: r.source_url,
+      brand: r.brand,
+      oemCodes: parseCodes(r.oem_codes),
+      articleCodes: parseCodes(r.article_codes),
+    }),
     title: r.title,
     price: r.price,
     city: r.city,
@@ -183,7 +227,7 @@ function rowToOffer(r: OfferRow): CatalogSourceOffer {
     sourceName: r.source_name as CatalogSourceOffer["sourceName"],
     sourceUrl: r.source_url,
     shortSnippet: r.short_snippet,
-    imageUrl: null,
+    coverImageUrl,
     confidenceScore: r.confidence_score,
     haliwaliCompanyId: r.haliwali_company_id,
     titleSearch: r.title_search,
@@ -240,19 +284,20 @@ export async function pgUpsertSourceOfferDrafts(
       const { rows } = await pool.query<DraftRow>(
         `
         UPDATE catalog_source_offer_import_drafts SET
-          status = $2, title = $3, price = $4, city = $5, region = $6, category_slug = $7,
-          company_name = $8, seller_name = $9, brand = $10,
-          oem_codes = $11::jsonb, article_codes = $12::jsonb,
-          source_name = $13, source_url = $14, short_snippet = $15, confidence_score = $16,
-          duplicate_hint = $17, duplicate_of_offer_id = $18,
-          title_search = $19, brand_search = $20, oem_search = $21, company_search = $22, city_search = $23,
-          raw_payload = $24::jsonb, imported_at = NOW(), updated_at = NOW()
+          status = $2, offer_type = $3, title = $4, price = $5, city = $6, region = $7, category_slug = $8,
+          company_name = $9, seller_name = $10, brand = $11,
+          oem_codes = $12::jsonb, article_codes = $13::jsonb,
+          source_name = $14, source_url = $15, short_snippet = $16, cover_image_url = $17, confidence_score = $18,
+          duplicate_hint = $19, duplicate_of_offer_id = $20,
+          title_search = $21, brand_search = $22, oem_search = $23, company_search = $24, city_search = $25,
+          raw_payload = $26::jsonb, imported_at = NOW(), updated_at = NOW()
         WHERE id = $1
         RETURNING ${DRAFT_COLS}
         `,
         [
           item.existingDraftId,
           status,
+          input.offerType,
           input.title,
           input.price,
           input.city,
@@ -266,6 +311,7 @@ export async function pgUpsertSourceOfferDrafts(
           input.sourceName,
           input.sourceUrl,
           input.shortSnippet,
+          input.coverImageUrl,
           input.confidenceScore,
           item.duplicateHint,
           item.duplicateOfOfferId,
@@ -274,7 +320,7 @@ export async function pgUpsertSourceOfferDrafts(
           search.oemSearch,
           search.companySearch,
           search.citySearch,
-          JSON.stringify(rawPayloadForDb(input.rawPayload, input.imageUrl)),
+          JSON.stringify(rawPayloadForDb(input.rawPayload, input.coverImageUrl)),
         ],
       );
       if (rows[0]) {
@@ -287,18 +333,19 @@ export async function pgUpsertSourceOfferDrafts(
     const { rows } = await pool.query<DraftRow>(
       `
       INSERT INTO catalog_source_offer_import_drafts (
-        status, title, price, city, region, category_slug, company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
+        status, offer_type, title, price, city, region, category_slug, company_name, seller_name, brand,
+        oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
         duplicate_hint, duplicate_of_offer_id,
         title_search, brand_search, oem_search, company_search, city_search, raw_payload
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15,
-        $16, $17, $18, $19, $20, $21, $22, $23::jsonb
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17,
+        $18, $19, $20, $21, $22, $23, $24, $25::jsonb
       )
       RETURNING ${DRAFT_COLS}
       `,
       [
         status,
+        input.offerType,
         input.title,
         input.price,
         input.city,
@@ -312,6 +359,7 @@ export async function pgUpsertSourceOfferDrafts(
         input.sourceName,
         input.sourceUrl,
         input.shortSnippet,
+        input.coverImageUrl,
         input.confidenceScore,
         item.duplicateHint,
         item.duplicateOfOfferId,
@@ -320,7 +368,7 @@ export async function pgUpsertSourceOfferDrafts(
         search.oemSearch,
         search.companySearch,
         search.citySearch,
-        JSON.stringify(rawPayloadForDb(input.rawPayload, input.imageUrl)),
+        JSON.stringify(rawPayloadForDb(input.rawPayload, input.coverImageUrl)),
       ],
     );
     if (rows[0]) {
@@ -385,17 +433,18 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
     const { rows: ins } = await pool.query<{ id: number }>(
       `
       INSERT INTO catalog_source_offers (
-        draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, confidence_score,
+        draft_id, offer_type, title, price, city, region, category_slug, company_name, seller_name, brand,
+        oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
         title_search, brand_search, oem_search, company_search, city_search
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15,
-        $16, $17, $18, $19, $20
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17,
+        $18, $19, $20, $21, $22
       )
       RETURNING id
       `,
       [
         d.id,
+        parseCatalogSourceOfferType(d.offer_type),
         d.title,
         d.price,
         d.city,
@@ -409,6 +458,7 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
         d.source_name,
         d.source_url,
         d.short_snippet,
+        resolveCoverImageUrl({ coverImageUrl: d.cover_image_url, rawPayload: d.raw_payload }),
         d.confidence_score,
         d.title_search,
         d.brand_search,
@@ -440,10 +490,6 @@ function buildPublishedOfferWhere(
   params: unknown[],
 ): string {
   const clauses: string[] = [];
-  if (opts?.categorySlug) {
-    params.push(opts.categorySlug.trim().toLowerCase());
-    clauses.push(`category_slug = $${params.length}`);
-  }
   if (opts?.city) {
     params.push(`%${opts.city.trim().toLowerCase()}%`);
     clauses.push(`(city_search LIKE $${params.length} OR lower(city) LIKE $${params.length})`);
@@ -451,6 +497,9 @@ function buildPublishedOfferWhere(
   if (opts?.sourceName) {
     params.push(opts.sourceName);
     clauses.push(`source_name = $${params.length}`);
+  }
+  if (opts?.offerType) {
+    clauses.push(sqlEffectiveOfferTypeMatch(opts.offerType));
   }
   if (opts?.brand?.trim()) {
     params.push(`%${opts.brand.trim().toLowerCase()}%`);
@@ -508,7 +557,8 @@ function filterValidPublishedRows(rows: OfferRow[]): CatalogSourceOffer[] {
           sourceName: o.sourceName,
           sourceUrl: o.sourceUrl,
           shortSnippet: o.shortSnippet,
-          imageUrl: o.imageUrl,
+          offerType: o.offerType,
+          coverImageUrl: o.coverImageUrl,
           confidenceScore: o.confidenceScore,
         }),
       ),

@@ -8,7 +8,10 @@ import {
   isRealOfferListingUrl,
   sanitizeOfferText,
 } from "./catalogOfferSearchText";
-import { parseCatalogSourceOfferType, type CatalogSourceOfferType } from "./catalogSourceOfferType";
+import {
+  resolveOfferTypeForStorage,
+  type CatalogSourceOfferType,
+} from "./catalogSourceOfferType";
 import { resolveCoverImageUrl, slimSourceOfferRawPayload } from "./catalogSourceOfferCoverImage";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
 import {
@@ -20,7 +23,14 @@ export const SOURCE_OFFER_SNIPPET_MAX = 280;
 export const SOURCE_OFFER_TITLE_MAX = 200;
 
 function pickOfferType(input: CatalogSourceOfferInput): CatalogSourceOfferType {
-  return parseCatalogSourceOfferType(input.offerType);
+  return resolveOfferTypeForStorage({
+    offerType: input.offerType,
+    title: input.title,
+    sourceUrl: input.sourceUrl,
+    brand: input.brand,
+    oemCodes: input.oemCodes,
+    articleCodes: input.articleCodes,
+  });
 }
 
 function pickCoverImage(input: CatalogSourceOfferInput): string | null {

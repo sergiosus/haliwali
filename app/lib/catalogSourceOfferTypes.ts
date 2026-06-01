@@ -45,6 +45,8 @@ export {
   OFFER_TYPE_LABELS,
   inferOfferType,
   parseCatalogSourceOfferType,
+  resolveOfferTypeForSearch,
+  resolveOfferSearchSources,
 } from "./catalogSourceOfferType";
 
 /** Canonical draft statuses (maps UI «new» → draft). */

@@ -2,10 +2,12 @@ import { logCatalogDiscover, logCatalogOfferSearch } from "./catalogCatalogLog";
 import type { OfferSearchApiErrorDetail } from "./catalogOfferSearchApiError";
 import {
   disabledSourcesForResolved,
-  isAutomotiveOfferSearch,
+  disabledSourceMessage,
   resolveOfferSearchSources,
+  resolveOfferTypeForSearch,
   shouldRunDromFallback,
-} from "./catalogOfferAutoRouting";
+  type OfferTypeFilter,
+} from "./catalogSourceOfferType";
 import {
   passesAutomotiveRelevance,
   scoreAutomotiveOffer,
@@ -73,7 +75,8 @@ export type OfferSearchResultItem = {
   parseQuality: OfferParseQuality;
   relevance: OfferSearchRelevance;
   skipReason?: OfferSearchSkipReason | null;
-  imageUrl?: string | null;
+  coverImageUrl?: string | null;
+  offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
   relevanceScore?: number;
@@ -126,6 +129,7 @@ export type OfferSearchResponse = {
   searchError?: OfferSearchApiErrorDetail;
   fromCache?: boolean;
   automotive?: boolean;
+  offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   sort?: OfferSearchSortMode;
 };
 
@@ -148,7 +152,10 @@ function listingSourceFromUrl(url: string): OfferListingSourceId | null {
   return offerListingSourceFromUrl(url);
 }
 
-function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
+function hitToResult(
+  hit: OfferSourceSearchHit,
+  defaultOfferType: import("./catalogSourceOfferType").CatalogSourceOfferType,
+): OfferSearchResultItem {
   const title =
     sanitizeOfferText(hit.title) || titleFromListingUrl(hit.url) || "";
   const cardComplete = Boolean(hit.cardComplete || (hit.sourceName === "auto_ru" && hit.title && hit.price));
@@ -168,7 +175,8 @@ function hitToResult(hit: OfferSourceSearchHit): OfferSearchResultItem {
     parseQuality: cardComplete ? "search_card" : "link_only",
     relevance: "match",
     skipReason: null,
-    imageUrl: hit.imageUrl ?? null,
+    coverImageUrl: hit.coverImageUrl ?? hit.imageUrl ?? null,
+    offerType: hit.offerType ?? defaultOfferType,
     year: hit.year ?? null,
     mileageKm: hit.mileageKm ?? null,
   };
@@ -460,6 +468,7 @@ export async function searchOffersForAdmin(opts: {
   brand?: string;
   oemArticle?: string;
   sourceFilter?: OfferSearchSourceFilter;
+  offerTypeFilter?: OfferTypeFilter;
   categorySlug?: string;
   priceMin?: number;
   priceMax?: number;
@@ -484,7 +493,14 @@ export async function searchOffersForAdmin(opts: {
   const sourceFilter = opts.sourceFilter ?? "all";
   const categorySlug = (opts.categorySlug ?? "").trim();
   const sortMode: OfferSearchSortMode = opts.sort ?? "exact_match";
-  const automotive = isAutomotiveOfferSearch(query, categorySlug);
+  const offerTypeFilter = opts.offerTypeFilter ?? "all";
+  const offerType = resolveOfferTypeForSearch({
+    offerTypeFilter,
+    query,
+    categorySlug,
+    oemArticle,
+  });
+  const automotive = offerType === "auto";
   const hidden: Record<string, number> = {};
 
   const cacheKey: OfferSearchCacheKey = {
@@ -494,6 +510,7 @@ export async function searchOffersForAdmin(opts: {
     oemArticle,
     sourceFilter,
     categorySlug,
+    offerType: offerTypeFilter,
     priceMin: opts.priceMin,
     priceMax: opts.priceMax,
     sort: sortMode,
@@ -517,10 +534,17 @@ export async function searchOffersForAdmin(opts: {
     };
   }
 
-  const resolved: import("./catalogOfferAutoRouting").ResolvedOfferSearchSources =
+  const resolved =
     sourceFilter === "all" ?
-      resolveOfferSearchSources({ sourceFilter, query, categorySlug })
+      resolveOfferSearchSources({
+        sourceFilter,
+        query,
+        categorySlug,
+        oemArticle,
+        offerTypeFilter,
+      })
     : {
+        offerType,
         primary: (
           sourceFilter === "avito" ? ["avito"]
           : sourceFilter === "auto_ru" ? ["auto_ru"]
@@ -530,7 +554,6 @@ export async function searchOffersForAdmin(opts: {
           : []
         ) as OfferListingSourceId[],
         fallback: [],
-        automotive: sourceFilter === "auto_ru" || automotive,
       };
 
   let sources: OfferListingSourceId[] = [...resolved.primary];
@@ -541,7 +564,7 @@ export async function searchOffersForAdmin(opts: {
     city: city.slice(0, 40),
     sourceFilter,
     sources,
-    automotive: resolved.automotive,
+    offerType: resolved.offerType,
   });
 
   logCatalogDiscover("offer_direct_search", {
@@ -573,57 +596,30 @@ export async function searchOffersForAdmin(opts: {
   const disabledSources = disabledSourcesForResolved(resolved, sources);
   for (const s of disabledSources) {
     if (diagnostics.some((d) => d.sourceName === s)) continue;
-    if (s === "youla") {
-      diagnostics.push({
-        sourceName: "youla",
-        searched: false,
-        blocked: true,
-        searchUrls: [],
-        httpStatus: null,
-        pagesScanned: 0,
-        linksExtracted: 0,
-        skippedCount: 0,
-        parserErrors: 0,
-        zeroReason: "disabled",
-        skipReasons: {},
-        message: "Youla blocked by captcha (не включён в авто-поиск).",
-      });
-    } else if (s === "vk") {
-      diagnostics.push({
-        sourceName: "vk",
-        searched: false,
-        blocked: false,
-        searchUrls: [],
-        httpStatus: null,
-        pagesScanned: 0,
-        linksExtracted: 0,
-        skippedCount: 0,
-        parserErrors: 0,
-        zeroReason: "unsupported",
-        skipReasons: {},
-        message: "VK parser not implemented yet",
-      });
-    } else if (s === "drom" && resolved.automotive) {
-      diagnostics.push({
-        sourceName: "drom",
-        searched: false,
-        blocked: false,
-        searchUrls: [],
-        httpStatus: null,
-        pagesScanned: 0,
-        linksExtracted: 0,
-        skippedCount: 0,
-        parserErrors: 0,
-        zeroReason: "disabled",
-        skipReasons: {},
-        message: "Drom — экспериментальный (резерв, не использован).",
-      });
-    }
+    const msg = disabledSourceMessage(s);
+    diagnostics.push({
+      sourceName: s,
+      searched: false,
+      blocked: s === "youla",
+      searchUrls: [],
+      httpStatus: null,
+      pagesScanned: 0,
+      linksExtracted: 0,
+      skippedCount: 0,
+      parserErrors: 0,
+      zeroReason: s === "vk" ? "unsupported" : "disabled",
+      skipReasons: {},
+      message:
+        msg ??
+        (s === "drom" && resolved.offerType === "auto" ?
+          "Drom — экспериментальный (резерв, не использован)."
+        : `${s} не включён в поиск`),
+    });
   }
 
   const pagesScanned = diagnostics.reduce((n, d) => n + d.pagesScanned, 0);
   const rawLinkCount = hits.length;
-  let items: OfferSearchResultItem[] = hits.map(hitToResult);
+  let items: OfferSearchResultItem[] = hits.map((h) => hitToResult(h, resolved.offerType));
 
   logCatalogOfferSearch("admin_links_from_sources", {
     rawLinkCount,
@@ -771,7 +767,8 @@ export async function searchOffersForAdmin(opts: {
     results: items,
     skipped,
     stats,
-    automotive: resolved.automotive || automotive,
+    automotive: resolved.offerType === "auto",
+    offerType: resolved.offerType,
     sort: sortMode,
     emptyReason:
       items.length === 0 ?
@@ -785,7 +782,7 @@ export async function searchOffersForAdmin(opts: {
       : null,
     message:
       filterFailed ?
-        resolved.automotive ?
+        resolved.offerType === "auto" ?
           `Релевантных совпадений мало — показаны Avito и Auto.ru (${items.length}). Drom скрыт.`
         : `Релевантных совпадений нет — показаны только Avito (${items.length}). Drom и прочие нерелевантные скрыты.`
       : items.length === 0 && skipped.length > 0 ?

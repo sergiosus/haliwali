@@ -32,6 +32,16 @@ export const OFFER_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[]
 ];
 
 /** Admin offer search — stable sources only in «all», disabled sources labeled. */
+import type { OfferTypeFilter } from "../../../lib/catalogSourceOfferType";
+import { OFFER_TYPE_LABELS } from "../../../lib/catalogSourceOfferType";
+
+export const OFFER_TYPE_FILTER_OPTIONS: { value: OfferTypeFilter; label: string }[] = [
+  { value: "all", label: "Все" },
+  ...(
+    Object.entries(OFFER_TYPE_LABELS) as [import("../../../lib/catalogSourceOfferType").CatalogSourceOfferType, string][]
+  ).map(([value, label]) => ({ value, label })),
+];
+
 export const OFFER_SEARCH_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[] = [
   { value: "all", label: "Авто: Avito + Auto.ru" },
   { value: "avito", label: "Avito — активен" },

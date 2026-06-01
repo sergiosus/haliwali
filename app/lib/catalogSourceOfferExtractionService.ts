@@ -25,6 +25,7 @@ import {
   classifyInvalidSourceUrl,
   validateSourceOfferDraftCandidate,
 } from "./catalogSourceOfferValidation";
+import { inferOfferType } from "./catalogSourceOfferType";
 import { isCatalogMarketplaceSourceName } from "./catalogSourceOfferTypes";
 
 export type SourceOfferSearchSelection = {
@@ -39,7 +40,8 @@ export type SourceOfferSearchSelection = {
   brand?: string | null;
   oemCodes?: string[];
   articleCodes?: string[];
-  imageUrl?: string | null;
+  coverImageUrl?: string | null;
+  offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
   parseQuality?: "link_only" | "search_card";
@@ -75,7 +77,8 @@ function buildInputFromSearchSelection(
     sourceName: listingSource,
     sourceUrl: sel.url.trim(),
     shortSnippet,
-    imageUrl: null,
+    offerType: sel.offerType ?? inferOfferType({ query: sel.title, oemArticle: sel.oemCodes?.[0] }),
+    coverImageUrl: sel.coverImageUrl ?? null,
     confidenceScore: 0.35,
     rawPayload: {
       extractor: "search_selection",
@@ -108,7 +111,7 @@ function mergeEnrichedInput(
     articleCodes: base.articleCodes.length ? base.articleCodes : enriched.articleCodes,
     shortSnippet:
       base.shortSnippet.length > 40 ? base.shortSnippet : enriched.shortSnippet || base.shortSnippet,
-    imageUrl: base.imageUrl ?? enriched.imageUrl,
+    coverImageUrl: base.coverImageUrl ?? enriched.coverImageUrl,
     confidenceScore: Math.max(base.confidenceScore ?? 0.35, enriched.confidenceScore ?? 0.5),
     rawPayload: {
       ...base.rawPayload,
@@ -187,8 +190,8 @@ export async function processSourceOfferSearchSelections(
       parseWarnings,
     );
 
-    if (sel.imageUrl && /^https?:\/\//i.test(sel.imageUrl)) {
-      input = { ...input, imageUrl: sel.imageUrl.trim().slice(0, 500) };
+    if (sel.coverImageUrl && /^https?:\/\//i.test(sel.coverImageUrl)) {
+      input = { ...input, coverImageUrl: sel.coverImageUrl.trim().slice(0, 500) };
     }
 
     const serpCardComplete =

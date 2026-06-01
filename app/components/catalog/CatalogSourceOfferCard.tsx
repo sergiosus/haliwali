@@ -1,15 +1,24 @@
 import { catalogSourceNameLabel } from "../../lib/catalogSourceName";
-import {
-  formatOfferImportedAt,
-  formatOfferPriceDisplay,
-} from "../../lib/catalogSourceOfferFormat";
+import { resolveSourceOfferDisplayCity } from "../../lib/catalogSourceOfferDisplay";
+import { formatOfferPriceDisplay } from "../../lib/catalogSourceOfferFormat";
 import { SOURCE_OFFER_SNIPPET_MAX } from "../../lib/catalogSourceOfferNormalize";
+import { resolveCoverImageUrl } from "../../lib/catalogSourceOfferCoverImage";
 import type { CatalogSourceOffer } from "../../lib/catalogSourceOfferTypes";
 
-export function CatalogSourceOfferCard({ offer }: { offer: CatalogSourceOffer }) {
+export function CatalogSourceOfferCard({
+  offer,
+  displayCityFallback,
+}: {
+  offer: CatalogSourceOffer;
+  displayCityFallback?: string;
+}) {
   const snippet = offer.shortSnippet?.trim().slice(0, SOURCE_OFFER_SNIPPET_MAX) ?? "";
   const priceLabel = formatOfferPriceDisplay(offer.price);
-  const importedLabel = formatOfferImportedAt(offer.importedAt);
+  const cityLabel = resolveSourceOfferDisplayCity(offer, displayCityFallback);
+  const cover = resolveCoverImageUrl({
+    coverImageUrl: offer.coverImageUrl,
+    imageUrl: offer.imageUrl,
+  });
 
   return (
     <article
@@ -17,10 +26,10 @@ export function CatalogSourceOfferCard({ offer }: { offer: CatalogSourceOffer })
       className="flex flex-col overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-sm"
     >
       <div className="relative aspect-[16/10] w-full shrink-0 bg-gradient-to-br from-black/[0.04] to-black/[0.08]">
-        {offer.imageUrl ?
+        {cover ?
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={offer.imageUrl}
+            src={cover}
             alt=""
             className="h-full w-full object-cover"
             loading="lazy"
@@ -48,17 +57,8 @@ export function CatalogSourceOfferCard({ offer }: { offer: CatalogSourceOffer })
           <p className="mt-2 text-sm text-black/40">Цена не указана</p>
         )}
 
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-black/55">
-          {offer.city ?
-            <span>{offer.city}</span>
-          : null}
-          {importedLabel ?
-            <span className="text-black/45">· {importedLabel}</span>
-          : null}
-        </div>
-
-        {offer.brand ?
-          <p className="mt-1 text-xs text-black/45">Бренд: {offer.brand}</p>
+        {cityLabel ?
+          <p className="mt-2 text-sm font-medium text-black/60">{cityLabel}</p>
         : null}
 
         {snippet ?

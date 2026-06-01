@@ -92,7 +92,10 @@ export type OfferSourceSearchHit = {
   sellerHint: string;
   sourceName: OfferListingSourceId;
   fromSearchPage: boolean;
+  /** @deprecated use coverImageUrl */
   imageUrl?: string | null;
+  coverImageUrl?: string | null;
+  offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
   /** SERP card has enough fields to create a draft without opening the listing. */

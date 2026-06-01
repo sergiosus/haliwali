@@ -35,7 +35,6 @@ export async function searchCatalogSuppliers(
     listPublishedSourceOffers({
       q,
       city: opts.city,
-      categorySlug: opts.categorySlug,
       limit: limit + 12,
     }).then((r) => r.offers),
   ]);

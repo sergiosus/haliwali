@@ -42,3 +42,11 @@ export function slimSourceOfferRawPayload(
   delete base.image_url;
   return base;
 }
+
+/** Persist slim JSONB (cover only in column + payload hint). */
+export function rawPayloadForDb(
+  raw: Record<string, unknown> | undefined,
+  coverImageUrl: string | null | undefined,
+): Record<string, unknown> {
+  return slimSourceOfferRawPayload(raw, coverImageUrl);
+}

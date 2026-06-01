@@ -142,12 +142,12 @@ export function extractSourceOfferFromHtml(
     sourceName: sourceName === "other" ? "company_site" : sourceName,
     sourceUrl,
     shortSnippet,
-    imageUrl,
+    offerType: inferOfferType({ query: title, oemArticle: articleCodes[0] }),
+    coverImageUrl,
     confidenceScore: shortSnippet.length > 40 ? 0.65 : 0.45,
     rawPayload: {
       extractor: "source_offer",
       host: fetched.url.hostname,
-      ...(imageUrl ? { imageUrl } : {}),
     },
   };
 

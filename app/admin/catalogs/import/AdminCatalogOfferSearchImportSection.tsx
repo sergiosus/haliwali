@@ -14,7 +14,7 @@ import type {
   OfferSearchSortMode,
   OfferSearchStats,
 } from "../../../lib/catalogOfferAdminSearch";
-import { isAutomotiveSearchQuery } from "../../../lib/catalogOfferAutoRouting";
+import type { OfferTypeFilter } from "../../../lib/catalogSourceOfferType";
 import type { OfferSearchApiErrorDetail } from "../../../lib/catalogOfferSearchApiError";
 import {
   clearOfferSearchFiltersInStorage,
@@ -33,6 +33,7 @@ import { SOURCE_OFFER_IMPORT_ERROR_LABELS } from "../../../lib/catalogSourceOffe
 import {
   OfferImportGoToDraftsBanner,
   OFFER_SEARCH_SOURCE_OPTIONS,
+  OFFER_TYPE_FILTER_OPTIONS,
   type OfferSourceFilter,
 } from "./offerImportUi";
 import { OfferSearchQueryAutocomplete } from "./OfferSearchQueryAutocomplete";
@@ -170,6 +171,7 @@ export function AdminCatalogOfferSearchImportSection({
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
   const [sourceFilter, setSourceFilter] = useState<OfferSourceFilter>("all");
+  const [offerTypeFilter, setOfferTypeFilter] = useState<OfferTypeFilter>("all");
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [brand, setBrand] = useState("");
@@ -344,8 +346,8 @@ export function AdminCatalogOfferSearchImportSection({
           brand: brand.trim(),
           oemArticle: oemArticle.trim(),
           source: sourceFilter,
-          categorySlug:
-            isAutomotiveSearchQuery(query.trim()) || sourceFilter === "auto_ru" ? "auto" : DEFAULT_CATEGORY,
+          offerType: offerTypeFilter,
+          categorySlug: DEFAULT_CATEGORY,
           sort: sortMode,
           priceMin: priceMin.trim() ? Number(priceMin) : undefined,
           priceMax: priceMax.trim() ? Number(priceMax) : undefined,
@@ -474,6 +476,7 @@ export function AdminCatalogOfferSearchImportSection({
     priceMin,
     priceMax,
     sortMode,
+    offerTypeFilter,
     persistNow,
     focusResults,
   ]);
@@ -630,6 +633,20 @@ export function AdminCatalogOfferSearchImportSection({
             placeholder="Ижевск"
           />
         </div>
+        <label className="block text-sm">
+          <span className="text-black/60">Тип предложения</span>
+          <select
+            value={offerTypeFilter}
+            onChange={(e) => setOfferTypeFilter(e.target.value as OfferTypeFilter)}
+            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
+          >
+            {OFFER_TYPE_FILTER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="block text-sm">
           <span className="text-black/60">Источник</span>
           <select

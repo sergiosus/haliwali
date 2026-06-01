@@ -3,6 +3,10 @@ import {
   searchOffersForAdmin,
   type OfferSearchSourceFilter,
 } from "../../../../../lib/catalogOfferAdminSearch";
+import {
+  parseCatalogSourceOfferType,
+  type OfferTypeFilter,
+} from "../../../../../lib/catalogSourceOfferType";
 import { formatOfferSearchApiError } from "../../../../../lib/catalogOfferSearchApiError";
 import { logCatalogOfferSearch } from "../../../../../lib/catalogCatalogLog";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
@@ -73,12 +77,17 @@ export async function POST(req: Request) {
     const sort =
       sortRaw === "price" || sortRaw === "newest" ? sortRaw : "exact_match";
 
+    const offerTypeRaw = String(body.offerType ?? body.offerTypeFilter ?? "all").trim();
+    const offerTypeFilter: OfferTypeFilter =
+      offerTypeRaw === "all" ? "all" : parseCatalogSourceOfferType(offerTypeRaw);
+
     const out = await searchOffersForAdmin({
       query,
       city,
       brand,
       oemArticle,
       sourceFilter,
+      offerTypeFilter,
       categorySlug: categorySlug || undefined,
       priceMin: Number.isFinite(priceMin) ? priceMin : undefined,
       priceMax: Number.isFinite(priceMax) ? priceMax : undefined,

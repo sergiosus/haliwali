@@ -25,8 +25,10 @@ import {
   classifyInvalidSourceUrl,
   validateSourceOfferDraftCandidate,
 } from "./catalogSourceOfferValidation";
-import { inferOfferType } from "./catalogSourceOfferType";
+import { inferOfferTypeFromListing } from "./catalogSourceOfferType";
 import { isCatalogMarketplaceSourceName } from "./catalogSourceOfferTypes";
+import { normalizeOfferPriceForStorage } from "./catalogSourceOfferFormat";
+import type { SourceOfferImportOutcome } from "./catalogSourceOfferImportErrors";
 
 export type SourceOfferSearchSelection = {
   url: string;
@@ -54,6 +56,17 @@ function resolveSourceName(url: string, hint: CatalogSourceName): CatalogSourceN
   return "";
 }
 
+function isSearchCardComplete(sel: SourceOfferSearchSelection): boolean {
+  if (sel.parseQuality === "search_card") return true;
+  const title = sanitizeOfferText(sel.title);
+  if (!title || title.length < 5 || !sel.url?.trim()) return false;
+  return Boolean(
+    normalizeOfferPriceForStorage(sel.price) ||
+    (sel.shortSnippet && sel.shortSnippet.trim().length >= 8) ||
+    (sel.coverImageUrl && /^https?:\/\//i.test(sel.coverImageUrl)),
+  );
+}
+
 function buildInputFromSearchSelection(
   sel: SourceOfferSearchSelection,
   defaults: ExtractionDefaults,
@@ -63,9 +76,10 @@ function buildInputFromSearchSelection(
   const title =
     sanitizeOfferText(sel.title) || titleFromListingUrl(sel.url) || "Объявление";
   const shortSnippet = sanitizeOfferText(sel.shortSnippet || sel.title).slice(0, 280) || title.slice(0, 280);
+  const parseQuality = isSearchCardComplete(sel) ? "search_card" : "link_only";
   return {
     title: title.slice(0, 200),
-    price: sel.price ? sanitizeOfferText(String(sel.price)).replace(/\D/g, "") || null : null,
+    price: normalizeOfferPriceForStorage(sel.price),
     city: sanitizeOfferText(sel.city || defaults.city),
     region: defaults.city && defaults.city !== sel.city ? defaults.city : "",
     categorySlug: defaults.categorySlug,
@@ -77,12 +91,20 @@ function buildInputFromSearchSelection(
     sourceName: listingSource,
     sourceUrl: sel.url.trim(),
     shortSnippet,
-    offerType: sel.offerType ?? inferOfferType({ query: sel.title, oemArticle: sel.oemCodes?.[0] }),
+    offerType:
+      sel.offerType ??
+      inferOfferTypeFromListing({
+        title,
+        sourceUrl: sel.url,
+        oemCodes: sel.oemCodes,
+        articleCodes: sel.articleCodes,
+        brand: sel.brand,
+      }),
     coverImageUrl: sel.coverImageUrl ?? null,
-    confidenceScore: 0.35,
+    confidenceScore: parseQuality === "search_card" ? 0.42 : 0.35,
     rawPayload: {
       extractor: "search_selection",
-      parseQuality: "link_only",
+      parseQuality,
       parseWarnings,
     },
   };
@@ -149,11 +171,13 @@ export async function processSourceOfferSearchSelections(
 ): Promise<{
   drafts: CatalogSourceOfferUpsertResult["drafts"];
   errors: SourceOfferImportError[];
+  outcomes: SourceOfferImportOutcome[];
   upsert: CatalogSourceOfferUpsertResult;
 }> {
   const limited = selections.slice(0, MAX_URLS_PER_BATCH);
   const seed = await loadSourceOfferDedupSeed();
   const errors: SourceOfferImportError[] = [];
+  const outcomes: SourceOfferImportOutcome[] = [];
   const items: Parameters<typeof upsertSourceOfferDrafts>[0] = [];
 
   logCatalogImport("source_offer_search_selections", { count: limited.length });
@@ -162,24 +186,37 @@ export async function processSourceOfferSearchSelections(
     const rawUrl = sel.url?.trim() ?? "";
     const sourceNameHint = resolveSourceName(rawUrl, sel.sourceName);
 
+    const pushRejected = (err: SourceOfferImportError) => {
+      errors.push(err);
+      outcomes.push({
+        url: err.url,
+        status: "rejected",
+        sourceName: err.sourceName,
+        message: err.message,
+      });
+    };
+
     if (!rawUrl) {
-      errors.push(sourceOfferImportError(rawUrl, "", "MISSING_URL"));
+      pushRejected(sourceOfferImportError(rawUrl, "", "MISSING_URL"));
       continue;
     }
     if (!/^https?:\/\//i.test(rawUrl)) {
-      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, "INVALID_URL"));
+      pushRejected(sourceOfferImportError(rawUrl, sourceNameHint, "INVALID_URL"));
       continue;
     }
 
     if (!sourceNameHint) {
-      errors.push(sourceOfferImportError(rawUrl, "", "UNSUPPORTED_SOURCE"));
+      pushRejected(sourceOfferImportError(rawUrl, "", "UNSUPPORTED_SOURCE"));
       continue;
     }
 
-    const urlReason = classifyInvalidSourceUrl(rawUrl);
-    if (urlReason) {
-      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, urlReason));
-      continue;
+    const searchCard = isSearchCardComplete(sel);
+    if (!searchCard) {
+      const urlReason = classifyInvalidSourceUrl(rawUrl);
+      if (urlReason) {
+        pushRejected(sourceOfferImportError(rawUrl, sourceNameHint, urlReason));
+        continue;
+      }
     }
 
     const parseWarnings: string[] = [];
@@ -194,17 +231,7 @@ export async function processSourceOfferSearchSelections(
       input = { ...input, coverImageUrl: sel.coverImageUrl.trim().slice(0, 500) };
     }
 
-    const serpCardComplete =
-      sel.parseQuality === "search_card" ||
-      (sourceNameHint === "auto_ru" &&
-        Boolean(
-          input.title &&
-            input.title.length >= 5 &&
-            input.sourceUrl &&
-            (input.price || input.shortSnippet.length > 12),
-        ));
-
-    if (serpCardComplete) {
+    if (searchCard) {
       input = {
         ...input,
         rawPayload: {
@@ -214,7 +241,6 @@ export async function processSourceOfferSearchSelections(
           mileageKm: sel.mileageKm ?? undefined,
         },
       };
-      parseWarnings.push("serp_card_only");
     } else {
       try {
         const fetched = await fetchPublicHtml(rawUrl);
@@ -267,35 +293,56 @@ export async function processSourceOfferSearchSelections(
     if (!preCheck.ok) {
       const code =
         preCheck.reason === "missing_required_fields" ? "MISSING_TITLE" : preCheck.reason;
-      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, code));
+      pushRejected(sourceOfferImportError(rawUrl, sourceNameHint, code));
       continue;
     }
     input = preCheck.input;
 
     const dup = findSourceOfferDuplicate(seed, input, input.rawPayload);
     if (dup) {
-      errors.push(duplicateImportError(rawUrl, sourceNameHint, dup, seed));
+      const dupErr = duplicateImportError(rawUrl, sourceNameHint, dup, seed);
+      errors.push(dupErr);
+      outcomes.push({
+        url: rawUrl,
+        status: "duplicate",
+        sourceName: sourceNameHint,
+        message: dupErr.message,
+      });
       continue;
     }
 
     const sanitized = sanitizeSourceOfferDraftInput(input);
     if (!sanitized) {
-      errors.push(sourceOfferImportError(rawUrl, sourceNameHint, "SANITIZE_FAILED"));
+      pushRejected(sourceOfferImportError(rawUrl, sourceNameHint, "SANITIZE_FAILED"));
       continue;
     }
 
     if (!sanitized.categorySlug) sanitized.categorySlug = defaults.categorySlug;
     if (!sanitized.city && defaults.city) sanitized.city = defaults.city;
 
+    const parseWarning =
+      parseWarnings.includes("full_page_parse_failed") ? "full_page_parse_failed" : undefined;
+
     items.push({
       input: sanitized,
       duplicateHint: null,
       duplicateOfOfferId: null,
     });
+    outcomes.push({
+      url: rawUrl,
+      status: "created",
+      sourceName: sourceNameHint,
+      message: parseWarning ? "Кандидат создан (данные с карточки поиска)" : "Кандидат создан",
+      parseWarning,
+    });
   }
 
   const upsert = await upsertSourceOfferDrafts(items);
-  return { drafts: upsert.drafts, errors, upsert };
+  for (const draft of upsert.drafts) {
+    const o = outcomes.find((x) => x.status === "created" && x.url === draft.sourceUrl);
+    if (o) o.draftId = draft.id;
+  }
+  return { drafts: upsert.drafts, errors, outcomes, upsert };
 }
 
 function isSourceOfferUrl(rawUrl: string): boolean {

@@ -4,6 +4,11 @@ import {
   type OfferSearchSourceFilter,
 } from "../../../../../lib/catalogOfferAdminSearch";
 import {
+  resolveAdminSearchSources,
+  type CatalogSourceRegistryId,
+} from "../../../../../lib/catalogSourceRegistry";
+import type { OfferListingSourceId } from "../../../../../lib/catalogOfferSourceSearch";
+import {
   parseCatalogSourceOfferType,
   type OfferTypeFilter,
 } from "../../../../../lib/catalogSourceOfferType";
@@ -81,12 +86,25 @@ export async function POST(req: Request) {
     const offerTypeFilter: OfferTypeFilter =
       offerTypeRaw === "all" ? "all" : parseCatalogSourceOfferType(offerTypeRaw);
 
+    const sourcesRaw = body.sources;
+    let enabledSources: OfferListingSourceId[] | undefined;
+    if (Array.isArray(sourcesRaw) && sourcesRaw.length > 0) {
+      enabledSources = resolveAdminSearchSources(
+        sourcesRaw
+          .map((s) => String(s).trim() as CatalogSourceRegistryId)
+          .filter((id): id is OfferListingSourceId =>
+            ["avito", "auto_ru", "drom", "youla", "vk"].includes(id),
+          ),
+      );
+    }
+
     const out = await searchOffersForAdmin({
       query,
       city,
       brand,
       oemArticle,
-      sourceFilter,
+      sourceFilter: enabledSources?.length ? "all" : sourceFilter,
+      enabledSources,
       offerTypeFilter,
       categorySlug: categorySlug || undefined,
       priceMin: Number.isFinite(priceMin) ? priceMin : undefined,

@@ -12,6 +12,7 @@ import {
   resolveOfferTypeForStorage,
   type CatalogSourceOfferType,
 } from "./catalogSourceOfferType";
+import { normalizeOfferPriceForStorage } from "./catalogSourceOfferFormat";
 import { resolveCoverImageUrl, slimSourceOfferRawPayload } from "./catalogSourceOfferCoverImage";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
 import {
@@ -31,6 +32,10 @@ function pickOfferType(input: CatalogSourceOfferInput): CatalogSourceOfferType {
     oemCodes: input.oemCodes,
     articleCodes: input.articleCodes,
   });
+}
+
+function pickPrice(input: CatalogSourceOfferInput): string | null {
+  return normalizeOfferPriceForStorage(input.price);
 }
 
 function pickCoverImage(input: CatalogSourceOfferInput): string | null {
@@ -93,7 +98,7 @@ export function sanitizeSourceOfferInput(
 
   const candidate: CatalogSourceOfferInput = {
     title,
-    price: input.price ? sanitizeOfferText(String(input.price)).replace(/\s+/g, " ").slice(0, 40) : null,
+    price: pickPrice(input),
     city: sanitizeOfferText(input.city).slice(0, 120),
     region: sanitizeOfferText(input.region).slice(0, 120),
     categorySlug: input.categorySlug,
@@ -141,7 +146,7 @@ export function sanitizeSourceOfferDraftInput(
 
   const candidate: CatalogSourceOfferInput = {
     title,
-    price: input.price ? sanitizeOfferText(String(input.price)).replace(/\s+/g, " ").slice(0, 40) : null,
+    price: pickPrice(input),
     city: sanitizeOfferText(input.city).slice(0, 120),
     region: sanitizeOfferText(input.region).slice(0, 120),
     categorySlug: input.categorySlug,

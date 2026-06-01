@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CatalogSourceName, CatalogSourceOffer } from "../../lib/catalogSourceOfferTypes";
-import { CATALOG_SOURCE_NAME_LABEL } from "../../lib/catalogSourceName";
+import { publicSourceFilterOptions } from "../../lib/catalogSourceRegistry";
 import {
   OFFER_TYPE_LABELS,
   parseCatalogSourceOfferType,
@@ -32,14 +32,7 @@ const OFFER_TYPE_OPTIONS: { value: "" | CatalogSourceOfferType; label: string }[
   ).map(([value, label]) => ({ value, label })),
 ];
 
-const SOURCE_OPTIONS: { value: "" | CatalogSourceName; label: string }[] = [
-  { value: "", label: "Все источники" },
-  { value: "avito", label: CATALOG_SOURCE_NAME_LABEL.avito },
-  { value: "auto_ru", label: CATALOG_SOURCE_NAME_LABEL.auto_ru },
-  { value: "drom", label: CATALOG_SOURCE_NAME_LABEL.drom },
-  { value: "company_site", label: CATALOG_SOURCE_NAME_LABEL.company_site },
-  { value: "other", label: CATALOG_SOURCE_NAME_LABEL.other },
-];
+const SOURCE_OPTIONS = publicSourceFilterOptions();
 
 const PAGE_SIZE_OPTIONS: CatalogSourceOfferPageSize[] = [20, 50, 100];
 

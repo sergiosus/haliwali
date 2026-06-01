@@ -9,6 +9,7 @@ import {
   type CatalogDiscoverLocation,
 } from "../../../lib/catalogDiscoverLocationStorage";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
+import { formatOfferPriceDisplay } from "../../../lib/catalogSourceOfferFormat";
 import type {
   OfferSearchResultItem,
   OfferSearchSortMode,
@@ -28,14 +29,20 @@ import {
   type OfferSearchPageSize,
   type PersistedOfferSearchState,
 } from "../../../lib/offerSearchLocalStorage";
-import type { SourceOfferImportError } from "../../../lib/catalogSourceOfferImportErrors";
+import type {
+  SourceOfferImportError,
+  SourceOfferImportOutcome,
+} from "../../../lib/catalogSourceOfferImportErrors";
 import { SOURCE_OFFER_IMPORT_ERROR_LABELS } from "../../../lib/catalogSourceOfferImportErrors";
 import {
   OfferImportGoToDraftsBanner,
-  OFFER_SEARCH_SOURCE_OPTIONS,
   OFFER_TYPE_FILTER_OPTIONS,
-  type OfferSourceFilter,
 } from "./offerImportUi";
+import {
+  defaultOfferSearchSourceSelection,
+  OfferSearchSourceCheckboxes,
+  type OfferSearchSourceSelectionState,
+} from "./OfferSearchSourceCheckboxes";
 import { OfferSearchQueryAutocomplete } from "./OfferSearchQueryAutocomplete";
 
 type OfferSourceSearchDiagnostic = OfferSearchStats["diagnostics"][number];
@@ -124,7 +131,7 @@ function locationFromCity(city: string): CatalogDiscoverLocation | null {
 function buildPersistedState(args: {
   query: string;
   cityLabel: string;
-  sourceFilter: OfferSourceFilter;
+  sourceSelection: OfferSearchSourceSelectionState;
   priceMin: string;
   priceMax: string;
   brand: string;
@@ -142,7 +149,8 @@ function buildPersistedState(args: {
   return {
     query: args.query,
     city: args.cityLabel,
-    source: args.sourceFilter,
+    source: args.sourceSelection.sources.length === 1 ? args.sourceSelection.sources[0]! : "all",
+    enabledSources: args.sourceSelection.sources,
     priceFrom: args.priceMin,
     priceTo: args.priceMax,
     brand: args.brand,
@@ -170,7 +178,9 @@ export function AdminCatalogOfferSearchImportSection({
 }) {
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState<CatalogDiscoverLocation | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<OfferSourceFilter>("all");
+  const [sourceSelection, setSourceSelection] = useState<OfferSearchSourceSelectionState>(
+    defaultOfferSearchSourceSelection,
+  );
   const [offerTypeFilter, setOfferTypeFilter] = useState<OfferTypeFilter>("all");
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
@@ -183,6 +193,7 @@ export function AdminCatalogOfferSearchImportSection({
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const [createdCount, setCreatedCount] = useState(0);
   const [importErrors, setImportErrors] = useState<SourceOfferImportError[]>([]);
+  const [importOutcomes, setImportOutcomes] = useState<SourceOfferImportOutcome[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<OfferSearchPageSize>(20);
   const [searched, setSearched] = useState(false);
@@ -206,7 +217,7 @@ export function AdminCatalogOfferSearchImportSection({
       const state = buildPersistedState({
         query,
         cityLabel,
-        sourceFilter,
+        sourceSelection,
         priceMin,
         priceMax,
         brand,
@@ -227,7 +238,7 @@ export function AdminCatalogOfferSearchImportSection({
     [
       query,
       cityLabel,
-      sourceFilter,
+      sourceSelection,
       priceMin,
       priceMax,
       brand,
@@ -252,7 +263,16 @@ export function AdminCatalogOfferSearchImportSection({
   const applyPersistedState = useCallback((s: PersistedOfferSearchState) => {
     setQuery(s.query);
     setLocation(s.city ? locationFromCity(s.city) : null);
-    setSourceFilter(s.source);
+    if (s.enabledSources?.length) {
+      setSourceSelection({ sources: s.enabledSources, allActive: false });
+    } else if (s.source && s.source !== "all") {
+      setSourceSelection({
+        sources: [s.source as import("../../../lib/catalogSourceOfferTypes").OfferListingSourceId],
+        allActive: false,
+      });
+    } else {
+      setSourceSelection(defaultOfferSearchSourceSelection());
+    }
     setPriceMin(s.priceFrom);
     setPriceMax(s.priceTo);
     setBrand(s.brand);
@@ -293,7 +313,7 @@ export function AdminCatalogOfferSearchImportSection({
     schedulePersist,
     query,
     cityLabel,
-    sourceFilter,
+    sourceSelection,
     priceMin,
     priceMax,
     brand,
@@ -328,6 +348,10 @@ export function AdminCatalogOfferSearchImportSection({
 
   const runSearch = useCallback(async () => {
     if (!query.trim()) return;
+    if (sourceSelection.sources.length === 0) {
+      setMessage("Выберите хотя бы один источник поиска");
+      return;
+    }
     setBusy(true);
     setMessage(null);
     setEmptyReason(null);
@@ -345,7 +369,7 @@ export function AdminCatalogOfferSearchImportSection({
           city: cityLabel,
           brand: brand.trim(),
           oemArticle: oemArticle.trim(),
-          source: sourceFilter,
+          sources: sourceSelection.sources,
           offerType: offerTypeFilter,
           categorySlug: DEFAULT_CATEGORY,
           sort: sortMode,
@@ -472,7 +496,7 @@ export function AdminCatalogOfferSearchImportSection({
     cityLabel,
     brand,
     oemArticle,
-    sourceFilter,
+    sourceSelection,
     priceMin,
     priceMax,
     sortMode,
@@ -505,19 +529,32 @@ export function AdminCatalogOfferSearchImportSection({
       const d = (await r.json()) as {
         ok?: boolean;
         error?: string;
+        message?: string;
         errors?: SourceOfferImportError[];
+        outcomes?: SourceOfferImportOutcome[];
         sourceOfferDrafts?: unknown[];
         createdCount?: number;
       };
       if (!r.ok) {
-        setMessage(d.error ?? "Ошибка импорта");
+        setMessage(d.message ?? d.error ?? "Ошибка импорта");
+        setImportOutcomes(d.outcomes ?? []);
         return;
       }
-      const offerCount = d.sourceOfferDrafts?.length ?? d.createdCount ?? 0;
+      const outcomes = d.outcomes ?? [];
+      const offerCount = d.createdCount ?? outcomes.filter((o) => o.status === "created").length;
       const errs = d.errors ?? [];
       setCreatedCount(offerCount);
       setImportErrors(errs);
-      if (errs.length > 0) {
+      setImportOutcomes(outcomes);
+      if (outcomes.length > 0) {
+        const parts = [
+          `${outcomes.filter((o) => o.status === "created").length} создано`,
+          `${outcomes.filter((o) => o.status === "duplicate").length} дубликат`,
+          `${outcomes.filter((o) => o.status === "rejected").length} отклонено`,
+          `${outcomes.filter((o) => o.status === "error").length} ошибка`,
+        ];
+        setMessage(`Импорт: ${parts.join(", ")}`);
+      } else if (errs.length > 0) {
         setMessage(
           offerCount > 0 ?
             `Создано кандидатов: ${offerCount}. Не создано: ${errs.length} — см. список ниже.`
@@ -528,8 +565,9 @@ export function AdminCatalogOfferSearchImportSection({
       }
       persistNow();
       onChanged?.();
-    } catch {
-      setMessage("Ошибка сети при импорте");
+    } catch (transportErr) {
+      const msg = transportErr instanceof Error ? transportErr.message : String(transportErr);
+      setMessage(`Сбой импорта: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -538,7 +576,7 @@ export function AdminCatalogOfferSearchImportSection({
   const clearSearchFilters = useCallback(() => {
     setQuery("");
     setLocation(null);
-    setSourceFilter("all");
+    setSourceSelection(defaultOfferSearchSourceSelection());
     setPriceMin("");
     setPriceMax("");
     setBrand("");
@@ -547,7 +585,7 @@ export function AdminCatalogOfferSearchImportSection({
     persistNow({
       query: "",
       cityLabel: "",
-      sourceFilter: "all",
+      sourceSelection: defaultOfferSearchSourceSelection(),
       priceMin: "",
       priceMax: "",
       brand: "",
@@ -565,6 +603,7 @@ export function AdminCatalogOfferSearchImportSection({
     setMessage(null);
     setEmptyReason(null);
     setImportErrors([]);
+    setImportOutcomes([]);
     setCreatedCount(0);
     setPage(1);
     setSearchError(null);
@@ -647,20 +686,13 @@ export function AdminCatalogOfferSearchImportSection({
             ))}
           </select>
         </label>
-        <label className="block text-sm">
-          <span className="text-black/60">Источник</span>
-          <select
-            value={sourceFilter}
-            onChange={(e) => setSourceFilter(e.target.value as OfferSourceFilter)}
-            className="mt-1 w-full rounded-xl border border-black/15 px-3 py-2"
-          >
-            {OFFER_SEARCH_SOURCE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="sm:col-span-2">
+          <OfferSearchSourceCheckboxes
+            value={sourceSelection}
+            onChange={setSourceSelection}
+            disabled={busy}
+          />
+        </div>
         <label className="block text-sm">
           <span className="text-black/60">Сортировка</span>
           <select
@@ -841,6 +873,34 @@ export function AdminCatalogOfferSearchImportSection({
           <p className="mt-3 text-sm font-medium text-amber-900">{message}</p>
         : null}
 
+        {importOutcomes.length > 0 ?
+          <div className="mt-3 rounded-2xl border border-black/10 bg-white p-4 text-sm">
+            <p className="font-semibold text-black">Результат импорта по ссылкам</p>
+            <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
+              {importOutcomes.map((o) => (
+                <li key={o.url} className="rounded-xl border border-black/[0.08] bg-black/[0.02] p-3">
+                  <p className="break-all text-xs font-medium text-black">{o.url}</p>
+                  <p
+                    className={[
+                      "mt-1 text-xs font-semibold",
+                      o.status === "created" ? "text-emerald-800"
+                      : o.status === "duplicate" ? "text-amber-900"
+                      : "text-red-900",
+                    ].join(" ")}
+                  >
+                    {o.status === "created" ? "создан"
+                    : o.status === "duplicate" ? "дубликат"
+                    : o.status === "rejected" ? "отклонён"
+                    : "ошибка"}
+                    {o.parseWarning ? ` · ${o.parseWarning}` : ""}
+                  </p>
+                  <p className="mt-0.5 text-xs text-black/55">{o.message}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        : null}
+
         {importErrors.length > 0 ?
           <div className="mt-3 rounded-2xl border border-red-200 bg-red-50/80 p-4 text-sm">
             <p className="font-semibold text-red-950">Не удалось создать кандидатов</p>
@@ -958,7 +1018,7 @@ export function AdminCatalogOfferSearchImportSection({
                       </div>
                       <p className="mt-1 text-black/55">
                         {[
-                          item.price ? `${Number(item.price).toLocaleString("ru-RU")} ₽` : null,
+                          item.price ? formatOfferPriceDisplay(item.price) : null,
                           item.year ? `${item.year} г.` : null,
                           item.mileageKm ?
                             `${item.mileageKm.toLocaleString("ru-RU")} км`

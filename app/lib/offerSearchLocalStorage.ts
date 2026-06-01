@@ -1,4 +1,5 @@
 import type { OfferSearchResultItem, OfferSearchStats } from "./catalogOfferAdminSearch";
+import type { OfferListingSourceId } from "./catalogSourceOfferTypes";
 
 export type OfferSearchSourceFilter =
   | "all"
@@ -21,6 +22,7 @@ export type PersistedOfferSearchState = {
   query: string;
   city: string;
   source: OfferSearchSourceFilter;
+  enabledSources?: OfferListingSourceId[];
   priceFrom: string;
   priceTo: string;
   brand: string;
@@ -58,6 +60,9 @@ export function readOfferSearchState(): PersistedOfferSearchState | null {
       query: String(j.query ?? ""),
       city: String(j.city ?? ""),
       source: (j.source as OfferSearchSourceFilter) ?? "all",
+      enabledSources: Array.isArray(j.enabledSources) ?
+        (j.enabledSources as OfferListingSourceId[])
+      : undefined,
       priceFrom: String(j.priceFrom ?? ""),
       priceTo: String(j.priceTo ?? ""),
       brand: String(j.brand ?? ""),

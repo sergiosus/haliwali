@@ -24,6 +24,10 @@ import {
   type OfferSourceSearchHit,
   type OfferListingSourceId,
 } from "./catalogOfferSourceSearch";
+import {
+  isMarketplaceRegistryId,
+  registryDiagnosticForSource,
+} from "./catalogSourceRegistry";
 import { offerListingSourceFromUrl } from "./catalogSourceName";
 import {
   hasBadEncoding,
@@ -158,7 +162,11 @@ function hitToResult(
 ): OfferSearchResultItem {
   const title =
     sanitizeOfferText(hit.title) || titleFromListingUrl(hit.url) || "";
-  const cardComplete = Boolean(hit.cardComplete || (hit.sourceName === "auto_ru" && hit.title && hit.price));
+  const cardComplete = Boolean(
+    hit.cardComplete ||
+    (hit.title && hit.price && hit.url) ||
+    (hit.sourceName === "auto_ru" && hit.title && hit.price),
+  );
   return {
     url: hit.url,
     title,
@@ -468,6 +476,8 @@ export async function searchOffersForAdmin(opts: {
   brand?: string;
   oemArticle?: string;
   sourceFilter?: OfferSearchSourceFilter;
+  /** Explicit marketplace sources from admin checkboxes (overrides sourceFilter when set). */
+  enabledSources?: OfferListingSourceId[];
   offerTypeFilter?: OfferTypeFilter;
   categorySlug?: string;
   priceMin?: number;
@@ -503,12 +513,14 @@ export async function searchOffersForAdmin(opts: {
   const automotive = offerType === "auto";
   const hidden: Record<string, number> = {};
 
+  const enabledSources = opts.enabledSources?.length ? [...opts.enabledSources] : undefined;
+
   const cacheKey: OfferSearchCacheKey = {
     query,
     city,
     brand,
     oemArticle,
-    sourceFilter,
+    sourceFilter: enabledSources ? enabledSources.join(",") : sourceFilter,
     categorySlug,
     offerType: offerTypeFilter,
     priceMin: opts.priceMin,
@@ -535,7 +547,9 @@ export async function searchOffersForAdmin(opts: {
   }
 
   const resolved =
-    sourceFilter === "all" ?
+    enabledSources ?
+      { offerType, primary: enabledSources, fallback: [] as OfferListingSourceId[] }
+    : sourceFilter === "all" ?
       resolveOfferSearchSources({
         sourceFilter,
         query,
@@ -580,6 +594,16 @@ export async function searchOffersForAdmin(opts: {
     maxPages: PAGES_PER_SOURCE,
     maxTotal: MAX_RESULTS,
   });
+
+  for (const d of diagnostics) {
+    if (isMarketplaceRegistryId(d.sourceName)) {
+      const msg = registryDiagnosticForSource(d.sourceName, d.linksExtracted);
+      if (msg) {
+        d.message = msg;
+        if (d.linksExtracted === 0 && !d.errorMessage) d.errorMessage = msg;
+      }
+    }
+  }
 
   if (shouldRunDromFallback(resolved, hits.length)) {
     const fallback = await searchOfferListingSources({

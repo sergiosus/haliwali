@@ -1,5 +1,17 @@
 import { parseOfferPriceRub } from "./catalogSourceOfferQuery";
 
+/** Normalize SERP / form price to digits-only text for DB (`180000`). */
+export function normalizeOfferPriceForStorage(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const digits = s.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const n = Number(digits);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return String(Math.round(n));
+}
+
 /** Display price as `180 000 ₽` when numeric digits are present. */
 export function formatOfferPriceDisplay(price: string | null | undefined): string | null {
   const rub = parseOfferPriceRub(price);

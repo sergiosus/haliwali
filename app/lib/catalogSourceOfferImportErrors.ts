@@ -18,6 +18,17 @@ export type SourceOfferImportError = {
   message: string;
 };
 
+export type SourceOfferImportOutcomeStatus = "created" | "duplicate" | "rejected" | "error";
+
+export type SourceOfferImportOutcome = {
+  url: string;
+  status: SourceOfferImportOutcomeStatus;
+  sourceName: CatalogSourceName | "";
+  message: string;
+  draftId?: number;
+  parseWarning?: string;
+};
+
 export const SOURCE_OFFER_IMPORT_ERROR_LABELS: Record<SourceOfferImportErrorCode, string> = {
   ...SOURCE_OFFER_REJECT_LABELS,
   INVALID_URL: "Некорректный URL",

@@ -1,6 +1,6 @@
 import { catalogSourceNameLabel } from "../../lib/catalogSourceName";
 import { resolveSourceOfferDisplayCity } from "../../lib/catalogSourceOfferDisplay";
-import { formatOfferPriceDisplay } from "../../lib/catalogSourceOfferFormat";
+import { displaySourceOfferPrice } from "../../lib/catalogOfferPrice";
 import { SOURCE_OFFER_SNIPPET_MAX } from "../../lib/catalogSourceOfferNormalize";
 import { resolveCoverImageUrl } from "../../lib/catalogSourceOfferCoverImage";
 import type { CatalogSourceOffer } from "../../lib/catalogSourceOfferTypes";
@@ -13,7 +13,7 @@ export function CatalogSourceOfferCard({
   displayCityFallback?: string;
 }) {
   const snippet = offer.shortSnippet?.trim().slice(0, SOURCE_OFFER_SNIPPET_MAX) ?? "";
-  const priceLabel = formatOfferPriceDisplay(offer.price);
+  const priceLabel = displaySourceOfferPrice(offer);
   const cityLabel = resolveSourceOfferDisplayCity(offer, displayCityFallback);
   const cover = resolveCoverImageUrl({
     coverImageUrl: offer.coverImageUrl,

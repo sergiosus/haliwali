@@ -27,13 +27,15 @@ import {
 } from "./catalogSourceOfferValidation";
 import { inferOfferTypeFromListing } from "./catalogSourceOfferType";
 import { isCatalogMarketplaceSourceName } from "./catalogSourceOfferTypes";
-import { normalizeOfferPriceForStorage } from "./catalogSourceOfferFormat";
+import { mergeOfferPriceFields, offerPriceFromLegacyPrice } from "./catalogOfferPrice";
 import type { SourceOfferImportOutcome } from "./catalogSourceOfferImportErrors";
 
 export type SourceOfferSearchSelection = {
   url: string;
   title: string;
   price: string | null;
+  priceAmount?: number | null;
+  priceText?: string | null;
   city: string;
   companyName?: string;
   sellerName?: string;
@@ -60,8 +62,12 @@ function isSearchCardComplete(sel: SourceOfferSearchSelection): boolean {
   if (sel.parseQuality === "search_card") return true;
   const title = sanitizeOfferText(sel.title);
   if (!title || title.length < 5 || !sel.url?.trim()) return false;
+  const hasPrice = Boolean(
+    (sel.priceAmount != null && sel.priceAmount > 0) ||
+    offerPriceFromLegacyPrice(sel.price).priceAmount,
+  );
   return Boolean(
-    normalizeOfferPriceForStorage(sel.price) ||
+    hasPrice ||
     (sel.shortSnippet && sel.shortSnippet.trim().length >= 8) ||
     (sel.coverImageUrl && /^https?:\/\//i.test(sel.coverImageUrl)),
   );
@@ -77,9 +83,15 @@ function buildInputFromSearchSelection(
     sanitizeOfferText(sel.title) || titleFromListingUrl(sel.url) || "Объявление";
   const shortSnippet = sanitizeOfferText(sel.shortSnippet || sel.title).slice(0, 280) || title.slice(0, 280);
   const parseQuality = isSearchCardComplete(sel) ? "search_card" : "link_only";
+  const priceFields = mergeOfferPriceFields(offerPriceFromLegacyPrice(sel.price), {
+    priceAmount: sel.priceAmount ?? null,
+    priceText: sel.priceText ?? null,
+  });
   return {
     title: title.slice(0, 200),
-    price: normalizeOfferPriceForStorage(sel.price),
+    price: priceFields.price,
+    priceAmount: priceFields.priceAmount,
+    priceText: priceFields.priceText,
     city: sanitizeOfferText(sel.city || defaults.city),
     region: defaults.city && defaults.city !== sel.city ? defaults.city : "",
     categorySlug: defaults.categorySlug,
@@ -125,6 +137,8 @@ function mergeEnrichedInput(
     ...base,
     title: pickTitle(),
     price: base.price ?? enriched.price,
+    priceAmount: base.priceAmount ?? enriched.priceAmount,
+    priceText: base.priceText ?? enriched.priceText,
     city: base.city || enriched.city,
     companyName: base.companyName || enriched.companyName,
     sellerName: base.sellerName || enriched.sellerName,

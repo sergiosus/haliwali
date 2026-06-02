@@ -60,7 +60,10 @@ export type CatalogSourceOfferDraftStatus =
 
 export type CatalogSourceOfferInput = {
   title: string;
+  /** Legacy digits string — kept in sync with priceAmount. */
   price: string | null;
+  priceAmount?: number | null;
+  priceText?: string | null;
   city: string;
   region: string;
   categorySlug: string;

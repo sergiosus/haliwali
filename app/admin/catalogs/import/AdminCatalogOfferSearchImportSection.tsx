@@ -9,7 +9,7 @@ import {
   type CatalogDiscoverLocation,
 } from "../../../lib/catalogDiscoverLocationStorage";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
-import { formatOfferPriceDisplay } from "../../../lib/catalogSourceOfferFormat";
+import { displaySourceOfferPrice } from "../../../lib/catalogOfferPrice";
 import type {
   OfferSearchResultItem,
   OfferSearchSortMode,
@@ -786,6 +786,70 @@ export function AdminCatalogOfferSearchImportSection({
         </aside>
 
         <div ref={resultsSectionRef} tabIndex={-1} className="min-w-0 flex-1 scroll-mt-4 outline-none">
+        {searched && totalFound > 0 ?
+          <div className="sticky top-0 z-20 mb-3 flex flex-col gap-2 rounded-2xl border border-black/10 bg-white/95 p-3 shadow-sm backdrop-blur-sm sm:flex-row sm:flex-wrap sm:items-center">
+            <span className="text-sm font-medium text-black">
+              Выбрано: <span className="font-semibold">{selectedCount}</span>
+            </span>
+            <button
+              type="button"
+              disabled={busy || selected.size === 0}
+              onClick={() => void importSelected()}
+              className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              Создать кандидатов предложений
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setSelected(new Set())}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+            >
+              Снять выбор
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={selectAllVisible}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
+            >
+              Выбрать на странице
+            </button>
+            <label className="flex items-center gap-2 text-sm text-black/60">
+              На странице
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  const ps = Number(e.target.value) as OfferSearchPageSize;
+                  setPageSize(ps);
+                  setPageLocal(1);
+                }}
+                className="rounded-lg border border-black/15 px-2 py-1"
+              >
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={busy || safePage <= 1}
+              onClick={() => setPageLocal(safePage - 1)}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+            >
+              Назад
+            </button>
+            <button
+              type="button"
+              disabled={busy || safePage >= totalPages}
+              onClick={() => setPageLocal(safePage + 1)}
+              className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+            >
+              Вперёд
+            </button>
+          </div>
+        : null}
+
         {searched ?
           <div className="space-y-3 rounded-2xl border border-black/10 bg-black/[0.02] px-4 py-3">
             <p className="text-base font-semibold text-black">
@@ -930,65 +994,6 @@ export function AdminCatalogOfferSearchImportSection({
 
         {searched && totalFound > 0 ?
           <div className="mt-4 space-y-3">
-            <div className="flex flex-col gap-2 rounded-2xl border border-black/10 bg-white p-3 sm:flex-row sm:flex-wrap sm:items-center">
-              <button
-                type="button"
-                disabled={busy || selected.size === 0}
-                onClick={() => void importSelected()}
-                className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
-              >
-                Создать кандидатов предложений ({selected.size})
-              </button>
-              <label className="flex items-center gap-2 text-sm text-black/60">
-                На странице
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    const ps = Number(e.target.value) as OfferSearchPageSize;
-                    setPageSize(ps);
-                    setPageLocal(1);
-                  }}
-                  className="rounded-lg border border-black/15 px-2 py-1"
-                >
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={busy || safePage <= 1}
-                onClick={() => setPageLocal(safePage - 1)}
-                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-              >
-                ← Назад
-              </button>
-              <button
-                type="button"
-                disabled={busy || safePage >= totalPages}
-                onClick={() => setPageLocal(safePage + 1)}
-                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-              >
-                Вперёд →
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={selectAllVisible}
-                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
-              >
-                Выбрать на странице
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setSelected(new Set())}
-                className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
-              >
-                Снять выбор
-              </button>
-            </div>
-
             <ul className="space-y-3">
               {pageResults.map((item) => (
                 <li key={item.url} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
@@ -999,6 +1004,17 @@ export function AdminCatalogOfferSearchImportSection({
                       onChange={() => toggleUrl(item.url)}
                       className="mt-1 shrink-0"
                     />
+                    {item.coverImageUrl ?
+                      <div className="hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-black/[0.04] sm:block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.coverImageUrl}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                    : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-black">{item.title}</span>
@@ -1029,7 +1045,7 @@ export function AdminCatalogOfferSearchImportSection({
                       </div>
                       <p className="mt-1 text-black/55">
                         {[
-                          item.price ? formatOfferPriceDisplay(item.price) : null,
+                          displaySourceOfferPrice(item),
                           item.year ? `${item.year} г.` : null,
                           item.mileageKm ?
                             `${item.mileageKm.toLocaleString("ru-RU")} км`

@@ -30,6 +30,11 @@ import {
 } from "./catalogSourceOfferType";
 import type { CatalogSourceName } from "./catalogSourceOfferTypes";
 import {
+  mergeOfferPriceFields,
+  offerPriceFromAmount,
+  offerPriceFromLegacyPrice,
+} from "./catalogOfferPrice";
+import {
   rawPayloadForDb,
   resolveCoverImageUrl,
   SOURCE_OFFER_DRAFT_SELECT_COLS,
@@ -39,12 +44,25 @@ import {
   CATALOG_SOURCE_OFFER_DRAFTS_TABLE,
 } from "./catalogSourceOfferDbColumns";
 
+function rowPriceFields(r: {
+  price: string | null;
+  price_amount?: number | null;
+  price_text?: string | null;
+}) {
+  return mergeOfferPriceFields(offerPriceFromAmount(r.price_amount ?? null), {
+    priceText: r.price_text,
+    price: offerPriceFromLegacyPrice(r.price).price,
+  });
+}
+
 type DraftRow = {
   id: number;
   status: string;
   offer_type: string;
   title: string;
   price: string | null;
+  price_amount?: number | null;
+  price_text?: string | null;
   city: string;
   region: string;
   category_slug: string;
@@ -126,6 +144,7 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
     coverImageUrl: r.cover_image_url,
     rawPayload: r.raw_payload,
   });
+  const price = rowPriceFields(r);
   return {
     id: r.id,
     status: normalizeSourceOfferDraftStatus(r.status),
@@ -137,7 +156,9 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
       articleCodes: parseCodes(r.article_codes),
     }),
     title: r.title,
-    price: r.price,
+    price: price.price,
+    priceAmount: price.priceAmount,
+    priceText: price.priceText,
     city: r.city,
     region: r.region,
     categorySlug: r.category_slug,
@@ -167,6 +188,7 @@ function rowToDraft(r: DraftRow): CatalogSourceOfferDraft {
 }
 
 function draftRowToInput(r: DraftRow): ReturnType<typeof inputFromSourceOfferFields> {
+  const price = rowPriceFields(r);
   return inputFromSourceOfferFields({
     offerType: effectiveOfferType(r.offer_type, {
       title: r.title,
@@ -176,7 +198,9 @@ function draftRowToInput(r: DraftRow): ReturnType<typeof inputFromSourceOfferFie
       articleCodes: parseCodes(r.article_codes),
     }),
     title: r.title,
-    price: r.price,
+    price: price.price,
+    priceAmount: price.priceAmount,
+    priceText: price.priceText,
     city: r.city,
     region: r.region,
     categorySlug: r.category_slug,
@@ -198,6 +222,7 @@ function draftRowToInput(r: DraftRow): ReturnType<typeof inputFromSourceOfferFie
 }
 
 function offerRowToInput(r: OfferRow): ReturnType<typeof inputFromSourceOfferFields> {
+  const price = rowPriceFields(r);
   return inputFromSourceOfferFields({
     offerType: effectiveOfferType(r.offer_type, {
       title: r.title,
@@ -207,7 +232,9 @@ function offerRowToInput(r: OfferRow): ReturnType<typeof inputFromSourceOfferFie
       articleCodes: parseCodes(r.article_codes),
     }),
     title: r.title,
-    price: r.price,
+    price: price.price,
+    priceAmount: price.priceAmount,
+    priceText: price.priceText,
     city: r.city,
     region: r.region,
     categorySlug: r.category_slug,
@@ -246,6 +273,7 @@ async function pgRejectDraftWithReason(
 
 function rowToOffer(r: OfferRow): CatalogSourceOffer {
   const coverImageUrl = resolveCoverImageUrl({ coverImageUrl: r.cover_image_url ?? null });
+  const price = rowPriceFields(r);
   return {
     id: r.id,
     offerType: effectiveOfferType(r.offer_type ?? "other", {
@@ -256,7 +284,9 @@ function rowToOffer(r: OfferRow): CatalogSourceOffer {
       articleCodes: parseCodes(r.article_codes),
     }),
     title: r.title,
-    price: r.price,
+    price: price.price,
+    priceAmount: price.priceAmount,
+    priceText: price.priceText,
     city: r.city,
     region: r.region,
     categorySlug: r.category_slug,
@@ -325,13 +355,14 @@ export async function pgUpsertSourceOfferDrafts(
       const { rows } = await pool.query<DraftRow>(
         `
         UPDATE catalog_source_offer_import_drafts SET
-          status = $2, offer_type = $3, title = $4, price = $5, city = $6, region = $7, category_slug = $8,
-          company_name = $9, seller_name = $10, brand = $11,
-          oem_codes = $12::jsonb, article_codes = $13::jsonb,
-          source_name = $14, source_url = $15, short_snippet = $16, cover_image_url = $17, confidence_score = $18,
-          duplicate_hint = $19, duplicate_of_offer_id = $20,
-          title_search = $21, brand_search = $22, oem_search = $23, company_search = $24, city_search = $25,
-          raw_payload = $26::jsonb, imported_at = NOW(), updated_at = NOW()
+          status = $2, offer_type = $3, title = $4, price = $5, price_amount = $6, price_text = $7,
+          city = $8, region = $9, category_slug = $10,
+          company_name = $11, seller_name = $12, brand = $13,
+          oem_codes = $14::jsonb, article_codes = $15::jsonb,
+          source_name = $16, source_url = $17, short_snippet = $18, cover_image_url = $19, confidence_score = $20,
+          duplicate_hint = $21, duplicate_of_offer_id = $22,
+          title_search = $23, brand_search = $24, oem_search = $25, company_search = $26, city_search = $27,
+          raw_payload = $28::jsonb, imported_at = NOW(), updated_at = NOW()
         WHERE id = $1
         RETURNING ${DRAFT_COLS}
         `,
@@ -341,6 +372,8 @@ export async function pgUpsertSourceOfferDrafts(
           input.offerType,
           input.title,
           input.price,
+          input.priceAmount ?? null,
+          input.priceText ?? null,
           input.city,
           input.region,
           input.categorySlug,
@@ -374,13 +407,14 @@ export async function pgUpsertSourceOfferDrafts(
     const { rows } = await pool.query<DraftRow>(
       `
       INSERT INTO catalog_source_offer_import_drafts (
-        status, offer_type, title, price, city, region, category_slug, company_name, seller_name, brand,
+        status, offer_type, title, price, price_amount, price_text, city, region, category_slug,
+        company_name, seller_name, brand,
         oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
         duplicate_hint, duplicate_of_offer_id,
         title_search, brand_search, oem_search, company_search, city_search, raw_payload
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17,
-        $18, $19, $20, $21, $22, $23, $24, $25::jsonb
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19,
+        $20, $21, $22, $23, $24, $25, $26, $27::jsonb
       )
       RETURNING ${DRAFT_COLS}
       `,
@@ -389,6 +423,8 @@ export async function pgUpsertSourceOfferDrafts(
         input.offerType,
         input.title,
         input.price,
+        input.priceAmount ?? null,
+        input.priceText ?? null,
         input.city,
         input.region,
         input.categorySlug,
@@ -490,6 +526,8 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
       offerType,
       sanitized.title,
       sanitized.price,
+      sanitized.priceAmount ?? null,
+      sanitized.priceText ?? null,
       sanitized.city,
       sanitized.region,
       sanitized.categorySlug,
@@ -515,12 +553,13 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
       const { rows: ins } = await pool.query<{ id: number }>(
         `
         INSERT INTO catalog_source_offers (
-          draft_id, offer_type, title, price, city, region, category_slug, company_name, seller_name, brand,
+          draft_id, offer_type, title, price, price_amount, price_text, city, region, category_slug,
+          company_name, seller_name, brand,
           oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
           title_search, brand_search, oem_search, company_search, city_search
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17,
-          $18, $19, $20, $21, $22
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19,
+          $20, $21, $22, $23, $24
         )
         RETURNING id
         `,

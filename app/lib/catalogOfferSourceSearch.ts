@@ -27,6 +27,8 @@ import {
   titleFromListingUrl,
   validateOfferLinkFromSearchPage,
 } from "./catalogOfferSearchText";
+import { parseListingPriceFromContext } from "./catalogOfferPrice";
+import { extractAvitoListingThumbnail } from "./catalogSourceOfferCoverImage";
 import { assertPublicResolvableHost } from "./catalogUrlSafety";
 import { slugifyCatalogText } from "./catalogSlug";
 import {
@@ -88,6 +90,8 @@ export type OfferSourceSearchHit = {
   title: string;
   snippet: string;
   price: string | null;
+  priceAmount?: number | null;
+  priceText?: string | null;
   city: string;
   sellerHint: string;
   sourceName: OfferListingSourceId;
@@ -241,7 +245,8 @@ function pushAvitoHit(
       titleFromListingUrl(url) ||
       "",
   );
-  const price = extractPriceFromBlob(ctx);
+  const priceFields = parseListingPriceFromContext(ctx);
+  const coverImageUrl = extractAvitoListingThumbnail(ctx);
   const snippet = sanitizeOfferText(
     decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") ||
       decodeJsonString(ctx.match(/data-marker="item-description"[^>]*>([^<]{8,280})/i)?.[1] ?? "") ||
@@ -251,11 +256,17 @@ function pushAvitoHit(
     url,
     title: title.slice(0, 200),
     snippet: snippet.slice(0, 280),
-    price,
+    price: priceFields.price,
+    priceAmount: priceFields.priceAmount,
+    priceText: priceFields.priceText,
+    coverImageUrl,
     city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
     sellerHint: extractSellerFromContext(ctx),
     sourceName: "avito",
     fromSearchPage: true,
+    cardComplete: Boolean(
+      title.length >= 4 && priceFields.priceAmount && (coverImageUrl || snippet.length >= 8),
+    ),
   };
   if (validateOfferLinkFromSearchPage(hit, "avito")) return null;
   hits.push(hit);

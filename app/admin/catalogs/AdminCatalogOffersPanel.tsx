@@ -70,7 +70,7 @@ export function AdminCatalogOffersPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
+      <div className="sticky top-[3.25rem] z-40 -mx-1 flex flex-wrap gap-2 border-b border-black/5 bg-[#fff8f3]/95 px-1 pb-3 pt-1 backdrop-blur-sm">
         {subTabs.map((t) => (
           <button
             key={t.key}

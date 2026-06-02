@@ -12,6 +12,7 @@ export function AdminCatalogSourceOfferMigrationWarning({
       <ol className="mt-2 list-inside list-decimal space-y-1 font-mono text-xs">
         <li>db/migrations/20260531_catalog_source_offers.sql</li>
         <li>db/migrations/20260602_catalog_source_offer_type_cover.sql</li>
+        <li>db/migrations/20260603_catalog_source_offer_price_columns.sql</li>
       </ol>
       {missing && missing.length > 0 ?
         <p className="mt-2 text-xs">

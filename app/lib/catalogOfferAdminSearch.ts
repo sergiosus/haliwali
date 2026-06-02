@@ -67,6 +67,8 @@ export type OfferSearchResultItem = {
   url: string;
   title: string;
   price: string | null;
+  priceAmount?: number | null;
+  priceText?: string | null;
   city: string;
   companyName: string;
   sellerName: string;
@@ -144,7 +146,11 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
-function parsePriceNumber(raw: string | null | undefined): number | null {
+function parsePriceNumber(
+  raw: string | null | undefined,
+  amount?: number | null,
+): number | null {
+  if (amount != null && Number.isFinite(amount) && amount > 0) return amount;
   if (!raw) return null;
   const digits = raw.replace(/\D/g, "");
   if (!digits) return null;
@@ -164,13 +170,15 @@ function hitToResult(
     sanitizeOfferText(hit.title) || titleFromListingUrl(hit.url) || "";
   const cardComplete = Boolean(
     hit.cardComplete ||
-    (hit.title && hit.price && hit.url) ||
+    (hit.title && (hit.price || hit.priceAmount) && hit.url) ||
     (hit.sourceName === "auto_ru" && hit.title && hit.price),
   );
   return {
     url: hit.url,
     title,
     price: hit.price,
+    priceAmount: hit.priceAmount ?? null,
+    priceText: hit.priceText ?? null,
     city: sanitizeOfferText(hit.city),
     companyName: "",
     sellerName: sanitizeOfferText(hit.sellerHint),
@@ -197,8 +205,8 @@ function sortOfferResults(
   const list = [...items];
   if (sort === "price") {
     list.sort((a, b) => {
-      const pa = parsePriceNumber(a.price) ?? Number.MAX_SAFE_INTEGER;
-      const pb = parsePriceNumber(b.price) ?? Number.MAX_SAFE_INTEGER;
+      const pa = parsePriceNumber(a.price, a.priceAmount) ?? Number.MAX_SAFE_INTEGER;
+      const pb = parsePriceNumber(b.price, b.priceAmount) ?? Number.MAX_SAFE_INTEGER;
       return pa - pb;
     });
     return list;
@@ -411,7 +419,7 @@ function matchesBrandOem(item: OfferSearchResultItem, brand: string, oemArticle:
 
 function matchesPrice(item: OfferSearchResultItem, priceMin?: number, priceMax?: number): boolean {
   if (priceMin == null && priceMax == null) return true;
-  const p = parsePriceNumber(item.price);
+  const p = parsePriceNumber(item.price, item.priceAmount);
   if (p == null) return true;
   if (priceMin != null && p < priceMin) return false;
   if (priceMax != null && p > priceMax) return false;

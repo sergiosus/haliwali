@@ -2,6 +2,7 @@
  * UTF-8 / windows-1251 decoding and text quality for admin offer search.
  */
 
+import { parseListingPriceFromContext } from "./catalogOfferPrice";
 import type { OfferListingSourceId } from "./catalogSourceOfferTypes";
 
 export type { OfferListingSourceId } from "./catalogSourceOfferTypes";
@@ -99,12 +100,7 @@ export function decodeJsonString(s: string): string {
 }
 
 export function extractPriceFromBlob(blob: string): string | null {
-  const m =
-    blob.match(/([0-9][0-9\s\u00a0]{2,12})\s*(?:₽|руб\.?|р\.)/i) ??
-    blob.match(/"price"\s*:\s*"?(\d[\d\s]{2,})"?/i);
-  if (!m?.[1]) return null;
-  const digits = m[1].replace(/\D/g, "");
-  return digits ? digits : null;
+  return parseListingPriceFromContext(blob).price;
 }
 
 export function sanitizeOfferText(text: string): string {

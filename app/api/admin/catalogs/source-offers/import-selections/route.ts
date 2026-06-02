@@ -19,6 +19,8 @@ function parseSelections(raw: unknown): SourceOfferSearchSelection[] {
       url,
       title: String(o.title ?? ""),
       price: o.price != null ? String(o.price) : null,
+      priceAmount: o.priceAmount != null ? Number(o.priceAmount) : null,
+      priceText: o.priceText != null ? String(o.priceText) : null,
       city: String(o.city ?? ""),
       companyName: String(o.companyName ?? ""),
       sellerName: String(o.sellerName ?? ""),

@@ -92,7 +92,7 @@ export function AdminCatalogPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
+      <div className="sticky top-0 z-50 -mx-1 flex flex-wrap gap-2 border-b border-black/5 bg-[#fff8f3]/95 px-1 pb-3 pt-1 backdrop-blur-sm">
         {mainTabs.map((t) => (
           <button
             key={t.key}

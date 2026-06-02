@@ -212,6 +212,8 @@ export function validateSourceOfferDraftCandidate(
 export function inputFromSourceOfferFields(fields: {
   title: string;
   price: string | null;
+  priceAmount?: number | null;
+  priceText?: string | null;
   city: string;
   region: string;
   categorySlug: string;
@@ -231,6 +233,8 @@ export function inputFromSourceOfferFields(fields: {
   return {
     title: fields.title,
     price: fields.price,
+    priceAmount: fields.priceAmount ?? null,
+    priceText: fields.priceText ?? null,
     city: fields.city,
     region: fields.region,
     categorySlug: fields.categorySlug,

@@ -12,7 +12,11 @@ import {
   resolveOfferTypeForStorage,
   type CatalogSourceOfferType,
 } from "./catalogSourceOfferType";
-import { normalizeOfferPriceForStorage } from "./catalogSourceOfferFormat";
+import {
+  mergeOfferPriceFields,
+  offerPriceFromAmount,
+  offerPriceFromLegacyPrice,
+} from "./catalogOfferPrice";
 import { resolveCoverImageUrl, slimSourceOfferRawPayload } from "./catalogSourceOfferCoverImage";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
 import {
@@ -34,8 +38,16 @@ function pickOfferType(input: CatalogSourceOfferInput): CatalogSourceOfferType {
   });
 }
 
-function pickPrice(input: CatalogSourceOfferInput): string | null {
-  return normalizeOfferPriceForStorage(input.price);
+function pickPrice(input: CatalogSourceOfferInput): {
+  price: string | null;
+  priceAmount: number | null;
+  priceText: string | null;
+} {
+  return mergeOfferPriceFields(offerPriceFromAmount(input.priceAmount), {
+    priceText: input.priceText,
+    price: offerPriceFromLegacyPrice(input.price).price,
+    priceAmount: input.priceAmount ?? null,
+  });
 }
 
 function pickCoverImage(input: CatalogSourceOfferInput): string | null {
@@ -96,9 +108,12 @@ export function sanitizeSourceOfferInput(
     input.sourceName === "company_site" ? "company_site"
     : listingSource ?? catalogSourceNameFromUrl(sourceUrl);
 
+  const priceFields = pickPrice(input);
   const candidate: CatalogSourceOfferInput = {
     title,
-    price: pickPrice(input),
+    price: priceFields.price,
+    priceAmount: priceFields.priceAmount,
+    priceText: priceFields.priceText,
     city: sanitizeOfferText(input.city).slice(0, 120),
     region: sanitizeOfferText(input.region).slice(0, 120),
     categorySlug: input.categorySlug,
@@ -144,9 +159,12 @@ export function sanitizeSourceOfferDraftInput(
     input.sourceName === "company_site" ? "company_site"
     : listingSource ?? catalogSourceNameFromUrl(sourceUrl);
 
+  const draftPriceFields = pickPrice(input);
   const candidate: CatalogSourceOfferInput = {
     title,
-    price: pickPrice(input),
+    price: draftPriceFields.price,
+    priceAmount: draftPriceFields.priceAmount,
+    priceText: draftPriceFields.priceText,
     city: sanitizeOfferText(input.city).slice(0, 120),
     region: sanitizeOfferText(input.region).slice(0, 120),
     categorySlug: input.categorySlug,

@@ -48,7 +48,7 @@ export function AdminCatalogOfferImportClient({
         </p>
       </div>
 
-      <div className="flex min-w-0 flex-wrap gap-2">
+      <div className="sticky top-[6.5rem] z-30 -mx-1 flex min-w-0 flex-wrap gap-2 border-b border-black/5 bg-white/95 px-1 pb-3 pt-1 backdrop-blur-sm">
         {modeBtn("links", "По ссылкам")}
         {modeBtn("search", "По поисковому запросу")}
         {modeBtn("text", "Из текста / VK")}

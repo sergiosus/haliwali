@@ -18,6 +18,7 @@ import {
   offerPriceFromLegacyPrice,
 } from "./catalogOfferPrice";
 import { resolveCoverImageUrl, slimSourceOfferRawPayload } from "./catalogSourceOfferCoverImage";
+import { cleanUrlSlugTitle } from "./catalogTitleCleanup";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
 import {
   validateSourceOfferDraftCandidate,
@@ -152,7 +153,10 @@ export function sanitizeSourceOfferDraftInput(
   const sourceUrl = input.sourceUrl?.trim();
   if (!sourceUrl) return null;
 
-  const title = sanitizeOfferText(input.title).slice(0, SOURCE_OFFER_TITLE_MAX);
+  const rawTitle = sanitizeOfferText(input.title).slice(0, SOURCE_OFFER_TITLE_MAX);
+  const titleSource = typeof input.rawPayload?.titleSource === "string" ? input.rawPayload.titleSource.trim() : "";
+  const title =
+    titleSource === "url_slug" ? cleanUrlSlugTitle(rawTitle).slice(0, SOURCE_OFFER_TITLE_MAX) : rawTitle;
   if (!title || hasBadEncoding(title)) return null;
 
   let shortSnippet = sanitizeOfferText(input.shortSnippet).slice(0, SOURCE_OFFER_SNIPPET_MAX);

@@ -252,8 +252,13 @@ export function extractSourceOfferFromHtml(
   // 4) Visible HTML selectors / fallback blobs
   const htmlBlob = html.slice(0, 220_000);
 
-  const title = sanitizeOfferText((ldName || ogTitle || pageTitle).trim()).slice(0, 200);
+  const titlePicked = (ldName || ogTitle || pageTitle).trim();
+  const title = sanitizeOfferText(titlePicked).slice(0, 200);
   if (!title) return null;
+  const titleSource =
+    ldName ? "json"
+    : ogTitle ? "og"
+    : "html";
 
   const shortSnippet = sanitizeOfferText((ogDesc || title).trim()).slice(0, SOURCE_OFFER_SNIPPET_MAX);
   const codeBlob = `${title} ${ogDesc ?? ""} ${ldBrand ?? ""}`.slice(0, 500);
@@ -316,6 +321,7 @@ export function extractSourceOfferFromHtml(
       parseStatus: "enriched",
       imageSource,
       priceSource,
+      titleSource,
     },
   };
 

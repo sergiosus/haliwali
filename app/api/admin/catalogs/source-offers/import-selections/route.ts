@@ -35,6 +35,7 @@ function parseSelections(raw: unknown): SourceOfferSearchSelection[] {
     out.push({
       url,
       title: String(o.title ?? ""),
+      titleSource: String(o.titleSource ?? ""),
       price: o.price != null ? String(o.price) : null,
       priceAmount: o.priceAmount != null ? Number(o.priceAmount) : null,
       priceText: o.priceText != null ? String(o.priceText) : null,

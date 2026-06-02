@@ -13,6 +13,7 @@ import { catalogSourceDiagnosticMessage } from "../../../lib/catalogSourceRegist
 import { coverImageDiagnosticsLabel } from "../../../lib/catalogSourceOfferCoverImage";
 import { priceDiagnosticsLabel } from "../../../lib/catalogOfferPriceDiagnostics";
 import { SourceOfferPriceDisplay } from "../../../components/catalog/SourceOfferPriceDisplay";
+import { cleanUrlSlugTitle } from "../../../lib/catalogTitleCleanup";
 import type {
   OfferSearchResultItem,
   OfferSearchSortMode,
@@ -1081,11 +1082,17 @@ export function AdminCatalogOfferSearchImportSection({
                     : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-black">{item.title}</span>
+                        <span className="font-semibold text-black">
+                          {item.titleSource === "url_slug" ? cleanUrlSlugTitle(item.title) : item.title}
+                        </span>
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-semibold ${sourceBadgeClass(item.sourceName)}`}
                         >
                           {catalogSourceNameLabel(item.sourceName)}
+                        </span>
+                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-black/55">
+                          Заголовок:{" "}
+                          {item.titleSource === "url_slug" ? "url" : item.titleSource ?? "card"}
                         </span>
                         {item.parseQuality === "search_card" ?
                           <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
@@ -1126,6 +1133,42 @@ export function AdminCatalogOfferSearchImportSection({
                       <p className="mt-1 text-[10px] text-black/40">
                         {coverImageDiagnosticsLabel(item.coverImageUrl, item.imageSource)}
                       </p>
+                      {item.titleSource === "url_slug" ?
+                        <p className="mt-1 text-[11px] text-amber-900">
+                          Заголовок взят из URL, может быть неточным
+                        </p>
+                      : null}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            try {
+                              setBusy(true);
+                              const r = await fetch("/api/admin/catalogs/source-offers/enrich", {
+                                method: "POST",
+                                credentials: "include",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ url: item.url, city: cityLabel, categorySlug: DEFAULT_CATEGORY }),
+                              });
+                              const d = (await r.json()) as {
+                                ok?: boolean;
+                                enriched?: Partial<OfferSearchResultItem>;
+                                warning?: string | null;
+                              };
+                              if (!d.ok || !d.enriched) return;
+                              setResults((prev) =>
+                                prev.map((x) => (x.url === item.url ? { ...x, ...d.enriched } : x)),
+                              );
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          className="rounded-full border border-black/15 px-3 py-1 text-xs font-medium text-black/70 disabled:opacity-40"
+                        >
+                          Дозагрузить данные
+                        </button>
+                      </div>
                       <a
                         href={item.url}
                         target="_blank"

@@ -39,6 +39,7 @@ import type { SourceOfferImportOutcome } from "./catalogSourceOfferImportErrors"
 export type SourceOfferSearchSelection = {
   url: string;
   title: string;
+  titleSource?: string;
   price: string | null;
   priceAmount?: number | null;
   priceText?: string | null;
@@ -127,6 +128,7 @@ function buildInputFromSearchSelection(
       // Stage 1 results do not guarantee price/image.
       priceSource: (sel.priceSource ?? "none") as OfferPriceSource,
       parseStatus: "search_only",
+      titleSource: (sel.titleSource ? String(sel.titleSource) : ""),
     },
   };
 }

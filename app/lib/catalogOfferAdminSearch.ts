@@ -67,6 +67,7 @@ export type OfferSearchSkipReason = "query_mismatch";
 export type OfferSearchResultItem = {
   url: string;
   title: string;
+  titleSource?: "card" | "json" | "og" | "app-state" | "html" | "url_slug";
   price: string | null;
   priceAmount?: number | null;
   priceText?: string | null;
@@ -184,6 +185,7 @@ function hitToResult(
   return {
     url: hit.url,
     title,
+    titleSource: hit.titleSource ?? "url_slug",
     price: hit.price,
     priceAmount: hit.priceAmount ?? null,
     priceText: hit.priceText ?? null,

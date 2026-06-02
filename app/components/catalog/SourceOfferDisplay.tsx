@@ -6,6 +6,7 @@ import { coverImageDiagnosticsLabel } from "../../lib/catalogSourceOfferCoverIma
 import { priceDiagnosticsLabel } from "../../lib/catalogOfferPriceDiagnostics";
 import { resolveCoverImageUrl } from "../../lib/catalogSourceOfferCoverImage";
 import { SourceOfferPriceDisplay } from "./SourceOfferPriceDisplay";
+import { maybeCleanTitleForPublic } from "../../lib/catalogTitleCleanup";
 import type { CatalogSourceOffer, CatalogSourceOfferDraft } from "../../lib/catalogSourceOfferTypes";
 
 type OfferLike = Pick<
@@ -103,10 +104,12 @@ export function SourceOfferModerationCardBody({
   children?: ReactNode;
   showDiagnostics?: boolean;
 }) {
+  const titleSource = typeof offer.rawPayload?.titleSource === "string" ? offer.rawPayload.titleSource : null;
+  const titleDisplay = maybeCleanTitleForPublic(offer.title, titleSource);
   return (
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-black">{offer.title}</span>
+        <span className="font-semibold text-black">{titleDisplay}</span>
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
           {catalogSourceNameLabel(offer.sourceName)}
         </span>
@@ -120,6 +123,11 @@ export function SourceOfferModerationCardBody({
       </p>
       {showDiagnostics ?
         <SourceOfferTruthDiagnostics offer={offer} />
+      : null}
+      {titleSource === "url_slug" ?
+        <p className="mt-1 text-[11px] text-amber-900">
+          Заголовок взят из URL, может быть неточным
+        </p>
       : null}
       {(offer.companyName || offer.sellerName) ?
         <p className="mt-1 text-xs text-black/50">

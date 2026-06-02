@@ -97,6 +97,7 @@ export type OfferSourceSearchDiagnostic = {
 export type OfferSourceSearchHit = {
   url: string;
   title: string;
+  titleSource?: "card" | "json" | "app-state" | "url_slug";
   snippet: string;
   price: string | null;
   priceAmount?: number | null;
@@ -247,18 +248,30 @@ function pushAvitoHit(
   const url = normalizeListingUrl(rawUrl, baseUrl);
   if (!url || !isRealOfferListingUrl(url, "avito") || seen.has(url)) return null;
   seen.add(url);
-  const title = sanitizeOfferText(
-    titleHint ||
-      decodeJsonString(
-        ctx.match(/data-marker="item-title"[^>]*>([^<]{4,200})</i)?.[1] ??
-          ctx.match(/itemprop="name"[^>]*content="([^"]{4,200})"/i)?.[1] ??
-          ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
-          ctx.match(/"name"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
-          "",
-      ) ||
-      titleFromListingUrl(url) ||
-      "",
-  );
+  const cardTitle =
+    decodeJsonString(
+      ctx.match(/data-marker="item-title"[^>]*>([^<]{4,200})</i)?.[1] ??
+        ctx.match(/data-marker="item-title"[^>]*title="([^"]{4,200})"/i)?.[1] ??
+        ctx.match(/aria-label="([^"]{4,200})"\s+data-marker="item-title"/i)?.[1] ??
+        "",
+    ) || "";
+  const jsonTitle =
+    decodeJsonString(
+      ctx.match(/"title"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
+        ctx.match(/"name"\s*:\s*"([^"]{4,200})"/i)?.[1] ??
+        "",
+    ) || "";
+
+  const resolvedTitle =
+    sanitizeOfferText(titleHint || cardTitle || "") ||
+    sanitizeOfferText(jsonTitle || "") ||
+    titleFromListingUrl(url) ||
+    "";
+  const title = sanitizeOfferText(resolvedTitle);
+  const titleSource: OfferSourceSearchHit["titleSource"] =
+    sanitizeOfferText(titleHint || cardTitle || "") ? "card"
+    : sanitizeOfferText(jsonTitle || "") ? "json"
+    : "url_slug";
   const snippet = sanitizeOfferText(
     decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") ||
       decodeJsonString(ctx.match(/data-marker="item-description"[^>]*>([^<]{8,280})/i)?.[1] ?? "") ||
@@ -267,6 +280,7 @@ function pushAvitoHit(
   const hit: OfferSourceSearchHit = {
     url,
     title: title.slice(0, 200),
+    titleSource,
     snippet: snippet.slice(0, 280),
     // Stage 1: lightweight search result. Do not promise price/image here.
     price: null,

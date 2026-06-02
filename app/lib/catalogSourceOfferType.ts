@@ -2,6 +2,7 @@
  * Soft offer types for lightweight external offer index (not full listings).
  */
 
+import { catalogSourceDiagnosticMessage } from "./catalogSourceRegistry";
 import type { OfferListingSourceId } from "./catalogSourceOfferTypes";
 import { isAutomotiveSearchQuery } from "./catalogOfferAutoRouting";
 
@@ -301,7 +302,6 @@ export function disabledSourcesForResolved(
 }
 
 export function disabledSourceMessage(source: OfferListingSourceId): string | null {
-  if (source === "youla") return "Youla blocked by captcha (источник отключён).";
-  if (source === "vk") return "VK parser not implemented yet";
-  return null;
+  const msg = catalogSourceDiagnosticMessage(source, { linksExtracted: 0, zeroReason: "disabled" });
+  return msg || null;
 }

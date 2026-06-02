@@ -38,6 +38,7 @@ import {
   rawPayloadForDb,
   resolveCoverImageUrl,
   SOURCE_OFFER_DRAFT_SELECT_COLS,
+  SOURCE_OFFER_DRAFT_SELECT_COLS_NO_PRICE_EXT,
   SOURCE_OFFER_PUBLISHED_SELECT_COLS,
   SOURCE_OFFER_PUBLISHED_SELECT_COLS_LEGACY,
   CATALOG_SOURCE_OFFERS_TABLE,
@@ -313,6 +314,188 @@ function rowToOffer(r: OfferRow): CatalogSourceOffer {
 }
 
 const DRAFT_COLS = SOURCE_OFFER_DRAFT_SELECT_COLS;
+const DRAFT_COLS_NO_PRICE_EXT = SOURCE_OFFER_DRAFT_SELECT_COLS_NO_PRICE_EXT;
+
+function sqlNull<T>(v: T | null | undefined): T | null {
+  return v === undefined ? null : v;
+}
+
+async function updateSourceOfferDraftRow(
+  pool: ReturnType<typeof getPool>,
+  draftId: number,
+  status: string,
+  input: CatalogSourceOfferInput,
+  search: ReturnType<typeof buildSourceOfferSearchFields>,
+  item: { duplicateHint: string | null; duplicateOfOfferId: number | null },
+): Promise<DraftRow | null> {
+  const sharedTail = [
+    input.city,
+    input.region,
+    input.categorySlug,
+    input.companyName,
+    input.sellerName,
+    sqlNull(input.brand),
+    JSON.stringify(input.oemCodes),
+    JSON.stringify(input.articleCodes),
+    input.sourceName,
+    input.sourceUrl,
+    input.shortSnippet,
+    sqlNull(input.coverImageUrl),
+    input.confidenceScore,
+    item.duplicateHint,
+    item.duplicateOfOfferId,
+    search.titleSearch,
+    search.brandSearch,
+    search.oemSearch,
+    search.companySearch,
+    search.citySearch,
+    JSON.stringify(
+      rawPayloadForDb(
+        input.rawPayload,
+        input.coverImageUrl,
+        typeof input.rawPayload?.imageSource === "string" ? input.rawPayload.imageSource : null,
+      ),
+    ),
+  ];
+  try {
+    const { rows } = await pool.query<DraftRow>(
+      `
+      UPDATE catalog_source_offer_import_drafts SET
+        status = $2, offer_type = $3, title = $4, price = $5, price_amount = $6, price_text = $7,
+        city = $8, region = $9, category_slug = $10,
+        company_name = $11, seller_name = $12, brand = $13,
+        oem_codes = $14::jsonb, article_codes = $15::jsonb,
+        source_name = $16, source_url = $17, short_snippet = $18, cover_image_url = $19, confidence_score = $20,
+        duplicate_hint = $21, duplicate_of_offer_id = $22,
+        title_search = $23, brand_search = $24, oem_search = $25, company_search = $26, city_search = $27,
+        raw_payload = $28::jsonb, imported_at = NOW(), updated_at = NOW()
+      WHERE id = $1
+      RETURNING ${DRAFT_COLS}
+      `,
+      [
+        draftId,
+        status,
+        input.offerType,
+        input.title,
+        sqlNull(input.price),
+        sqlNull(input.priceAmount),
+        sqlNull(input.priceText),
+        ...sharedTail,
+      ],
+    );
+    return rows[0] ?? null;
+  } catch (err) {
+    if (!isMissingColumnDbError(err)) throw err;
+    const { rows } = await pool.query<DraftRow>(
+      `
+      UPDATE catalog_source_offer_import_drafts SET
+        status = $2, offer_type = $3, title = $4, price = $5,
+        city = $6, region = $7, category_slug = $8,
+        company_name = $9, seller_name = $10, brand = $11,
+        oem_codes = $12::jsonb, article_codes = $13::jsonb,
+        source_name = $14, source_url = $15, short_snippet = $16, cover_image_url = $17, confidence_score = $18,
+        duplicate_hint = $19, duplicate_of_offer_id = $20,
+        title_search = $21, brand_search = $22, oem_search = $23, company_search = $24, city_search = $25,
+        raw_payload = $26::jsonb, imported_at = NOW(), updated_at = NOW()
+      WHERE id = $1
+      RETURNING ${DRAFT_COLS_NO_PRICE_EXT}
+      `,
+      [
+        draftId,
+        status,
+        input.offerType,
+        input.title,
+        sqlNull(input.price),
+        ...sharedTail,
+      ],
+    );
+    return rows[0] ?? null;
+  }
+}
+
+async function insertSourceOfferDraftRow(
+  pool: ReturnType<typeof getPool>,
+  status: string,
+  input: CatalogSourceOfferInput,
+  search: ReturnType<typeof buildSourceOfferSearchFields>,
+  item: { duplicateHint: string | null; duplicateOfOfferId: number | null },
+): Promise<DraftRow | null> {
+  const sharedTail = [
+    input.city,
+    input.region,
+    input.categorySlug,
+    input.companyName,
+    input.sellerName,
+    sqlNull(input.brand),
+    JSON.stringify(input.oemCodes),
+    JSON.stringify(input.articleCodes),
+    input.sourceName,
+    input.sourceUrl,
+    input.shortSnippet,
+    sqlNull(input.coverImageUrl),
+    input.confidenceScore,
+    item.duplicateHint,
+    item.duplicateOfOfferId,
+    search.titleSearch,
+    search.brandSearch,
+    search.oemSearch,
+    search.companySearch,
+    search.citySearch,
+    JSON.stringify(
+      rawPayloadForDb(
+        input.rawPayload,
+        input.coverImageUrl,
+        typeof input.rawPayload?.imageSource === "string" ? input.rawPayload.imageSource : null,
+      ),
+    ),
+  ];
+  try {
+    const { rows } = await pool.query<DraftRow>(
+      `
+      INSERT INTO catalog_source_offer_import_drafts (
+        status, offer_type, title, price, price_amount, price_text, city, region, category_slug,
+        company_name, seller_name, brand,
+        oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
+        duplicate_hint, duplicate_of_offer_id,
+        title_search, brand_search, oem_search, company_search, city_search, raw_payload
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19,
+        $20, $21, $22, $23, $24, $25, $26, $27::jsonb
+      )
+      RETURNING ${DRAFT_COLS}
+      `,
+      [
+        status,
+        input.offerType,
+        input.title,
+        sqlNull(input.price),
+        sqlNull(input.priceAmount),
+        sqlNull(input.priceText),
+        ...sharedTail,
+      ],
+    );
+    return rows[0] ?? null;
+  } catch (err) {
+    if (!isMissingColumnDbError(err)) throw err;
+    const { rows } = await pool.query<DraftRow>(
+      `
+      INSERT INTO catalog_source_offer_import_drafts (
+        status, offer_type, title, price, city, region, category_slug,
+        company_name, seller_name, brand,
+        oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
+        duplicate_hint, duplicate_of_offer_id,
+        title_search, brand_search, oem_search, company_search, city_search, raw_payload
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16, $17, $18,
+        $19, $20, $21, $22, $23, $24, $25::jsonb
+      )
+      RETURNING ${DRAFT_COLS_NO_PRICE_EXT}
+      `,
+      [status, input.offerType, input.title, sqlNull(input.price), ...sharedTail],
+    );
+    return rows[0] ?? null;
+  }
+}
 
 export async function pgListSourceOfferDrafts(
   status?: CatalogSourceOfferDraftStatus,
@@ -324,11 +507,18 @@ export async function pgListSourceOfferDrafts(
     sql += ` WHERE status = ANY($1::text[])`;
   }
   sql += ` ORDER BY created_at DESC LIMIT 500`;
-  const { rows } = await pool.query<DraftRow>(
-    sql,
-    status ? [sourceOfferDraftStatusDbValues(status)] : [],
-  );
-  return rows.map(rowToDraft);
+  const queryParams = status ? [sourceOfferDraftStatusDbValues(status)] : [];
+  try {
+    const { rows } = await pool.query<DraftRow>(sql, queryParams);
+    return rows.map(rowToDraft);
+  } catch (err) {
+    if (!isMissingColumnDbError(err)) throw err;
+    const legacySql = `SELECT ${SOURCE_OFFER_DRAFT_SELECT_COLS_NO_PRICE_EXT} FROM catalog_source_offer_import_drafts${
+      status ? ` WHERE status = ANY($1::text[])` : ""
+    } ORDER BY created_at DESC LIMIT 500`;
+    const { rows } = await pool.query<DraftRow>(legacySql, queryParams);
+    return rows.map(rowToDraft);
+  }
 }
 
 export async function pgUpsertSourceOfferDrafts(
@@ -352,105 +542,25 @@ export async function pgUpsertSourceOfferDrafts(
     const status = item.duplicateHint || item.duplicateOfOfferId ? "duplicate" : "draft";
 
     if (item.existingDraftId) {
-      const { rows } = await pool.query<DraftRow>(
-        `
-        UPDATE catalog_source_offer_import_drafts SET
-          status = $2, offer_type = $3, title = $4, price = $5, price_amount = $6, price_text = $7,
-          city = $8, region = $9, category_slug = $10,
-          company_name = $11, seller_name = $12, brand = $13,
-          oem_codes = $14::jsonb, article_codes = $15::jsonb,
-          source_name = $16, source_url = $17, short_snippet = $18, cover_image_url = $19, confidence_score = $20,
-          duplicate_hint = $21, duplicate_of_offer_id = $22,
-          title_search = $23, brand_search = $24, oem_search = $25, company_search = $26, city_search = $27,
-          raw_payload = $28::jsonb, imported_at = NOW(), updated_at = NOW()
-        WHERE id = $1
-        RETURNING ${DRAFT_COLS}
-        `,
-        [
-          item.existingDraftId,
-          status,
-          input.offerType,
-          input.title,
-          input.price,
-          input.priceAmount ?? null,
-          input.priceText ?? null,
-          input.city,
-          input.region,
-          input.categorySlug,
-          input.companyName,
-          input.sellerName,
-          input.brand,
-          JSON.stringify(input.oemCodes),
-          JSON.stringify(input.articleCodes),
-          input.sourceName,
-          input.sourceUrl,
-          input.shortSnippet,
-          input.coverImageUrl,
-          input.confidenceScore,
-          item.duplicateHint,
-          item.duplicateOfOfferId,
-          search.titleSearch,
-          search.brandSearch,
-          search.oemSearch,
-          search.companySearch,
-          search.citySearch,
-          JSON.stringify(rawPayloadForDb(input.rawPayload, input.coverImageUrl)),
-        ],
+      const row = await updateSourceOfferDraftRow(
+        pool,
+        item.existingDraftId,
+        status,
+        input,
+        search,
+        item,
       );
-      if (rows[0]) {
-        updatedIds.push(rows[0].id);
-        drafts.push(rowToDraft(rows[0]));
+      if (row) {
+        updatedIds.push(row.id);
+        drafts.push(rowToDraft(row));
       }
       continue;
     }
 
-    const { rows } = await pool.query<DraftRow>(
-      `
-      INSERT INTO catalog_source_offer_import_drafts (
-        status, offer_type, title, price, price_amount, price_text, city, region, category_slug,
-        company_name, seller_name, brand,
-        oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
-        duplicate_hint, duplicate_of_offer_id,
-        title_search, brand_search, oem_search, company_search, city_search, raw_payload
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19,
-        $20, $21, $22, $23, $24, $25, $26, $27::jsonb
-      )
-      RETURNING ${DRAFT_COLS}
-      `,
-      [
-        status,
-        input.offerType,
-        input.title,
-        input.price,
-        input.priceAmount ?? null,
-        input.priceText ?? null,
-        input.city,
-        input.region,
-        input.categorySlug,
-        input.companyName,
-        input.sellerName,
-        input.brand,
-        JSON.stringify(input.oemCodes),
-        JSON.stringify(input.articleCodes),
-        input.sourceName,
-        input.sourceUrl,
-        input.shortSnippet,
-        input.coverImageUrl,
-        input.confidenceScore,
-        item.duplicateHint,
-        item.duplicateOfOfferId,
-        search.titleSearch,
-        search.brandSearch,
-        search.oemSearch,
-        search.companySearch,
-        search.citySearch,
-        JSON.stringify(rawPayloadForDb(input.rawPayload, input.coverImageUrl)),
-      ],
-    );
-    if (rows[0]) {
-      createdIds.push(rows[0].id);
-      drafts.push(rowToDraft(rows[0]));
+    const row = await insertSourceOfferDraftRow(pool, status, input, search, item);
+    if (row) {
+      createdIds.push(row.id);
+      drafts.push(rowToDraft(row));
     }
   }
 
@@ -831,7 +941,13 @@ export async function pgCheckSourceOffersTablesReady(): Promise<boolean> {
   return schema.ready;
 }
 
-const REQUIRED_SOURCE_OFFER_COLUMNS = ["offer_type", "cover_image_url", "price"] as const;
+const REQUIRED_SOURCE_OFFER_COLUMNS = [
+  "offer_type",
+  "cover_image_url",
+  "price",
+  "price_amount",
+  "price_text",
+] as const;
 
 export type SourceOfferSchemaReady = {
   ready: boolean;

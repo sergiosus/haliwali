@@ -39,7 +39,7 @@ const REGISTRY: CatalogSourceRegistryEntry[] = [
     supportsSearch: false,
     supportsImportByUrl: false,
     supportsImages: true,
-    note: "Auto.ru experimental: parser not implemented or disabled",
+    note: "Auto.ru experimental — parser not implemented yet",
     disabledReason: "parser_not_implemented",
   },
   {
@@ -49,7 +49,7 @@ const REGISTRY: CatalogSourceRegistryEntry[] = [
     supportsSearch: true,
     supportsImportByUrl: true,
     supportsImages: true,
-    note: "Drom — экспериментальный источник",
+    note: "Drom — экспериментальный fallback",
   },
   {
     id: "youla",
@@ -164,26 +164,48 @@ export function resolveAdminSearchSources(
   return [...uniq];
 }
 
+/** Per-source admin/search diagnostic text — never reuse VK message for other sources. */
+export function catalogSourceDiagnosticMessage(
+  source: CatalogSourceName,
+  opts: { linksExtracted?: number; zeroReason?: string | null } = {},
+): string {
+  const entry = getCatalogSourceRegistryEntry(source);
+  const links = opts.linksExtracted ?? 0;
+  const zero = opts.zeroReason ?? null;
+
+  switch (source) {
+    case "avito":
+      return links > 0 ? "" : "Avito: нет ссылок на объявления в HTML выдачи";
+    case "auto_ru":
+      if (!entry?.supportsSearch && links === 0) {
+        return entry?.note ?? "Auto.ru experimental — parser not implemented yet";
+      }
+      if (links === 0) {
+        return zero === "no_selector" ?
+            "Auto.ru experimental — parser not implemented yet (нет карточек в выдаче)"
+          : (entry?.note ?? "Auto.ru experimental — parser not implemented yet");
+      }
+      return "Auto.ru experimental — карточки только из поиска";
+    case "drom":
+      if (links === 0) {
+        return entry?.note ?? "Drom — экспериментальный fallback";
+      }
+      return "Drom — экспериментальный fallback";
+    case "youla":
+      return entry?.note ?? "Youla blocked by captcha (источник отключён).";
+    case "vk":
+      return entry?.note ?? "VK parser not implemented yet";
+    default:
+      return entry?.note ?? "";
+  }
+}
+
 export function registryDiagnosticForSource(
   source: CatalogSourceName,
   linksExtracted: number,
 ): string | null {
-  const entry = getCatalogSourceRegistryEntry(source);
-  if (!entry) return null;
-  if (source === "auto_ru") {
-    if (!entry.supportsSearch) {
-      return entry.note ?? "Auto.ru experimental: parser not implemented or disabled";
-    }
-    if (linksExtracted === 0) {
-      return "Auto.ru experimental: parser not implemented or disabled (0 карточек в выдаче)";
-    }
-    return "Auto.ru experimental: только карточки из поиска, без загрузки страницы объявления";
-  }
-  if (entry.status === "disabled") return entry.note ?? null;
-  if (entry.status === "experimental" && linksExtracted === 0) {
-    return `${entry.label} (${entry.status}): нет результатов`;
-  }
-  return null;
+  const msg = catalogSourceDiagnosticMessage(source, { linksExtracted });
+  return msg || null;
 }
 
 /** Public catalog source filter options (excludes disabled unless needed later). */

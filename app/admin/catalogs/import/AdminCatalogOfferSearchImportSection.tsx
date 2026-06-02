@@ -9,6 +9,8 @@ import {
   type CatalogDiscoverLocation,
 } from "../../../lib/catalogDiscoverLocationStorage";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
+import { catalogSourceDiagnosticMessage } from "../../../lib/catalogSourceRegistry";
+import { coverImageDiagnosticsLabel } from "../../../lib/catalogSourceOfferCoverImage";
 import { displaySourceOfferPrice } from "../../../lib/catalogOfferPrice";
 import type {
   OfferSearchResultItem,
@@ -87,6 +89,22 @@ const PARSE_QUALITY_LABEL: Record<string, string> = {
   search_card: "карточка поиска",
 };
 
+function diagnosticTableErrorText(diag: OfferSourceSearchDiagnostic): string {
+  if (diag.errorMessage?.trim()) return diag.errorMessage;
+  if (diag.linksExtracted > 0) return "—";
+  if (diag.message?.trim()) return diag.message;
+  const fromRegistry = catalogSourceDiagnosticMessage(diag.sourceName, {
+    linksExtracted: diag.linksExtracted,
+    zeroReason: diag.zeroReason,
+  });
+  if (fromRegistry) return fromRegistry;
+  const label = OFFER_SOURCE_ZERO_LABELS[diag.zeroReason ?? ""];
+  if (label) return label;
+  if (diag.zeroReason) return diag.zeroReason;
+  if (diag.blocked) return "заблокирован";
+  return "—";
+}
+
 const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
   blocked: "Avito blocked search page.",
   captcha: "Youla blocked by captcha",
@@ -95,7 +113,7 @@ const OFFER_SOURCE_ZERO_LABELS: Record<string, string> = {
   empty_response: "пустой ответ",
   fetch_error: "ошибка загрузки",
   parse_error: "ошибка разбора HTML",
-  unsupported: "VK parser not implemented yet",
+  unsupported: "источник не поддерживается",
   city_unsupported: "город не в URL — ищем широко, фильтр после разбора",
   catalog_only: "Drom returned catalog pages, no real offers.",
   js_shell: "Drom: объявления подгружаются скриптом, ссылок в HTML нет.",
@@ -642,8 +660,8 @@ export function AdminCatalogOfferSearchImportSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <aside className="w-full shrink-0 space-y-3 lg:sticky lg:top-4 lg:w-72 xl:w-80">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
+        <aside className="w-full space-y-3 lg:sticky lg:top-[120px] lg:z-10 lg:max-h-[calc(100vh-140px)] lg:overflow-y-auto lg:overscroll-contain">
           <div className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
             <label className="block text-sm">
               <span className="text-black/60">Поисковый запрос</span>
@@ -787,7 +805,7 @@ export function AdminCatalogOfferSearchImportSection({
 
         <div ref={resultsSectionRef} tabIndex={-1} className="min-w-0 flex-1 scroll-mt-4 outline-none">
         {searched && totalFound > 0 ?
-          <div className="sticky top-0 z-20 mb-3 flex flex-col gap-2 rounded-2xl border border-black/10 bg-white/95 p-3 shadow-sm backdrop-blur-sm sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="sticky top-[120px] z-30 mb-3 flex flex-col gap-2 rounded-2xl border border-black/10 bg-[#fff8f3]/95 p-3 shadow-sm backdrop-blur-sm sm:flex-row sm:flex-wrap sm:items-center">
             <span className="text-sm font-medium text-black">
               Выбрано: <span className="font-semibold">{selectedCount}</span>
             </span>
@@ -901,15 +919,7 @@ export function AdminCatalogOfferSearchImportSection({
                   </thead>
                   <tbody>
                     {diagnostics.map((diag) => {
-                      const errText =
-                        diag.errorMessage ??
-                        (diag.linksExtracted === 0 ?
-                          diag.message ??
-                            OFFER_SOURCE_ZERO_LABELS[diag.zeroReason ?? ""] ??
-                            diag.zeroReason ??
-                            (diag.blocked ? "заблокирован" : null)
-                        : null) ??
-                        "—";
+                      const errText = diagnosticTableErrorText(diag);
                       return (
                         <tr key={diag.sourceName} className="border-t border-black/5 align-top">
                           <td className="px-3 py-2 font-medium text-black">
@@ -970,6 +980,12 @@ export function AdminCatalogOfferSearchImportSection({
                     {o.parseWarning ? ` · ${o.parseWarning}` : ""}
                   </p>
                   <p className="mt-0.5 text-xs text-black/55">{o.message}</p>
+                  {o.imageFound != null ?
+                    <p className="mt-1 text-[10px] text-black/45">
+                      image: {o.imageFound ? "found" : "not found"} · imageSource:{" "}
+                      {o.imageSource ?? "none"}
+                    </p>
+                  : null}
                 </li>
               ))}
             </ul>
@@ -1058,6 +1074,9 @@ export function AdminCatalogOfferSearchImportSection({
                       {item.shortSnippet ?
                         <p className="mt-1 line-clamp-2 text-black/45">{item.shortSnippet}</p>
                       : null}
+                      <p className="mt-1 text-[10px] text-black/40">
+                        {coverImageDiagnosticsLabel(item.coverImageUrl, item.imageSource)}
+                      </p>
                       <a
                         href={item.url}
                         target="_blank"

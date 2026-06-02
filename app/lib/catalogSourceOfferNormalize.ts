@@ -131,6 +131,7 @@ export function sanitizeSourceOfferInput(
     rawPayload: slimSourceOfferRawPayload(
       input.rawPayload ?? { extractor: "source_offer", host },
       pickCoverImage(input),
+      typeof input.rawPayload?.imageSource === "string" ? input.rawPayload.imageSource : null,
     ),
   };
 
@@ -179,7 +180,11 @@ export function sanitizeSourceOfferDraftInput(
     offerType: pickOfferType(input),
     coverImageUrl: pickCoverImage(input),
     confidenceScore: Math.min(1, Math.max(0, input.confidenceScore ?? 0.35)),
-    rawPayload: slimSourceOfferRawPayload(input.rawPayload, pickCoverImage(input)),
+    rawPayload: slimSourceOfferRawPayload(
+      input.rawPayload,
+      pickCoverImage(input),
+      typeof input.rawPayload?.imageSource === "string" ? input.rawPayload.imageSource : null,
+    ),
   };
 
   const validated = validateSourceOfferDraftCandidate(candidate);

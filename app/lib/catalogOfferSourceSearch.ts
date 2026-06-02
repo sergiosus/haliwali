@@ -28,7 +28,9 @@ import {
   validateOfferLinkFromSearchPage,
 } from "./catalogOfferSearchText";
 import { parseListingPriceFromContext } from "./catalogOfferPrice";
-import { extractAvitoListingThumbnail } from "./catalogSourceOfferCoverImage";
+import { catalogSourceDiagnosticMessage } from "./catalogSourceRegistry";
+import { extractAvitoCoverFromCardContext } from "./catalogSourceOfferCoverImage";
+import type { AvitoCoverImageSource } from "./catalogAvitoCoverImage";
 import { assertPublicResolvableHost } from "./catalogUrlSafety";
 import { slugifyCatalogText } from "./catalogSlug";
 import {
@@ -99,6 +101,7 @@ export type OfferSourceSearchHit = {
   /** @deprecated use coverImageUrl */
   imageUrl?: string | null;
   coverImageUrl?: string | null;
+  imageSource?: AvitoCoverImageSource;
   offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
@@ -246,7 +249,7 @@ function pushAvitoHit(
       "",
   );
   const priceFields = parseListingPriceFromContext(ctx);
-  const coverImageUrl = extractAvitoListingThumbnail(ctx);
+  const cover = extractAvitoCoverFromCardContext(ctx, baseUrl);
   const snippet = sanitizeOfferText(
     decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") ||
       decodeJsonString(ctx.match(/data-marker="item-description"[^>]*>([^<]{8,280})/i)?.[1] ?? "") ||
@@ -259,13 +262,14 @@ function pushAvitoHit(
     price: priceFields.price,
     priceAmount: priceFields.priceAmount,
     priceText: priceFields.priceText,
-    coverImageUrl,
+    coverImageUrl: cover.coverImageUrl,
+    imageSource: cover.imageSource,
     city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
     sellerHint: extractSellerFromContext(ctx),
     sourceName: "avito",
     fromSearchPage: true,
     cardComplete: Boolean(
-      title.length >= 4 && priceFields.priceAmount && (coverImageUrl || snippet.length >= 8),
+      title.length >= 4 && priceFields.priceAmount && (cover.coverImageUrl || snippet.length >= 8),
     ),
   };
   if (validateOfferLinkFromSearchPage(hit, "avito")) return null;
@@ -599,6 +603,10 @@ function buildSearchUrls(
     return { urls: [url], cityInUrl: Boolean(slug) };
   }
 
+  if (source === "auto_ru") {
+    return { urls: buildAutoRuSearchUrls(query, city, page), cityInUrl: false };
+  }
+
   if (source === "vk") {
     const base = `https://vk.com/market?section=search&q=${q}`;
     const url = page <= 1 ? base : `${base}&offset=${(page - 1) * 40}`;
@@ -715,19 +723,15 @@ export async function searchOfferListingSources(opts: {
     (s) => !opts.sources.includes(s),
   );
   for (const source of disabledSources) {
-    if (source === "youla") {
-      diagnostics.push(
-        disabledSourceDiagnostic(
-          "youla",
-          "disabled",
-          "Youla blocked by captcha (источник отключён).",
-        ),
-      );
-    } else if (source === "vk") {
-      diagnostics.push(
-        disabledSourceDiagnostic("vk", "unsupported", "VK parser not implemented yet"),
-      );
-    }
+    const msg = catalogSourceDiagnosticMessage(source, { linksExtracted: 0, zeroReason: "disabled" });
+    if (!msg) continue;
+    diagnostics.push(
+      disabledSourceDiagnostic(
+        source,
+        source === "vk" ? "unsupported" : "disabled",
+        msg,
+      ),
+    );
   }
 
   await Promise.all(
@@ -735,7 +739,11 @@ export async function searchOfferListingSources(opts: {
       try {
       if (source === "vk") {
         diagnostics.push(
-          disabledSourceDiagnostic("vk", "unsupported", "VK parser not implemented yet"),
+          disabledSourceDiagnostic(
+            "vk",
+            "unsupported",
+            catalogSourceDiagnosticMessage("vk", { zeroReason: "unsupported" }),
+          ),
         );
         return;
       }
@@ -913,10 +921,9 @@ export async function searchOfferListingSources(opts: {
             : "Капча на странице источника."
           : zeroReason === "source_unreliable_for_query" ?
             "Drom: выдача не соответствует запросу."
-          : zeroReason === "unsupported" ?
-            "VK parser not implemented yet"
-          : zeroReason === "disabled" ?
-            "Youla blocked by captcha (источник отключён)."
+          : zeroReason === "unsupported" || zeroReason === "disabled" ?
+            (catalogSourceDiagnosticMessage(source, { linksExtracted: 0, zeroReason }) ||
+              (OFFER_SOURCE_ZERO_LABELS[zeroReason ?? "no_selector"] ?? "ссылок нет"))
           : zeroReason === "catalog_only" ? "Drom returned catalog pages, no real offers."
           : zeroReason === "js_shell" ?
             source === "avito" ?

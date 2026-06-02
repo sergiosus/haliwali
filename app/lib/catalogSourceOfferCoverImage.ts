@@ -2,31 +2,18 @@
  * Single cover image for external offers — no galleries.
  */
 
-/** First listing thumbnail from Avito SERP card HTML/JSON fragment. */
-export function extractAvitoListingThumbnail(ctx: string): string | null {
-  if (!ctx?.trim()) return null;
-  const blob = ctx.replace(/\\u002F/gi, "/").replace(/\\\//g, "/");
-  const patterns = [
-    /https:\/\/\d+\.img\.avito\.st\/image\/[^\s"'<>\\]+/i,
-    /"(https:\/\/[^"]+img\.avito\.st[^"]+)"/i,
-    /src="(https:\/\/[^"]*img\.avito[^"]*\.(?:jpg|jpeg|webp)[^"]*)"/i,
-    /"(\d+x\d+)"\s*:\s*"(https:\/\/[^"]+img\.avito[^"]+)"/i,
-    /"imageUrl"\s*:\s*"(https:\/\/[^"]+)"/i,
-  ];
-  for (const re of patterns) {
-    const m = blob.match(re);
-    const raw = m?.[1] ?? m?.[0];
-    if (!raw) continue;
-    const url = sanitizeCoverImageUrl(raw.split(/["#\s]/)[0]);
-    if (url) return url;
-  }
-  return null;
-}
+export type { AvitoCoverImageSource, AvitoCoverExtraction } from "./catalogAvitoCoverImage";
+export {
+  extractAvitoCoverFromCardContext,
+  extractAvitoListingThumbnail,
+  resolveAvitoImageUrl,
+  coverImageDiagnosticsLabel,
+} from "./catalogAvitoCoverImage";
 
 export function sanitizeCoverImageUrl(url: unknown): string | null {
   if (typeof url !== "string") return null;
   const t = url.trim();
-  if (!/^https?:\/\//i.test(t)) return null;
+  if (!/^https:\/\//i.test(t)) return null;
   return t.slice(0, 500);
 }
 
@@ -49,6 +36,7 @@ export function resolveCoverImageUrl(opts: {
 export function slimSourceOfferRawPayload(
   raw: Record<string, unknown> | undefined,
   coverImageUrl: string | null | undefined,
+  imageSource?: string | null,
 ): Record<string, unknown> {
   const base = { ...(raw ?? {}) };
   delete base.images;
@@ -58,6 +46,9 @@ export function slimSourceOfferRawPayload(
   const cover = sanitizeCoverImageUrl(coverImageUrl);
   if (cover) {
     base.coverImageUrl = cover;
+    if (imageSource) base.imageSource = imageSource;
+  } else {
+    base.imageSource = imageSource ?? "none";
   }
   delete base.imageUrl;
   delete base.image_url;
@@ -68,6 +59,7 @@ export function slimSourceOfferRawPayload(
 export function rawPayloadForDb(
   raw: Record<string, unknown> | undefined,
   coverImageUrl: string | null | undefined,
+  imageSource?: string | null,
 ): Record<string, unknown> {
-  return slimSourceOfferRawPayload(raw, coverImageUrl);
+  return slimSourceOfferRawPayload(raw, coverImageUrl, imageSource);
 }

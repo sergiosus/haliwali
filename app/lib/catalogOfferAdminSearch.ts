@@ -25,6 +25,7 @@ import {
   type OfferListingSourceId,
 } from "./catalogOfferSourceSearch";
 import {
+  catalogSourceDiagnosticMessage,
   isMarketplaceRegistryId,
   registryDiagnosticForSource,
 } from "./catalogSourceRegistry";
@@ -82,6 +83,8 @@ export type OfferSearchResultItem = {
   relevance: OfferSearchRelevance;
   skipReason?: OfferSearchSkipReason | null;
   coverImageUrl?: string | null;
+  imageFound?: boolean;
+  imageSource?: import("./catalogAvitoCoverImage").AvitoCoverImageSource;
   offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
@@ -192,6 +195,8 @@ function hitToResult(
     relevance: "match",
     skipReason: null,
     coverImageUrl: hit.coverImageUrl ?? hit.imageUrl ?? null,
+    imageFound: Boolean(hit.coverImageUrl ?? hit.imageUrl),
+    imageSource: hit.imageSource ?? (hit.coverImageUrl ? "card_img" : "none"),
     offerType: hit.offerType ?? defaultOfferType,
     year: hit.year ?? null,
     mileageKm: hit.mileageKm ?? null,
@@ -604,11 +609,19 @@ export async function searchOffersForAdmin(opts: {
   });
 
   for (const d of diagnostics) {
-    if (isMarketplaceRegistryId(d.sourceName)) {
-      const msg = registryDiagnosticForSource(d.sourceName, d.linksExtracted);
-      if (msg) {
+    if (!isMarketplaceRegistryId(d.sourceName)) continue;
+    const msg =
+      registryDiagnosticForSource(d.sourceName, d.linksExtracted) ||
+      catalogSourceDiagnosticMessage(d.sourceName, {
+        linksExtracted: d.linksExtracted,
+        zeroReason: d.zeroReason,
+      });
+    if (msg && d.linksExtracted === 0) {
+      if (!d.message || /VK parser not implemented/i.test(d.message)) {
         d.message = msg;
-        if (d.linksExtracted === 0 && !d.errorMessage) d.errorMessage = msg;
+      }
+      if (!d.errorMessage || /VK parser not implemented/i.test(d.errorMessage)) {
+        d.errorMessage = msg;
       }
     }
   }

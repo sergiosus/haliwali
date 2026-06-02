@@ -28,6 +28,8 @@ import {
 import { inferOfferTypeFromListing } from "./catalogSourceOfferType";
 import { isCatalogMarketplaceSourceName } from "./catalogSourceOfferTypes";
 import { mergeOfferPriceFields, offerPriceFromLegacyPrice } from "./catalogOfferPrice";
+import type { AvitoCoverImageSource } from "./catalogAvitoCoverImage";
+import { coverImageDiagnosticsLabel } from "./catalogSourceOfferCoverImage";
 import type { SourceOfferImportOutcome } from "./catalogSourceOfferImportErrors";
 
 export type SourceOfferSearchSelection = {
@@ -45,6 +47,7 @@ export type SourceOfferSearchSelection = {
   oemCodes?: string[];
   articleCodes?: string[];
   coverImageUrl?: string | null;
+  imageSource?: AvitoCoverImageSource;
   offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
@@ -118,7 +121,30 @@ function buildInputFromSearchSelection(
       extractor: "search_selection",
       parseQuality,
       parseWarnings,
+      imageSource: sel.imageSource ?? (sel.coverImageUrl ? "card_img" : "none"),
     },
+  };
+}
+
+function resolveImageSource(
+  input: CatalogSourceOfferInput,
+  sel: SourceOfferSearchSelection,
+): AvitoCoverImageSource {
+  const fromPayload = input.rawPayload?.imageSource;
+  if (typeof fromPayload === "string") return fromPayload as AvitoCoverImageSource;
+  if (sel.imageSource) return sel.imageSource;
+  if (input.coverImageUrl) return "card_img";
+  return "none";
+}
+
+function importImageFields(
+  input: CatalogSourceOfferInput,
+  sel: SourceOfferSearchSelection,
+): Pick<SourceOfferImportOutcome, "imageFound" | "imageSource"> {
+  const imageSource = resolveImageSource(input, sel);
+  return {
+    imageFound: Boolean(input.coverImageUrl),
+    imageSource,
   };
 }
 
@@ -153,6 +179,12 @@ function mergeEnrichedInput(
       ...base.rawPayload,
       enrichedFromPage: true,
       parseWarnings: base.rawPayload?.parseWarnings,
+      imageSource:
+        base.coverImageUrl ?
+          (base.rawPayload?.imageSource ?? "card_img")
+        : enriched.coverImageUrl ?
+          (enriched.rawPayload?.imageSource ?? "og_image")
+        : (base.rawPayload?.imageSource ?? "none"),
     },
   };
 }
@@ -242,7 +274,14 @@ export async function processSourceOfferSearchSelections(
     );
 
     if (sel.coverImageUrl && /^https?:\/\//i.test(sel.coverImageUrl)) {
-      input = { ...input, coverImageUrl: sel.coverImageUrl.trim().slice(0, 500) };
+      input = {
+        ...input,
+        coverImageUrl: sel.coverImageUrl.trim().slice(0, 500),
+        rawPayload: {
+          ...input.rawPayload,
+          imageSource: sel.imageSource ?? input.rawPayload?.imageSource ?? "card_img",
+        },
+      };
     }
 
     if (searchCard) {
@@ -321,6 +360,7 @@ export async function processSourceOfferSearchSelections(
         status: "duplicate",
         sourceName: sourceNameHint,
         message: dupErr.message,
+        ...importImageFields(input, sel),
       });
       continue;
     }
@@ -342,12 +382,17 @@ export async function processSourceOfferSearchSelections(
       duplicateHint: null,
       duplicateOfOfferId: null,
     });
+    const imageFields = importImageFields(sanitized, sel);
     outcomes.push({
       url: rawUrl,
       status: "created",
       sourceName: sourceNameHint,
-      message: parseWarning ? "Кандидат создан (данные с карточки поиска)" : "Кандидат создан",
+      message: [
+        parseWarning ? "Кандидат создан (данные с карточки поиска)" : "Кандидат создан",
+        coverImageDiagnosticsLabel(sanitized.coverImageUrl, imageFields.imageSource),
+      ].join(" · "),
       parseWarning,
+      ...imageFields,
     });
   }
 

@@ -10,6 +10,7 @@ import {
   sanitizeSourceOfferInput,
   SOURCE_OFFER_SNIPPET_MAX,
 } from "./catalogSourceOfferNormalize";
+import { resolveAvitoImageUrl } from "./catalogSourceOfferCoverImage";
 import { classifyInvalidSourceUrl } from "./catalogSourceOfferValidation";
 
 /** Parse only `<head>` + early meta — never full page body text. */
@@ -125,8 +126,8 @@ export function extractSourceOfferFromHtml(
   const city = extractCityFromHead(head, defaults);
   const sourceName = catalogSourceNameFromUrl(sourceUrl);
 
-  const coverImageUrl =
-    ogImage && /^https?:\/\//i.test(ogImage.trim()) ? ogImage.trim().slice(0, 500) : null;
+  const pageOrigin = fetched.url.origin;
+  const coverImageUrl = ogImage ? resolveAvitoImageUrl(ogImage, pageOrigin) : null;
 
   const draft: CatalogSourceOfferInput = {
     title,
@@ -148,6 +149,7 @@ export function extractSourceOfferFromHtml(
     rawPayload: {
       extractor: "source_offer",
       host: fetched.url.hostname,
+      imageSource: coverImageUrl ? "og_image" : "none",
     },
   };
 

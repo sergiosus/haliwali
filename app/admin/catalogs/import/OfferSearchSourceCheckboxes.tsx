@@ -93,8 +93,8 @@ export function OfferSearchSourceCheckboxes({
                 {isDisabled && entry.disabledReason === "captcha" ?
                   <span className="ml-1 text-xs text-black/45">— captcha</span>
                 : null}
-                {isDisabled && entry.disabledReason === "parser_not_implemented" ?
-                  <span className="ml-1 text-xs text-black/45">— parser not implemented</span>
+                {entry.note ?
+                  <span className="mt-0.5 block text-xs text-black/45">{entry.note}</span>
                 : null}
               </span>
             </label>

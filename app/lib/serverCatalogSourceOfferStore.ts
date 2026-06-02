@@ -112,7 +112,7 @@ export async function getSourceOfferAdminStatus(): Promise<CatalogSourceOfferAdm
         ...empty,
         tablesReady: schema.tablesExist,
         dbError: schema.tablesExist ?
-          `Missing columns — run db/migrations/20260602_catalog_source_offer_type_cover.sql (${hint})`
+          `Missing columns — run db/migrations/20260602_source_offer_price_fields.sql (${hint})`
         : `Missing tables — run db/migrations/20260531_catalog_source_offers.sql (${hint})`,
         schemaMissing: schema.missing,
       };

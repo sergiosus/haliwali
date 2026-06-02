@@ -1,6 +1,23 @@
 import { NextResponse } from "next/server";
 import { processSourceOfferSearchSelections } from "../../../../../lib/catalogSourceOfferExtractionService";
+import type { AvitoCoverImageSource } from "../../../../../lib/catalogAvitoCoverImage";
 import type { SourceOfferSearchSelection } from "../../../../../lib/catalogSourceOfferExtractionService";
+
+const COVER_IMAGE_SOURCES = new Set<AvitoCoverImageSource>([
+  "card_img",
+  "data_src",
+  "data_lazy",
+  "srcset",
+  "json_ld",
+  "page_data",
+  "og_image",
+  "none",
+]);
+
+function parseImageSource(raw: unknown): AvitoCoverImageSource | undefined {
+  const s = String(raw ?? "").trim() as AvitoCoverImageSource;
+  return COVER_IMAGE_SOURCES.has(s) ? s : undefined;
+}
 import { parseCatalogSourceOfferType } from "../../../../../lib/catalogSourceOfferType";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
 
@@ -30,6 +47,7 @@ function parseSelections(raw: unknown): SourceOfferSearchSelection[] {
       oemCodes: Array.isArray(o.oemCodes) ? o.oemCodes.map(String) : [],
       articleCodes: Array.isArray(o.articleCodes) ? o.articleCodes.map(String) : [],
       coverImageUrl: o.coverImageUrl != null ? String(o.coverImageUrl) : null,
+      imageSource: parseImageSource(o.imageSource),
       offerType:
         o.offerType != null ?
           parseCatalogSourceOfferType(String(o.offerType))

@@ -27,6 +27,8 @@ export type SourceOfferImportOutcome = {
   message: string;
   draftId?: number;
   parseWarning?: string;
+  imageFound?: boolean;
+  imageSource?: string;
 };
 
 export const SOURCE_OFFER_IMPORT_ERROR_LABELS: Record<SourceOfferImportErrorCode, string> = {

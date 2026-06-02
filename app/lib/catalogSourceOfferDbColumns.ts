@@ -22,6 +22,15 @@ export const SOURCE_OFFER_PUBLISHED_SELECT_COLS = `
   imported_at, created_at, updated_at
 `.trim();
 
+/** SELECT when price_amount / price_text are not migrated yet. */
+export const SOURCE_OFFER_DRAFT_SELECT_COLS_NO_PRICE_EXT = `
+  id, status, offer_type, title, price, city, region, category_slug, company_name, seller_name, brand,
+  oem_codes, article_codes, source_name, source_url, short_snippet, cover_image_url, confidence_score,
+  duplicate_hint, duplicate_of_offer_id, published_offer_id,
+  title_search, brand_search, oem_search, company_search, city_search,
+  raw_payload, imported_at, created_at, updated_at
+`.trim();
+
 /** SELECT when offer_type / cover_image_url columns are not migrated yet. */
 export const SOURCE_OFFER_PUBLISHED_SELECT_COLS_LEGACY = `
   id, draft_id, title, price, city, region, category_slug, company_name, seller_name, brand,

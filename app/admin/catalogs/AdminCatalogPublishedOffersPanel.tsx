@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { catalogSourceNameLabel } from "../../lib/catalogSourceName";
 import type { CatalogSourceOffer } from "../../lib/catalogSourceOfferTypes";
 import { AdminCatalogSourceOfferMigrationWarning } from "./AdminCatalogSourceOfferMigrationWarning";
+import {
+  SourceOfferCoverThumb,
+  SourceOfferModerationCardBody,
+} from "../../components/catalog/SourceOfferDisplay";
 
 export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: () => void }) {
   const [offers, setOffers] = useState<CatalogSourceOffer[]>([]);
@@ -138,35 +141,15 @@ export function AdminCatalogPublishedOffersPanel({ onChanged }: { onChanged?: ()
                 }}
                 className="mt-1"
               />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-black">{o.title}</span>
+              <SourceOfferCoverThumb offer={o} size="admin" />
+              <SourceOfferModerationCardBody
+                offer={o}
+                meta={
                   <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-900">
                     Опубликовано
                   </span>
-                  <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
-                    {catalogSourceNameLabel(o.sourceName)}
-                  </span>
-                </div>
-                <p className="mt-1 text-black/55">
-                  {[o.price, o.city, o.companyName || o.sellerName].filter(Boolean).join(" · ")}
-                </p>
-                {(o.brand || o.oemCodes.length > 0 || o.articleCodes.length > 0) && (
-                  <p className="mt-1 text-xs text-black/40">
-                    {o.brand ? `Бренд: ${o.brand}` : ""}
-                    {o.oemCodes.length > 0 ? ` · OEM: ${o.oemCodes.join(", ")}` : ""}
-                    {o.articleCodes.length > 0 ? ` · Арт.: ${o.articleCodes.join(", ")}` : ""}
-                  </p>
-                )}
-                <a
-                  href={o.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-block text-xs font-medium text-[#c25a00] underline"
-                >
-                  Открыть источник
-                </a>
-              </div>
+                }
+              />
             </div>
           </li>
         ))}

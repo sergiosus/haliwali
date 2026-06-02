@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
-import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 import type { CatalogSourceOfferDraft, CatalogSourceOfferDraftStatus } from "../../../lib/catalogSourceOfferTypes";
 import { sourceOfferRejectLabel } from "../../../lib/catalogSourceOfferValidation";
 import { AdminCatalogSourceOfferMigrationWarning } from "../AdminCatalogSourceOfferMigrationWarning";
+import {
+  SourceOfferCoverThumb,
+  SourceOfferModerationCardBody,
+} from "../../../components/catalog/SourceOfferDisplay";
+import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 
 const STATUS_LABEL: Record<CatalogSourceOfferDraftStatus, string> = {
   draft: "Новые",
@@ -21,7 +24,7 @@ const CANDIDATE_TABS: CatalogSourceOfferDraftStatus[] = ["draft", "saved", "appr
 const QUEUE_HEADING: Record<"candidates" | "rejected" | "duplicate", { title: string; hint: string }> = {
   candidates: {
     title: "Кандидаты предложений",
-    hint: "Очередь модерации: новые, сохранённые и одобренные перед публикацией.",
+    hint: "Выберите кандидатов и публикуйте напрямую — отдельное одобрение не требуется.",
   },
   rejected: {
     title: "Отклонённые",
@@ -36,6 +39,8 @@ const QUEUE_HEADING: Record<"candidates" | "rejected" | "duplicate", { title: st
 function categoryTitle(slug: string): string {
   return CATALOG_CATEGORY_SEED.find((c) => c.slug === slug)?.title ?? slug;
 }
+
+type DraftAction = "publish" | "reject" | "delete";
 
 export function AdminCatalogSourceOfferDraftsPanel({
   onChanged,
@@ -72,7 +77,10 @@ export function AdminCatalogSourceOfferDraftsPanel({
   }, []);
 
   const load = useCallback(async (status: CatalogSourceOfferDraftStatus) => {
-    const r = await fetch(`/api/admin/catalogs/source-offers/drafts?status=${status}`, { cache: "no-store" });
+    const r = await fetch(`/api/admin/catalogs/source-offers/drafts?status=${status}`, {
+      cache: "no-store",
+      credentials: "include",
+    });
     const data = (await r.json()) as { drafts?: CatalogSourceOfferDraft[] };
     setDrafts(data.drafts ?? []);
     setSelected(new Set());
@@ -94,26 +102,48 @@ export function AdminCatalogSourceOfferDraftsPanel({
 
   const filtered = useMemo(() => drafts, [drafts]);
 
-  async function runAction(action: "save" | "approve" | "reject" | "publish") {
+  const selectAllVisible = useCallback(() => {
+    setSelected(new Set(filtered.map((d) => d.id)));
+  }, [filtered]);
+
+  const clearSelection = useCallback(() => {
+    setSelected(new Set());
+  }, []);
+
+  async function runAction(action: DraftAction) {
     const ids = [...selected];
     if (ids.length === 0) return;
+    if (action === "delete") {
+      const ok = window.confirm(`Удалить ${ids.length} кандидат(ов)?`);
+      if (!ok) return;
+    }
     setBusy(true);
     setMessage("");
     try {
       const r = await fetch("/api/admin/catalogs/source-offers/confirm", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ids }),
       });
-      const data = (await r.json()) as { ok?: boolean; error?: string; message?: string };
+      const data = (await r.json()) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        deleted?: number;
+      };
       if (!data.ok) {
         setMessage(data.error ?? "Ошибка");
         return;
       }
-      setMessage(
-        data.message ??
-          (action === "publish" ? "Опубликовано в «Предложения»" : "Готово"),
-      );
+      if (action === "delete") {
+        setMessage(`Удалено: ${data.deleted ?? ids.length}`);
+      } else {
+        setMessage(
+          data.message ??
+            (action === "publish" ? "Опубликовано в каталог предложений" : "Готово"),
+        );
+      }
       await load(tab);
       onChanged?.();
     } catch {
@@ -142,7 +172,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
         <div>
           <h2 className="text-lg font-semibold">Кандидаты предложений</h2>
           <p className="mt-1 text-sm text-black/55">
-            Поля объявления: название, цена, город, категория, продавец, источник, бренд, OEM.
+            Публикация напрямую из новых, сохранённых и одобренных записей.
           </p>
         </div>
       )}
@@ -169,27 +199,27 @@ export function AdminCatalogSourceOfferDraftsPanel({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={busy || selected.size === 0}
-            onClick={() => void runAction("save")}
-            className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+            disabled={busy || filtered.length === 0}
+            onClick={selectAllVisible}
+            className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium"
           >
-            Сохранить
+            Выделить все
           </button>
           <button
             type="button"
             disabled={busy || selected.size === 0}
-            onClick={() => void runAction("approve")}
+            onClick={clearSelection}
             className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium disabled:opacity-40"
           >
-            Одобрить
+            Снять выбор
           </button>
           <button
             type="button"
-            disabled={busy || selected.size === 0 || tab !== "approved"}
+            disabled={busy || selected.size === 0}
             onClick={() => void runAction("publish")}
             className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
           >
-            Опубликовать
+            Опубликовать выбранные
           </button>
           <button
             type="button"
@@ -197,7 +227,15 @@ export function AdminCatalogSourceOfferDraftsPanel({
             onClick={() => void runAction("reject")}
             className="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-900 disabled:opacity-40"
           >
-            Отклонить
+            Отклонить выбранные
+          </button>
+          <button
+            type="button"
+            disabled={busy || selected.size === 0}
+            onClick={() => void runAction("delete")}
+            className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium text-black/70 disabled:opacity-40"
+          >
+            Удалить выбранные
           </button>
         </div>
       : null}
@@ -210,61 +248,43 @@ export function AdminCatalogSourceOfferDraftsPanel({
         {filtered.map((d) => (
           <li key={d.id} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
             <div className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                checked={selected.has(d.id)}
-                onChange={() => {
-                  setSelected((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(d.id)) next.delete(d.id);
-                    else next.add(d.id);
-                    return next;
-                  });
-                }}
-                className="mt-1"
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-black">{d.title}</span>
-                  <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
-                    {catalogSourceNameLabel(d.sourceName)}
-                  </span>
-                  {queueMode === "duplicate" || d.duplicateHint ?
-                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-900">
-                      {d.duplicateHint ? "Дубликат" : d.status}
-                    </span>
-                  : (
-                    <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-xs">{STATUS_LABEL[d.status] ?? d.status}</span>
-                  )}
-                </div>
-                <p className="mt-1 text-black/55">
-                  {[d.price, d.city, categoryTitle(d.categorySlug)].filter(Boolean).join(" · ")}
-                </p>
-                {(d.companyName || d.sellerName) && (
-                  <p className="mt-1 text-xs text-black/50">
-                    {d.companyName ? `Компания: ${d.companyName}` : ""}
-                    {d.companyName && d.sellerName ? " · " : ""}
-                    {d.sellerName ? `Продавец: ${d.sellerName}` : ""}
-                  </p>
-                )}
-                {d.shortSnippet ?
-                  <p className="mt-1 line-clamp-2 text-black/45">{d.shortSnippet}</p>
-                : null}
-                {(d.brand || d.oemCodes.length > 0 || d.articleCodes.length > 0) && (
-                  <p className="mt-1 text-xs text-black/40">
-                    {d.brand ? `Бренд: ${d.brand}` : ""}
-                    {d.oemCodes.length > 0 ? ` · OEM: ${d.oemCodes.join(", ")}` : ""}
-                    {d.articleCodes.length > 0 ? ` · Арт.: ${d.articleCodes.join(", ")}` : ""}
-                  </p>
-                )}
-                <a
-                  href={d.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-block text-xs font-medium text-[#c25a00] underline"
-                >
-                  {d.sourceUrl}
-                </a>
+              {queueMode === "candidates" ?
+                <input
+                  type="checkbox"
+                  checked={selected.has(d.id)}
+                  onChange={() => {
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(d.id)) next.delete(d.id);
+                      else next.add(d.id);
+                      return next;
+                    });
+                  }}
+                  className="mt-1 shrink-0"
+                />
+              : null}
+              <SourceOfferCoverThumb offer={d} size="admin" />
+              <SourceOfferModerationCardBody
+                offer={d}
+                meta={
+                  <>
+                    {queueMode === "duplicate" || d.duplicateHint ?
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-900">
+                        {d.duplicateHint ? "Дубликат" : STATUS_LABEL[d.status]}
+                      </span>
+                    : (
+                      <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-xs">
+                        {STATUS_LABEL[d.status] ?? d.status}
+                      </span>
+                    )}
+                    {d.categorySlug ?
+                      <span className="rounded-full bg-black/[0.04] px-2 py-0.5 text-xs text-black/50">
+                        {categoryTitle(d.categorySlug)}
+                      </span>
+                    : null}
+                  </>
+                }
+              >
                 {d.duplicateHint ?
                   <p className="mt-1 text-xs text-blue-800">
                     {sourceOfferRejectLabel(d.duplicateHint) ?? d.duplicateHint}
@@ -280,7 +300,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
                     : null}
                   </p>
                 : null}
-              </div>
+              </SourceOfferModerationCardBody>
             </div>
           </li>
         ))}

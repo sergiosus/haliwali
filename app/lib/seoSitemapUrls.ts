@@ -1,6 +1,7 @@
 import { directoryColumns } from "./categoryDirectory";
 import { cities } from "./citiesData";
 import { catalogCategoryUrl, catalogCompaniesSectionUrl, catalogCompanyPath } from "./catalogSeo";
+import { sourceOfferPublicPath } from "./catalogSourceOfferSeo";
 import { listingPath } from "./seo";
 import {
   companyPublicPath,
@@ -107,6 +108,18 @@ export function buildListingSitemapUrls(listings: Listing[]): string[] {
   return urls;
 }
 
+export function buildSourceOfferSitemapUrls(offerIds: number[]): string[] {
+  const base = siteUrl();
+  const urls: string[] = [];
+  const seen = new Set<number>();
+  for (const id of offerIds) {
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    urls.push(`${base}${sourceOfferPublicPath(id)}`);
+  }
+  return urls;
+}
+
 export function buildSitemapIndexEntries(): { loc: string }[] {
   const base = siteUrl();
   return [
@@ -116,6 +129,7 @@ export function buildSitemapIndexEntries(): { loc: string }[] {
     { loc: `${base}/sitemap-companies.xml` },
     { loc: `${base}/sitemap-listings.xml` },
     { loc: `${base}/sitemap-catalog.xml` },
+    { loc: `${base}/sitemap-source-offers.xml` },
   ];
 }
 

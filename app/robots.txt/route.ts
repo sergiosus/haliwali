@@ -6,26 +6,11 @@ function buildRobotsTxt(): string {
   const base = siteUrl();
   return `User-agent: *
 Allow: /
-Allow: /uslugi/
-Allow: /zadachi/
-Allow: /tovary/
-Allow: /company/
-Allow: /catalogs
-Allow: /catalogs/
-Allow: /map
+
 Disallow: /admin
 Disallow: /api
-Disallow: /messages
 Disallow: /profile
-Disallow: /account
-Disallow: /chat
-Disallow: /login
-Disallow: /post
-Disallow: /edit
-Disallow: /reset-password
-Disallow: /users
 
-Host: ${new URL(base).host}
 Sitemap: ${base}/sitemap.xml
 `;
 }

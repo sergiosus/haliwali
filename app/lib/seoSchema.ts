@@ -1,6 +1,12 @@
+import { displaySourceOfferPrice } from "./catalogOfferPrice";
+import { resolveCoverImageUrl } from "./catalogSourceOfferCoverImage";
+import { sourceOfferMetaDescription, sourceOfferPublicPath } from "./catalogSourceOfferSeo";
+import { resolveSourceOfferDisplayCity } from "./catalogSourceOfferDisplay";
+import type { CatalogSourceOffer } from "./catalogSourceOfferTypes";
 import type { CatalogCompanyListItem, CatalogCompanyProfile } from "./catalogTypes";
 import type { DirectoryItem } from "./categoryDirectory";
 import type { Listing } from "./listingModel";
+import { parseOfferPriceRub } from "./catalogSourceOfferQuery";
 import { absoluteUrl } from "./siteUrl";
 import type { SeoSegment } from "./seoRoutes";
 import { companyPublicPath, seoCategoryPath, seoCityCategoryPath } from "./seoRoutes";
@@ -77,6 +83,68 @@ export function organizationJsonLd(siteName = "Haliwali"): JsonLd {
     name: siteName,
     url: absoluteUrl("/"),
   };
+}
+
+export function websiteJsonLd(siteName = "Haliwali"): JsonLd {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: siteName,
+    url: absoluteUrl("/"),
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate: `${absoluteUrl("/search")}?q={search_term_string}`,
+      },
+      "query-input": "required name=search_term_string",
+    },
+  };
+}
+
+export function sourceOfferJsonLd(offer: CatalogSourceOffer): JsonLd {
+  const path = sourceOfferPublicPath(offer.id ?? 0);
+  const url = absoluteUrl(path);
+  const city = resolveSourceOfferDisplayCity(offer);
+  const image = resolveCoverImageUrl({
+    coverImageUrl: offer.coverImageUrl,
+    imageUrl: offer.imageUrl,
+    rawPayload: offer.rawPayload,
+  });
+  const priceLabel = displaySourceOfferPrice(offer);
+  const priceAmount = offer.priceAmount ?? parseOfferPriceRub(offer.price);
+
+  const json: JsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Offer",
+    name: (offer.title ?? "").trim(),
+    description: sourceOfferMetaDescription(offer),
+    url,
+    ...(image ? { image: [image] } : {}),
+    ...(city ? { areaServed: city, availableAtOrFrom: { "@type": "Place", name: city } } : {}),
+    ...(priceAmount ?
+      {
+        price: priceAmount,
+        priceCurrency: "RUB",
+      }
+    : priceLabel ?
+      { priceSpecification: { "@type": "PriceSpecification", price: priceLabel } }
+    : {}),
+  };
+  return json;
+}
+
+export function sourceOfferBreadcrumbs(offer: Pick<CatalogSourceOffer, "id" | "title">): {
+  name: string;
+  path: string;
+}[] {
+  const id = offer.id ?? 0;
+  const title = (offer.title ?? "").trim() || "Предложение";
+  return [
+    { name: "Haliwali", path: "/" },
+    { name: "Предложения", path: "/catalogs/predlozheniya" },
+    { name: title, path: sourceOfferPublicPath(id) },
+  ];
 }
 
 export function seoCategoryBreadcrumbs(

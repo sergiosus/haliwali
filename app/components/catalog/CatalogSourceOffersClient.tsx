@@ -13,6 +13,7 @@ import {
   parseSourceOfferPageSize,
   type CatalogSourceOfferPageSize,
 } from "../../lib/catalogSourceOfferQuery";
+import { sourceOffersListHasFilters } from "../../lib/seoIndexability";
 import { CatalogSourceOfferCard } from "./CatalogSourceOfferCard";
 
 type Filters = {
@@ -76,16 +77,17 @@ function buildParams(
 }
 
 function hasActiveFilters(filters: Filters, q: string): boolean {
-  return (
-    q.trim().length >= 1 ||
-    Boolean(filters.city.trim()) ||
-    Boolean(filters.offerType) ||
-    Boolean(filters.brand.trim()) ||
-    Boolean(filters.oemArticle.trim()) ||
-    Boolean(filters.sourceName) ||
-    Boolean(filters.priceMin.trim()) ||
-    Boolean(filters.priceMax.trim())
-  );
+  const p = new URLSearchParams();
+  const trimmed = q.trim();
+  if (trimmed.length >= 1) p.set("q", trimmed);
+  if (filters.city.trim()) p.set("city", filters.city.trim());
+  if (filters.offerType) p.set("offerType", filters.offerType);
+  if (filters.brand.trim()) p.set("brand", filters.brand.trim());
+  if (filters.oemArticle.trim()) p.set("oem", filters.oemArticle.trim());
+  if (filters.sourceName) p.set("source", filters.sourceName);
+  if (filters.priceMin.trim()) p.set("priceFrom", filters.priceMin.trim());
+  if (filters.priceMax.trim()) p.set("priceTo", filters.priceMax.trim());
+  return sourceOffersListHasFilters(p);
 }
 
 function SourceOfferFiltersForm({

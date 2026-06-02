@@ -580,6 +580,30 @@ export async function pgSetSourceOfferDraftStatuses(
   return rowCount ?? 0;
 }
 
+const PUBLISHABLE_DRAFT_STATUSES = new Set<CatalogSourceOfferDraftStatus>([
+  "draft",
+  "saved",
+  "approved",
+]);
+
+function isPublishableDraftRow(status: string): boolean {
+  return PUBLISHABLE_DRAFT_STATUSES.has(normalizeSourceOfferDraftStatus(status));
+}
+
+export async function pgDeleteSourceOfferDrafts(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const pool = getPool();
+  const { rowCount } = await pool.query(
+    `
+    DELETE FROM catalog_source_offer_import_drafts
+    WHERE id = ANY($1::int[])
+      AND status <> 'published'
+    `,
+    [ids],
+  );
+  return rowCount ?? 0;
+}
+
 export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<CatalogSourceOfferDraft[]> {
   const pool = getPool();
   const out: CatalogSourceOfferDraft[] = [];
@@ -590,7 +614,7 @@ export async function pgPublishSourceOfferDrafts(ids: number[]): Promise<Catalog
       [id],
     );
     const d = draftRows[0];
-    if (!d || normalizeSourceOfferDraftStatus(d.status) !== "approved") continue;
+    if (!d || !isPublishableDraftRow(d.status)) continue;
 
     const publishCheck = validateSourceOfferInput(draftRowToInput(d));
     if (!publishCheck.ok) {
@@ -809,6 +833,30 @@ export async function pgListPublishedSourceOffers(
   const rows = await queryPublishedOfferRows(pool, where, params, limit, offset);
   const offers = mapPublicPublishedRows(rows);
   return { offers, total: dbTotal };
+}
+
+export async function pgGetPublishedSourceOfferById(id: number): Promise<CatalogSourceOffer | null> {
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const pool = getPool();
+  const params: unknown[] = [id];
+  const where = `WHERE id = $1`;
+  const rows = await queryPublishedOfferRows(pool, where, params, 1, 0);
+  const offers = mapPublicPublishedRows(rows);
+  return offers[0] ?? null;
+}
+
+export async function pgListPublishedSourceOfferIdsForSitemap(batchSize = 1000): Promise<number[]> {
+  const ids: number[] = [];
+  let offset = 0;
+  for (;;) {
+    const { offers, total } = await pgListPublishedSourceOffers({ limit: batchSize, offset });
+    for (const o of offers) {
+      if (o.id != null) ids.push(o.id);
+    }
+    offset += batchSize;
+    if (offset >= total || offers.length === 0) break;
+  }
+  return ids;
 }
 
 export type SourceOfferSyncDebug = {

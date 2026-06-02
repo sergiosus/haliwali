@@ -100,7 +100,7 @@ export function displaySourceOfferPrice(offer: {
   price?: string | null;
 }): string | null {
   const text = offer.priceText?.trim();
-  if (text && /(?:₽|руб)/i.test(text)) return text;
+  if (text) return text;
   if (offer.priceAmount != null && offer.priceAmount > 0) {
     return formatRubText(offer.priceAmount);
   }

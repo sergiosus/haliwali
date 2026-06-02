@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  deleteSourceOfferDrafts,
   listSourceOfferDrafts,
   publishSourceOfferDrafts,
   setSourceOfferDraftStatuses,
@@ -10,7 +11,7 @@ import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type ConfirmAction = "save" | "approve" | "reject" | "publish";
+type ConfirmAction = "save" | "approve" | "reject" | "publish" | "delete";
 
 function parseIds(v: unknown): number[] {
   if (!Array.isArray(v)) return [];
@@ -25,11 +26,16 @@ export async function POST(req: Request) {
   const action = String(body.action ?? "") as ConfirmAction;
   const ids = parseIds(body.ids);
 
-  if (!["save", "approve", "reject", "publish"].includes(action)) {
+  if (!["save", "approve", "reject", "publish", "delete"].includes(action)) {
     return NextResponse.json({ ok: false, error: "INVALID_ACTION" }, { status: 400 });
   }
   if (ids.length === 0) {
     return NextResponse.json({ ok: false, error: "IDS_REQUIRED" }, { status: 400 });
+  }
+
+  if (action === "delete") {
+    const deleted = await deleteSourceOfferDrafts(ids);
+    return NextResponse.json({ ok: true, deleted, message: `Удалено: ${deleted}` });
   }
 
   if (action === "publish") {
@@ -47,7 +53,7 @@ export async function POST(req: Request) {
     });
   }
 
-  const statusMap: Record<Exclude<ConfirmAction, "publish">, CatalogSourceOfferDraftStatus> = {
+  const statusMap: Record<Exclude<ConfirmAction, "publish" | "delete">, CatalogSourceOfferDraftStatus> = {
     save: "saved",
     approve: "approved",
     reject: "rejected",

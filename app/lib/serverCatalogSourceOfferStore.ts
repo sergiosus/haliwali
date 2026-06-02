@@ -52,11 +52,26 @@ export async function publishSourceOfferDrafts(ids: number[]): Promise<CatalogSo
   return pg.pgPublishSourceOfferDrafts(ids);
 }
 
+export async function deleteSourceOfferDrafts(ids: number[]): Promise<number> {
+  assertPostgres();
+  return pg.pgDeleteSourceOfferDrafts(ids);
+}
+
 export async function listPublishedSourceOffers(
   opts?: CatalogSourceOfferListQuery,
 ): Promise<CatalogSourceOfferListResult> {
   assertPostgres();
   return pg.pgListPublishedSourceOffers(opts);
+}
+
+export async function getPublishedSourceOfferById(id: number): Promise<CatalogSourceOffer | null> {
+  assertPostgres();
+  return pg.pgGetPublishedSourceOfferById(id);
+}
+
+export async function listPublishedSourceOfferIdsForSitemap(): Promise<number[]> {
+  assertPostgres();
+  return pg.pgListPublishedSourceOfferIdsForSitemap();
 }
 
 export async function loadSourceOfferDedupSeed() {

@@ -32,7 +32,9 @@ export async function generateMetadata(props: {
   }
 
   const pub = listingForPublicViewer(listing);
-  const title = `${(pub.title ?? "").trim()} | Haliwali`;
+  const city = (pub.city ?? "").trim();
+  const titleBase = (pub.title ?? "").trim();
+  const title = city ? `${titleBase} — ${city} | Haliwali` : `${titleBase} | Haliwali`;
   const description = safeListingDescription(pub.description ?? "");
   const canonical = `${base}${listingPath(pub.id, pub.title)}`;
   const img = safeOgImageUrl(base, Array.isArray(pub.photos) ? pub.photos[0] : undefined);

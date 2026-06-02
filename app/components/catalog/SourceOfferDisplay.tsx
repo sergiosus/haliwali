@@ -2,8 +2,10 @@
 
 import type { ReactNode } from "react";
 import { catalogSourceNameLabel } from "../../lib/catalogSourceName";
-import { displaySourceOfferPrice } from "../../lib/catalogOfferPrice";
+import { coverImageDiagnosticsLabel } from "../../lib/catalogSourceOfferCoverImage";
+import { priceDiagnosticsLabel } from "../../lib/catalogOfferPriceDiagnostics";
 import { resolveCoverImageUrl } from "../../lib/catalogSourceOfferCoverImage";
+import { SourceOfferPriceDisplay } from "./SourceOfferPriceDisplay";
 import type { CatalogSourceOffer, CatalogSourceOfferDraft } from "../../lib/catalogSourceOfferTypes";
 
 type OfferLike = Pick<
@@ -24,18 +26,23 @@ type OfferLike = Pick<
   | "sellerName"
 > & { rawPayload?: Record<string, unknown>; imageUrl?: string | null };
 
-export function SourceOfferPriceDisplay({
-  offer,
-  className = "",
-}: {
-  offer: Pick<OfferLike, "price" | "priceAmount" | "priceText">;
-  className?: string;
-}) {
-  const label = displaySourceOfferPrice(offer);
-  if (label) {
-    return <span className={["font-semibold text-black", className].filter(Boolean).join(" ")}>{label}</span>;
-  }
-  return <span className={["text-black/40", className].filter(Boolean).join(" ")}>Цена не указана</span>;
+export { SourceOfferPriceDisplay } from "./SourceOfferPriceDisplay";
+
+export function SourceOfferTruthDiagnostics({ offer }: { offer: OfferLike }) {
+  const imageSrc =
+    typeof offer.rawPayload?.imageSource === "string" ? offer.rawPayload.imageSource : null;
+  const cover = resolveCoverImageUrl({
+    coverImageUrl: offer.coverImageUrl,
+    imageUrl: offer.imageUrl,
+    rawPayload: offer.rawPayload,
+  });
+  return (
+    <p className="mt-1 text-[10px] leading-snug text-black/45">
+      {priceDiagnosticsLabel(offer)}
+      {" · "}
+      {coverImageDiagnosticsLabel(cover, imageSrc)}
+    </p>
+  );
 }
 
 export function SourceOfferCoverThumb({
@@ -89,10 +96,12 @@ export function SourceOfferModerationCardBody({
   offer,
   meta,
   children,
+  showDiagnostics = true,
 }: {
   offer: OfferLike;
   meta?: ReactNode;
   children?: ReactNode;
+  showDiagnostics?: boolean;
 }) {
   return (
     <div className="min-w-0 flex-1">
@@ -109,6 +118,9 @@ export function SourceOfferModerationCardBody({
           <span className="text-black/55">{offer.city}</span>
         : null}
       </p>
+      {showDiagnostics ?
+        <SourceOfferTruthDiagnostics offer={offer} />
+      : null}
       {(offer.companyName || offer.sellerName) ?
         <p className="mt-1 text-xs text-black/50">
           {offer.companyName ? `Компания: ${offer.companyName}` : ""}

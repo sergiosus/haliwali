@@ -12,19 +12,17 @@ import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 
 const STATUS_LABEL: Record<CatalogSourceOfferDraftStatus, string> = {
   draft: "Новые",
-  saved: "Сохранённые",
-  approved: "Одобренные",
+  saved: "Новые",
+  approved: "Новые",
   rejected: "Отклонённые",
   published: "Опубликованные",
   duplicate: "Дубликаты",
 };
 
-const CANDIDATE_TABS: CatalogSourceOfferDraftStatus[] = ["draft", "saved", "approved"];
-
 const QUEUE_HEADING: Record<"candidates" | "rejected" | "duplicate", { title: string; hint: string }> = {
   candidates: {
     title: "Кандидаты предложений",
-    hint: "Выберите кандидатов и публикуйте напрямую — отдельное одобрение не требуется.",
+    hint: "Поиск → импорт → публикация напрямую. Без сохранения и одобрения.",
   },
   rejected: {
     title: "Отклонённые",
@@ -53,11 +51,11 @@ export function AdminCatalogSourceOfferDraftsPanel({
   refreshSignal?: number;
   queueMode?: "candidates" | "rejected" | "duplicate";
 }) {
-  const initialTab =
+  const listStatus =
     queueMode === "rejected" ? "rejected"
     : queueMode === "duplicate" ? "duplicate"
-    : "draft";
-  const [tab, setTab] = useState<CatalogSourceOfferDraftStatus>(initialTab);
+    : "candidates";
+
   const [drafts, setDrafts] = useState<CatalogSourceOfferDraft[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -76,7 +74,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
     }
   }, []);
 
-  const load = useCallback(async (status: CatalogSourceOfferDraftStatus) => {
+  const load = useCallback(async (status: string) => {
     const r = await fetch(`/api/admin/catalogs/source-offers/drafts?status=${status}`, {
       cache: "no-store",
       credentials: "include",
@@ -91,14 +89,9 @@ export function AdminCatalogSourceOfferDraftsPanel({
   }, [loadStatus]);
 
   useEffect(() => {
-    if (queueMode === "rejected") setTab("rejected");
-    else if (queueMode === "duplicate") setTab("duplicate");
-  }, [queueMode]);
-
-  useEffect(() => {
     if (!tablesReady) return;
-    void load(tab);
-  }, [tab, load, tablesReady, refreshSignal, queueMode]);
+    void load(listStatus);
+  }, [listStatus, load, tablesReady, refreshSignal]);
 
   const filtered = useMemo(() => drafts, [drafts]);
 
@@ -110,8 +103,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
     setSelected(new Set());
   }, []);
 
-  async function runAction(action: DraftAction) {
-    const ids = [...selected];
+  async function runAction(action: DraftAction, ids: number[]) {
     if (ids.length === 0) return;
     if (action === "delete") {
       const ok = window.confirm(`Удалить ${ids.length} кандидат(ов)?`);
@@ -133,7 +125,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
         deleted?: number;
       };
       if (!data.ok) {
-        setMessage(data.error ?? "Ошибка");
+        setMessage(data.message ?? data.error ?? "Ошибка");
         return;
       }
       if (action === "delete") {
@@ -144,7 +136,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
             (action === "publish" ? "Опубликовано в каталог предложений" : "Готово"),
         );
       }
-      await load(tab);
+      await load(listStatus);
       onChanged?.();
     } catch {
       setMessage("Ошибка сети");
@@ -171,29 +163,9 @@ export function AdminCatalogSourceOfferDraftsPanel({
       : (
         <div>
           <h2 className="text-lg font-semibold">Кандидаты предложений</h2>
-          <p className="mt-1 text-sm text-black/55">
-            Публикация напрямую из новых, сохранённых и одобренных записей.
-          </p>
+          <p className="mt-1 text-sm text-black/55">{QUEUE_HEADING.candidates.hint}</p>
         </div>
       )}
-
-      {queueMode === "candidates" ?
-        <div className="flex flex-wrap gap-2">
-          {CANDIDATE_TABS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={[
-                "rounded-full border px-3 py-1.5 text-xs font-medium",
-                tab === id ? "border-black/20 bg-black/[0.06] text-black" : "border-black/10 text-black/55",
-              ].join(" ")}
-            >
-              {STATUS_LABEL[id]}
-            </button>
-          ))}
-        </div>
-      : null}
 
       {queueMode === "candidates" ?
         <div className="flex flex-wrap gap-2">
@@ -216,7 +188,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
           <button
             type="button"
             disabled={busy || selected.size === 0}
-            onClick={() => void runAction("publish")}
+            onClick={() => void runAction("publish", [...selected])}
             className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
           >
             Опубликовать выбранные
@@ -224,7 +196,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
           <button
             type="button"
             disabled={busy || selected.size === 0}
-            onClick={() => void runAction("reject")}
+            onClick={() => void runAction("reject", [...selected])}
             className="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-900 disabled:opacity-40"
           >
             Отклонить выбранные
@@ -232,7 +204,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
           <button
             type="button"
             disabled={busy || selected.size === 0}
-            onClick={() => void runAction("delete")}
+            onClick={() => void runAction("delete", [...selected])}
             className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium text-black/70 disabled:opacity-40"
           >
             Удалить выбранные
@@ -263,7 +235,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
                   className="mt-1 shrink-0"
                 />
               : null}
-              <SourceOfferCoverThumb offer={d} size="admin" />
+              <SourceOfferCoverThumb offer={d} size="admin" alt={d.title} />
               <SourceOfferModerationCardBody
                 offer={d}
                 meta={
@@ -285,12 +257,24 @@ export function AdminCatalogSourceOfferDraftsPanel({
                   </>
                 }
               >
+                {queueMode === "candidates" ?
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void runAction("publish", [d.id])}
+                      className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white disabled:opacity-40"
+                    >
+                      Опубликовать
+                    </button>
+                  </div>
+                : null}
                 {d.duplicateHint ?
                   <p className="mt-1 text-xs text-blue-800">
                     {sourceOfferRejectLabel(d.duplicateHint) ?? d.duplicateHint}
                     {d.duplicateOfOfferId ?
                       <a
-                        href={`/catalogs/predlozheniya#offer-${d.duplicateOfOfferId}`}
+                        href={`/catalogs/predlozheniya/${d.duplicateOfOfferId}`}
                         className="ml-1 underline"
                         target="_blank"
                         rel="noopener noreferrer"

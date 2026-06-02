@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
-import { displaySourceOfferPrice } from "../../../lib/catalogOfferPrice";
+import { SourceOfferPriceDisplay } from "../../../components/catalog/SourceOfferPriceDisplay";
 import { resolveCoverImageUrl } from "../../../lib/catalogSourceOfferCoverImage";
 import {
   sourceOfferDisplayCityLabel,
@@ -140,7 +140,9 @@ export default async function CatalogSourceOfferDetailPage(props: PageProps) {
 
           <div className="p-4 sm:p-6">
             <h1 className="text-xl font-extrabold tracking-tight text-black sm:text-2xl">{offer.title}</h1>
-            <p className="mt-3 text-2xl font-bold tracking-tight text-black">{displaySourceOfferPrice(offer)}</p>
+            <p className="mt-3 text-2xl font-bold tracking-tight">
+              <SourceOfferPriceDisplay offer={offer} className="text-2xl" />
+            </p>
             {city ?
               <p className="mt-2 text-sm font-medium text-black/60">{city}</p>
             : null}

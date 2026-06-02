@@ -20,16 +20,13 @@ import {
   decodeJsonString,
   extractCityFromContext,
   extractDromCardTitle,
-  extractPriceFromBlob,
   extractSellerFromContext,
   isRealOfferListingUrl,
   sanitizeOfferText,
   titleFromListingUrl,
   validateOfferLinkFromSearchPage,
 } from "./catalogOfferSearchText";
-import { parseListingPriceFromContext } from "./catalogOfferPrice";
 import { catalogSourceDiagnosticMessage } from "./catalogSourceRegistry";
-import { extractAvitoCoverFromCardContext } from "./catalogSourceOfferCoverImage";
 import type { AvitoCoverImageSource } from "./catalogAvitoCoverImage";
 import { assertPublicResolvableHost } from "./catalogUrlSafety";
 import { slugifyCatalogText } from "./catalogSlug";
@@ -56,10 +53,13 @@ export type OfferSourceZeroReason =
   | "source_unreliable_for_query"
   | null;
 
-/** Non-automotive «all» search (Avito + Drom). Automotive uses routing in catalogOfferAutoRouting. */
-export const STABLE_OFFER_SEARCH_SOURCES: OfferListingSourceId[] = ["avito", "drom"];
+/** Default marketplace search — Avito only unless Drom enabled manually. */
+export const STABLE_OFFER_SEARCH_SOURCES: OfferListingSourceId[] = ["avito"];
 
-export const AUTOMOTIVE_OFFER_SEARCH_SOURCES: OfferListingSourceId[] = ["avito", "auto_ru"];
+export const AUTOMOTIVE_OFFER_SEARCH_SOURCES: OfferListingSourceId[] = ["avito"];
+
+/** Not shown in search diagnostics unless explicitly selected. */
+export const OFFER_SEARCH_LATER_SOURCES: OfferListingSourceId[] = ["auto_ru", "youla", "vk"];
 
 export type OfferSourceSearchDiagnostic = {
   sourceName: OfferListingSourceId;
@@ -94,6 +94,7 @@ export type OfferSourceSearchHit = {
   price: string | null;
   priceAmount?: number | null;
   priceText?: string | null;
+  priceSource?: import("./catalogOfferPriceDiagnostics").OfferPriceSource;
   city: string;
   sellerHint: string;
   sourceName: OfferListingSourceId;
@@ -248,8 +249,6 @@ function pushAvitoHit(
       titleFromListingUrl(url) ||
       "",
   );
-  const priceFields = parseListingPriceFromContext(ctx);
-  const cover = extractAvitoCoverFromCardContext(ctx, baseUrl);
   const snippet = sanitizeOfferText(
     decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") ||
       decodeJsonString(ctx.match(/data-marker="item-description"[^>]*>([^<]{8,280})/i)?.[1] ?? "") ||
@@ -259,18 +258,18 @@ function pushAvitoHit(
     url,
     title: title.slice(0, 200),
     snippet: snippet.slice(0, 280),
-    price: priceFields.price,
-    priceAmount: priceFields.priceAmount,
-    priceText: priceFields.priceText,
-    coverImageUrl: cover.coverImageUrl,
-    imageSource: cover.imageSource,
+    // Stage 1: lightweight search result. Do not promise price/image here.
+    price: null,
+    priceAmount: null,
+    priceText: null,
+    priceSource: "none",
+    coverImageUrl: null,
+    imageSource: "none",
     city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
     sellerHint: extractSellerFromContext(ctx),
     sourceName: "avito",
     fromSearchPage: true,
-    cardComplete: Boolean(
-      title.length >= 4 && priceFields.priceAmount && (cover.coverImageUrl || snippet.length >= 8),
-    ),
+    cardComplete: false,
   };
   if (validateOfferLinkFromSearchPage(hit, "avito")) return null;
   hits.push(hit);
@@ -387,7 +386,10 @@ function pushDromHit(
     url,
     title: title.slice(0, 200),
     snippet: snippet.slice(0, 280),
-    price: extractPriceFromBlob(ctx),
+    price: null,
+    priceAmount: null,
+    priceText: null,
+    priceSource: "none",
     city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
     sellerHint: extractSellerFromContext(ctx),
     sourceName: "drom",
@@ -502,7 +504,10 @@ function parseYoulaSearchHtml(html: string, baseUrl: string, cityDefault: string
       url,
       title: title.slice(0, 200),
       snippet: snippet.slice(0, 280),
-      price: extractPriceFromBlob(ctx),
+      price: null,
+      priceAmount: null,
+      priceText: null,
+      priceSource: "none",
       city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
       sellerHint: extractSellerFromContext(ctx),
       sourceName: "youla",
@@ -542,7 +547,10 @@ function parseVkSearchHtml(html: string, baseUrl: string, cityDefault: string): 
         url,
         title: title.slice(0, 200),
         snippet: snippet.slice(0, 280),
-        price: extractPriceFromBlob(ctx),
+        price: null,
+        priceAmount: null,
+        priceText: null,
+        priceSource: "none",
         city: sanitizeOfferText(extractCityFromContext(ctx) || cityDefault),
         sellerHint: extractSellerFromContext(ctx),
         sourceName: "vk",
@@ -719,10 +727,9 @@ export async function searchOfferListingSources(opts: {
 
   logCatalogOfferSearch("search_start", { query: query.slice(0, 60), sources: opts.sources });
 
-  const disabledSources = CATALOG_MARKETPLACE_SOURCES.filter(
-    (s) => !opts.sources.includes(s),
-  );
+  const disabledSources = CATALOG_MARKETPLACE_SOURCES.filter((s) => !opts.sources.includes(s));
   for (const source of disabledSources) {
+    if (OFFER_SEARCH_LATER_SOURCES.includes(source)) continue;
     const msg = catalogSourceDiagnosticMessage(source, { linksExtracted: 0, zeroReason: "disabled" });
     if (!msg) continue;
     diagnostics.push(

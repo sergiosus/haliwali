@@ -246,7 +246,7 @@ export function resolveOfferSearchSources(opts: {
     case "auto":
       return {
         offerType,
-        primary: ["avito", "auto_ru"],
+        primary: ["avito"],
         fallback: ["drom"],
       };
     case "parts":

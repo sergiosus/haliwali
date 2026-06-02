@@ -11,7 +11,8 @@ import {
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
 import { catalogSourceDiagnosticMessage } from "../../../lib/catalogSourceRegistry";
 import { coverImageDiagnosticsLabel } from "../../../lib/catalogSourceOfferCoverImage";
-import { displaySourceOfferPrice } from "../../../lib/catalogOfferPrice";
+import { priceDiagnosticsLabel } from "../../../lib/catalogOfferPriceDiagnostics";
+import { SourceOfferPriceDisplay } from "../../../components/catalog/SourceOfferPriceDisplay";
 import type {
   OfferSearchResultItem,
   OfferSearchSortMode,
@@ -890,9 +891,6 @@ export function AdminCatalogOfferSearchImportSection({
               <span className={`rounded-full px-2 py-0.5 font-semibold ${sourceBadgeClass("avito")}`}>
                 Avito
               </span>
-              <span className={`rounded-full px-2 py-0.5 font-semibold ${sourceBadgeClass("auto_ru")}`}>
-                Auto.ru
-              </span>
               <span className={`rounded-full px-2 py-0.5 font-semibold ${sourceBadgeClass("drom")}`}>
                 Drom (эксп.)
               </span>
@@ -980,10 +978,15 @@ export function AdminCatalogOfferSearchImportSection({
                     {o.parseWarning ? ` · ${o.parseWarning}` : ""}
                   </p>
                   <p className="mt-0.5 text-xs text-black/55">{o.message}</p>
-                  {o.imageFound != null ?
+                  {o.priceFound != null || o.imageFound != null ?
                     <p className="mt-1 text-[10px] text-black/45">
-                      image: {o.imageFound ? "found" : "not found"} · imageSource:{" "}
-                      {o.imageSource ?? "none"}
+                      {o.priceFound != null ?
+                        `price: ${o.priceFound ? "found" : "not found"} · priceSource: ${o.priceSource ?? "none"}`
+                      : null}
+                      {o.priceFound != null && o.imageFound != null ? " · " : null}
+                      {o.imageFound != null ?
+                        `image: ${o.imageFound ? "found" : "not found"} · imageSource: ${o.imageSource ?? "none"}`
+                      : null}
                     </p>
                   : null}
                 </li>
@@ -1059,18 +1062,19 @@ export function AdminCatalogOfferSearchImportSection({
                           </span>
                         : null}
                       </div>
-                      <p className="mt-1 text-black/55">
-                        {[
-                          displaySourceOfferPrice(item),
-                          item.year ? `${item.year} г.` : null,
-                          item.mileageKm ?
-                            `${item.mileageKm.toLocaleString("ru-RU")} км`
-                          : null,
-                          item.city || null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || "—"}
+                      <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-black/55">
+                        <SourceOfferPriceDisplay offer={item} />
+                        {item.year ?
+                          <span>{item.year} г.</span>
+                        : null}
+                        {item.mileageKm != null ?
+                          <span>{item.mileageKm.toLocaleString("ru-RU")} км</span>
+                        : null}
+                        {item.city ?
+                          <span>{item.city}</span>
+                        : null}
                       </p>
+                      <p className="mt-0.5 text-[10px] text-black/40">{priceDiagnosticsLabel(item)}</p>
                       {item.shortSnippet ?
                         <p className="mt-1 line-clamp-2 text-black/45">{item.shortSnippet}</p>
                       : null}

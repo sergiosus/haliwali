@@ -497,6 +497,24 @@ async function insertSourceOfferDraftRow(
   }
 }
 
+export async function pgListCandidateSourceOfferDrafts(): Promise<CatalogSourceOfferDraft[]> {
+  const pool = getPool();
+  const statusValues: CatalogSourceOfferDraftStatus[] = ["draft", "saved", "approved"];
+  const uniqueStatuses = [
+    ...new Set(statusValues.flatMap((s) => sourceOfferDraftStatusDbValues(s))),
+  ];
+  const sql = `SELECT ${DRAFT_COLS} FROM catalog_source_offer_import_drafts WHERE status = ANY($1::text[]) ORDER BY created_at DESC LIMIT 500`;
+  try {
+    const { rows } = await pool.query<DraftRow>(sql, [uniqueStatuses]);
+    return rows.map(rowToDraft);
+  } catch (err) {
+    if (!isMissingColumnDbError(err)) throw err;
+    const legacySql = `SELECT ${SOURCE_OFFER_DRAFT_SELECT_COLS_NO_PRICE_EXT} FROM catalog_source_offer_import_drafts WHERE status = ANY($1::text[]) ORDER BY created_at DESC LIMIT 500`;
+    const { rows } = await pool.query<DraftRow>(legacySql, [uniqueStatuses]);
+    return rows.map(rowToDraft);
+  }
+}
+
 export async function pgListSourceOfferDrafts(
   status?: CatalogSourceOfferDraftStatus,
 ): Promise<CatalogSourceOfferDraft[]> {

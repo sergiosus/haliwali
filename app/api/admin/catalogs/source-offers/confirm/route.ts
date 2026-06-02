@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   deleteSourceOfferDrafts,
-  listSourceOfferDrafts,
   publishSourceOfferDrafts,
   setSourceOfferDraftStatuses,
 } from "../../../../../lib/serverCatalogSourceOfferStore";
@@ -11,7 +10,7 @@ import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type ConfirmAction = "save" | "approve" | "reject" | "publish" | "delete";
+type ConfirmAction = "reject" | "publish" | "delete";
 
 function parseIds(v: unknown): number[] {
   if (!Array.isArray(v)) return [];
@@ -23,10 +22,17 @@ export async function POST(req: Request) {
   if (deny) return deny;
 
   const body = (await req.json()) as Record<string, unknown>;
-  const action = String(body.action ?? "") as ConfirmAction;
+  const action = String(body.action ?? "") as ConfirmAction | "save" | "approve";
   const ids = parseIds(body.ids);
 
-  if (!["save", "approve", "reject", "publish", "delete"].includes(action)) {
+  if (action === "save" || action === "approve") {
+    return NextResponse.json(
+      { ok: false, error: "DEPRECATED_ACTION", message: "Используйте «Опубликовать выбранные»" },
+      { status: 400 },
+    );
+  }
+
+  if (!["reject", "publish", "delete"].includes(action)) {
     return NextResponse.json({ ok: false, error: "INVALID_ACTION" }, { status: 400 });
   }
   if (ids.length === 0) {
@@ -53,12 +59,6 @@ export async function POST(req: Request) {
     });
   }
 
-  const statusMap: Record<Exclude<ConfirmAction, "publish" | "delete">, CatalogSourceOfferDraftStatus> = {
-    save: "saved",
-    approve: "approved",
-    reject: "rejected",
-  };
-  const updated = await setSourceOfferDraftStatuses(ids, statusMap[action]);
-  const drafts = await listSourceOfferDrafts();
-  return NextResponse.json({ ok: true, updated, drafts: drafts.filter((d) => ids.includes(d.id)) });
+  const updated = await setSourceOfferDraftStatuses(ids, "rejected" as CatalogSourceOfferDraftStatus);
+  return NextResponse.json({ ok: true, updated });
 }

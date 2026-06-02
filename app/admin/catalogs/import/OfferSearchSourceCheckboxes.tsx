@@ -1,11 +1,10 @@
 "use client";
 
-import type { CatalogSourceName, OfferListingSourceId } from "../../../lib/catalogSourceOfferTypes";
+import { useState } from "react";
+import type { OfferListingSourceId } from "../../../lib/catalogSourceOfferTypes";
 import {
-  activeSearchMarketplaceIds,
   defaultAdminSearchSourceIds,
   getCatalogSourceRegistryEntry,
-  listCatalogSourceRegistry,
   type CatalogSourceRegistryEntry,
 } from "../../../lib/catalogSourceRegistry";
 
@@ -18,14 +17,11 @@ export function defaultOfferSearchSourceSelection(): OfferSearchSourceSelectionS
   return { sources: defaultAdminSearchSourceIds(), allActive: false };
 }
 
-function marketplaceEntries(): CatalogSourceRegistryEntry[] {
-  return listCatalogSourceRegistry().filter(
-    (e) =>
-      e.id !== "all_active" &&
-      e.id !== "all_sources_future" &&
-      e.id !== "company_site" &&
-      e.id !== "other",
-  );
+const ACTIVE_IDS = new Set<OfferListingSourceId>(["avito", "drom"]);
+const LATER_IDS = new Set<OfferListingSourceId>(["auto_ru", "youla", "vk"]);
+
+function marketplaceEntry(id: OfferListingSourceId): CatalogSourceRegistryEntry | undefined {
+  return getCatalogSourceRegistryEntry(id);
 }
 
 export function OfferSearchSourceCheckboxes({
@@ -37,36 +33,37 @@ export function OfferSearchSourceCheckboxes({
   onChange: (next: OfferSearchSourceSelectionState) => void;
   disabled?: boolean;
 }) {
-  const entries = marketplaceEntries();
-  const futureEntry = getCatalogSourceRegistryEntry("all_sources_future");
+  const [laterOpen, setLaterOpen] = useState(false);
 
   const toggle = (id: OfferListingSourceId, checked: boolean) => {
     if (disabled) return;
-    const entry = getCatalogSourceRegistryEntry(id);
+    const entry = marketplaceEntry(id);
     if (!entry || entry.status === "disabled" || entry.status === "future") return;
-    if (!entry.supportsSearch && entry.status !== "experimental") return;
+    if (!entry.supportsSearch) return;
 
     let next = new Set(value.sources);
     if (checked) next.add(id);
     else next.delete(id);
+    if (next.size === 0) next.add("avito");
     onChange({ sources: [...next], allActive: false });
   };
 
-  const selectAllActive = () => {
-    if (disabled) return;
-    onChange({ sources: activeSearchMarketplaceIds(), allActive: true });
-  };
+  const activeEntries = (["avito", "drom"] as const)
+    .map((id) => marketplaceEntry(id))
+    .filter((e): e is CatalogSourceRegistryEntry => Boolean(e));
+
+  const laterEntries = (["auto_ru", "youla", "vk"] as const)
+    .map((id) => marketplaceEntry(id))
+    .filter((e): e is CatalogSourceRegistryEntry => Boolean(e));
 
   return (
     <fieldset className="space-y-2" disabled={disabled}>
       <legend className="text-sm text-black/60">Источники поиска</legend>
       <div className="flex flex-col gap-2 rounded-xl border border-black/10 bg-white p-3">
-        {entries.map((entry) => {
+        {activeEntries.map((entry) => {
           const id = entry.id as OfferListingSourceId;
+          if (!ACTIVE_IDS.has(id)) return null;
           const isDisabled = entry.status === "disabled" || entry.status === "future";
-          const isExperimental = entry.status === "experimental";
-          const canToggle =
-            !isDisabled && (entry.supportsSearch || isExperimental);
           const checked = value.sources.includes(id);
 
           return (
@@ -82,16 +79,13 @@ export function OfferSearchSourceCheckboxes({
                 type="checkbox"
                 className="mt-0.5"
                 checked={checked}
-                disabled={!canToggle || disabled}
+                disabled={isDisabled || disabled}
                 onChange={(e) => toggle(id, e.target.checked)}
               />
               <span>
                 <span className="font-medium text-black">{entry.label}</span>
-                {isExperimental ?
+                {id === "drom" ?
                   <span className="ml-1 text-xs text-amber-800">(эксп.)</span>
-                : null}
-                {isDisabled && entry.disabledReason === "captcha" ?
-                  <span className="ml-1 text-xs text-black/45">— captcha</span>
                 : null}
                 {entry.note ?
                   <span className="mt-0.5 block text-xs text-black/45">{entry.note}</span>
@@ -101,29 +95,38 @@ export function OfferSearchSourceCheckboxes({
           );
         })}
 
-        <label className="flex cursor-pointer items-start gap-2 border-t border-black/10 pt-2 text-sm">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={value.allActive}
-            disabled={disabled}
-            onChange={() => selectAllActive()}
-          />
-          <span className="font-medium text-black">Все активные источники</span>
-        </label>
-
-        {futureEntry ?
-          <label
-            className="flex cursor-not-allowed items-start gap-2 text-sm opacity-50"
-            title={futureEntry.note}
+        <div className="border-t border-black/10 pt-2">
+          <button
+            type="button"
+            className="text-xs font-medium text-black/55 underline"
+            onClick={() => setLaterOpen((v) => !v)}
           >
-            <input type="checkbox" className="mt-0.5" disabled checked={false} />
-            <span>
-              <span className="font-medium text-black">{futureEntry.label}</span>
-              <span className="mt-0.5 block text-xs text-black/45">{futureEntry.note}</span>
-            </span>
-          </label>
-        : null}
+            {laterOpen ? "Скрыть" : "Площадки позже"}
+          </button>
+          {laterOpen ?
+            <div className="mt-2 flex flex-col gap-2">
+              {laterEntries.map((entry) => {
+                const id = entry.id as OfferListingSourceId;
+                if (!LATER_IDS.has(id)) return null;
+                return (
+                  <label
+                    key={entry.id}
+                    className="flex cursor-not-allowed items-start gap-2 text-sm opacity-55"
+                    title={entry.note}
+                  >
+                    <input type="checkbox" className="mt-0.5" disabled checked={false} />
+                    <span>
+                      <span className="font-medium text-black">{entry.label}</span>
+                      {entry.note ?
+                        <span className="mt-0.5 block text-xs text-black/45">{entry.note}</span>
+                      : null}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          : null}
+        </div>
       </div>
     </fieldset>
   );

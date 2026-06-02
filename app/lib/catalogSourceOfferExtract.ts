@@ -4,6 +4,7 @@ import { inferOfferType } from "./catalogSourceOfferType";
 import type { CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
 import { catalogSourceNameFromUrl } from "./catalogSourceName";
 import { metaContent, titleTag } from "./catalogExtractShared";
+import { parseListingPriceFromContext } from "./catalogOfferPrice";
 import { sanitizeOfferText } from "./catalogOfferSearchText";
 import {
   offerListingSourceFromUrl,
@@ -13,8 +14,8 @@ import {
 import { resolveAvitoImageUrl } from "./catalogSourceOfferCoverImage";
 import { classifyInvalidSourceUrl } from "./catalogSourceOfferValidation";
 
-/** Parse only `<head>` + early meta — never full page body text. */
 const HEAD_SCAN_BYTES = 120_000;
+const ENRICH_SCAN_BYTES = 420_000;
 
 const PRICE_HEAD_RE = [
   /itemprop="price"[^>]*content="(\d[\d\s]{0,12})"/i,
@@ -44,6 +45,109 @@ function headSlice(html: string): string {
   const end = html.indexOf("</head>");
   if (end > 0) return html.slice(0, Math.min(end + 7, HEAD_SCAN_BYTES));
   return html.slice(0, HEAD_SCAN_BYTES);
+}
+
+function enrichSlice(html: string): string {
+  // Keep parsing fast but allow JSON-LD / NEXT_DATA blocks.
+  return html.slice(0, ENRICH_SCAN_BYTES);
+}
+
+function safeJsonParse(raw: string): unknown | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function jsonLdBlocks(html: string): unknown[] {
+  const out: unknown[] = [];
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const raw = (m[1] ?? "").trim();
+    if (!raw) continue;
+    const parsed = safeJsonParse(raw);
+    if (parsed == null) continue;
+    if (Array.isArray(parsed)) out.push(...parsed);
+    else out.push(parsed);
+  }
+  return out;
+}
+
+function extractFirstJsonString(obj: unknown, keys: string[]): string | null {
+  if (!obj || typeof obj !== "object") return null;
+  const rec = obj as Record<string, unknown>;
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function extractFirstJsonNumber(obj: unknown, keys: string[]): number | null {
+  if (!obj || typeof obj !== "object") return null;
+  const rec = obj as Record<string, unknown>;
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    if (typeof v === "string") {
+      const digits = v.replace(/[^\d]/g, "");
+      const n = Number(digits);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return null;
+}
+
+function pickImageFromJsonLd(node: unknown, baseUrl: string): string | null {
+  if (!node || typeof node !== "object") return null;
+  const rec = node as Record<string, unknown>;
+  const img = rec.image;
+  if (typeof img === "string") return resolveAvitoImageUrl(img, baseUrl);
+  if (Array.isArray(img)) {
+    for (const it of img) {
+      if (typeof it === "string") {
+        const url = resolveAvitoImageUrl(it, baseUrl);
+        if (url) return url;
+      }
+    }
+  }
+  return null;
+}
+
+function pickOfferLikeJsonLd(nodes: unknown[]): Record<string, unknown> | null {
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    const rec = n as Record<string, unknown>;
+    const t = rec["@type"];
+    const type = Array.isArray(t) ? String(t[0] ?? "") : String(t ?? "");
+    if (/^(Offer|Product|Vehicle)$/i.test(type)) return rec;
+    if (type === "WebPage" || type === "Organization") continue;
+    // Some pages embed `@graph`.
+    const graph = rec["@graph"];
+    if (Array.isArray(graph)) {
+      const picked = pickOfferLikeJsonLd(graph);
+      if (picked) return picked;
+    }
+  }
+  return null;
+}
+
+function extractFromNextData(html: string): unknown | null {
+  const m = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (!m?.[1]) return null;
+  return safeJsonParse(m[1]);
+}
+
+function findFirstLikelyImageUrl(blob: string, baseUrl: string): string | null {
+  const re = /https?:\/\/[^\s"'<>]+?\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]+)?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(blob)) !== null) {
+    const url = resolveAvitoImageUrl(m[0]!, baseUrl);
+    if (url) return url;
+  }
+  return null;
 }
 
 function extractPriceFromHead(head: string): string | null {
@@ -108,30 +212,90 @@ export function extractSourceOfferFromHtml(
   defaults: ExtractionDefaults,
 ): CatalogSourceOfferInput | null {
   const sourceUrl = fetched.url.toString();
-  const head = headSlice(fetched.html);
+  const html = enrichSlice(fetched.html);
+  const head = headSlice(html);
   if (isCatalogOrSearchPage(head, sourceUrl)) return null;
 
+  const pageOrigin = fetched.url.origin;
+
+  // 1) JSON-LD
+  const ldAll = jsonLdBlocks(html);
+  const ld = pickOfferLikeJsonLd(ldAll);
+  const ldName = ld ? extractFirstJsonString(ld, ["name", "headline", "title"]) : null;
+  const ldBrand =
+    ld ?
+      extractFirstJsonString(ld, ["brand", "manufacturer", "model"]) ??
+        (typeof (ld.brand as unknown) === "object" ?
+          extractFirstJsonString(ld.brand, ["name"])
+        : null)
+    : null;
+  const ldImage = ld ? pickImageFromJsonLd(ld, pageOrigin) : null;
+  const ldOffers = ld ? (ld.offers as unknown) : null;
+  const ldOfferObj =
+    ldOffers && typeof ldOffers === "object" && !Array.isArray(ldOffers) ? (ldOffers as Record<string, unknown>)
+    : Array.isArray(ldOffers) && ldOffers.length > 0 && typeof ldOffers[0] === "object" ?
+      (ldOffers[0] as Record<string, unknown>)
+    : null;
+  const ldPriceAmount =
+    ldOfferObj ? extractFirstJsonNumber(ldOfferObj, ["price", "priceValue", "lowPrice"]) : null;
+
+  // 2) OpenGraph
   const ogTitle = metaContent(head, "og:title");
   const ogDesc = metaContent(head, "og:description");
   const ogImage = metaContent(head, "og:image");
   const pageTitle = titleTag(head);
-  const title = sanitizeOfferText((ogTitle || pageTitle).trim()).slice(0, 200);
+
+  // 3) App state (NEXT_DATA + other global blobs)
+  const nextData = extractFromNextData(html);
+  const nextBlob = nextData ? JSON.stringify(nextData).slice(0, 140_000) : "";
+
+  // 4) Visible HTML selectors / fallback blobs
+  const htmlBlob = html.slice(0, 220_000);
+
+  const title = sanitizeOfferText((ldName || ogTitle || pageTitle).trim()).slice(0, 200);
   if (!title) return null;
 
   const shortSnippet = sanitizeOfferText((ogDesc || title).trim()).slice(0, SOURCE_OFFER_SNIPPET_MAX);
-  const codeBlob = `${title} ${ogDesc ?? ""}`.slice(0, 500);
+  const codeBlob = `${title} ${ogDesc ?? ""} ${ldBrand ?? ""}`.slice(0, 500);
   const { oemCodes, articleCodes } = detectCodes(codeBlob);
-  const brand = detectBrand(codeBlob);
+  const brand = (ldBrand ? sanitizeOfferText(ldBrand).slice(0, 80) : null) ?? detectBrand(codeBlob);
   const sellerName = sellerFromTitle(title);
   const city = extractCityFromHead(head, defaults);
   const sourceName = catalogSourceNameFromUrl(sourceUrl);
 
-  const pageOrigin = fetched.url.origin;
-  const coverImageUrl = ogImage ? resolveAvitoImageUrl(ogImage, pageOrigin) : null;
+  const coverFromOg = ogImage ? resolveAvitoImageUrl(ogImage, pageOrigin) : null;
+  const coverFromApp = nextBlob ? findFirstLikelyImageUrl(nextBlob, pageOrigin) : null;
+  const coverFromHtml = findFirstLikelyImageUrl(htmlBlob, pageOrigin);
+  const coverImageUrl = ldImage ?? coverFromOg ?? coverFromApp ?? coverFromHtml ?? null;
+
+  const priceFromLd =
+    ldPriceAmount != null ?
+      { priceAmount: ldPriceAmount, priceText: null, price: String(ldPriceAmount) }
+    : null;
+  const headPrice = parseListingPriceFromContext(head);
+  const appPrice = nextBlob ? parseListingPriceFromContext(nextBlob) : { priceAmount: null, priceText: null, price: null };
+  const bodyPrice = parseListingPriceFromContext(htmlBlob);
+  const priceFields = priceFromLd ?? (headPrice.priceAmount ? headPrice : appPrice.priceAmount ? appPrice : bodyPrice);
+
+  const priceSource =
+    priceFromLd ? "json-ld"
+    : headPrice.priceAmount ? "og"
+    : appPrice.priceAmount ? "app-state"
+    : bodyPrice.priceAmount ? "html"
+    : "none";
+
+  const imageSource =
+    ldImage ? "json_ld"
+    : coverFromOg ? "og_image"
+    : coverFromApp ? "page_data"
+    : coverFromHtml ? "card_img"
+    : "none";
 
   const draft: CatalogSourceOfferInput = {
     title,
-    price: extractPriceFromHead(head),
+    price: priceFields.price,
+    priceAmount: priceFields.priceAmount,
+    priceText: priceFields.priceText,
     city,
     region: defaults.city && defaults.city !== city ? defaults.city : "",
     categorySlug: defaults.categorySlug,
@@ -149,7 +313,9 @@ export function extractSourceOfferFromHtml(
     rawPayload: {
       extractor: "source_offer",
       host: fetched.url.hostname,
-      imageSource: coverImageUrl ? "og_image" : "none",
+      parseStatus: "enriched",
+      imageSource,
+      priceSource,
     },
   };
 

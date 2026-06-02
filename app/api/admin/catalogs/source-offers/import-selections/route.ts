@@ -48,6 +48,14 @@ function parseSelections(raw: unknown): SourceOfferSearchSelection[] {
       articleCodes: Array.isArray(o.articleCodes) ? o.articleCodes.map(String) : [],
       coverImageUrl: o.coverImageUrl != null ? String(o.coverImageUrl) : null,
       imageSource: parseImageSource(o.imageSource),
+      priceSource:
+        o.priceSource === "json-ld" ||
+        o.priceSource === "og" ||
+        o.priceSource === "app-state" ||
+        o.priceSource === "html" ||
+        o.priceSource === "fallback" ?
+          o.priceSource
+        : undefined,
       offerType:
         o.offerType != null ?
           parseCatalogSourceOfferType(String(o.offerType))

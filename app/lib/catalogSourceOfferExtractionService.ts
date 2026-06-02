@@ -28,6 +28,10 @@ import {
 import { inferOfferTypeFromListing } from "./catalogSourceOfferType";
 import { isCatalogMarketplaceSourceName } from "./catalogSourceOfferTypes";
 import { mergeOfferPriceFields, offerPriceFromLegacyPrice } from "./catalogOfferPrice";
+import {
+  priceDiagnosticsLabel,
+  type OfferPriceSource,
+} from "./catalogOfferPriceDiagnostics";
 import type { AvitoCoverImageSource } from "./catalogAvitoCoverImage";
 import { coverImageDiagnosticsLabel } from "./catalogSourceOfferCoverImage";
 import type { SourceOfferImportOutcome } from "./catalogSourceOfferImportErrors";
@@ -48,6 +52,7 @@ export type SourceOfferSearchSelection = {
   articleCodes?: string[];
   coverImageUrl?: string | null;
   imageSource?: AvitoCoverImageSource;
+  priceSource?: OfferPriceSource;
   offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
@@ -65,10 +70,7 @@ function isSearchCardComplete(sel: SourceOfferSearchSelection): boolean {
   if (sel.parseQuality === "search_card") return true;
   const title = sanitizeOfferText(sel.title);
   if (!title || title.length < 5 || !sel.url?.trim()) return false;
-  const hasPrice = Boolean(
-    (sel.priceAmount != null && sel.priceAmount > 0) ||
-    offerPriceFromLegacyPrice(sel.price).priceAmount,
-  );
+  const hasPrice = sel.priceAmount != null && sel.priceAmount > 0;
   return Boolean(
     hasPrice ||
     (sel.shortSnippet && sel.shortSnippet.trim().length >= 8) ||
@@ -122,6 +124,9 @@ function buildInputFromSearchSelection(
       parseQuality,
       parseWarnings,
       imageSource: sel.imageSource ?? (sel.coverImageUrl ? "card_img" : "none"),
+      // Stage 1 results do not guarantee price/image.
+      priceSource: (sel.priceSource ?? "none") as OfferPriceSource,
+      parseStatus: "search_only",
     },
   };
 }
@@ -146,6 +151,17 @@ function importImageFields(
     imageFound: Boolean(input.coverImageUrl),
     imageSource,
   };
+}
+
+function importPriceFields(
+  input: CatalogSourceOfferInput,
+): Pick<SourceOfferImportOutcome, "priceFound" | "priceSource"> {
+  const src =
+    (typeof input.rawPayload?.priceSource === "string" ?
+      input.rawPayload.priceSource
+    : "none") as OfferPriceSource;
+  const found = src !== "none" && input.priceAmount != null && input.priceAmount > 0;
+  return { priceFound: found, priceSource: found ? src : "none" };
 }
 
 function mergeEnrichedInput(
@@ -178,6 +194,7 @@ function mergeEnrichedInput(
     rawPayload: {
       ...base.rawPayload,
       enrichedFromPage: true,
+      parseStatus: "enriched",
       parseWarnings: base.rawPayload?.parseWarnings,
       imageSource:
         base.coverImageUrl ?
@@ -185,6 +202,12 @@ function mergeEnrichedInput(
         : enriched.coverImageUrl ?
           (enriched.rawPayload?.imageSource ?? "og_image")
         : (base.rawPayload?.imageSource ?? "none"),
+      priceSource:
+        base.priceAmount ?
+          (base.rawPayload?.priceSource ?? "html")
+        : enriched.priceAmount ?
+          (enriched.rawPayload?.priceSource ?? "og")
+        : (base.rawPayload?.priceSource ?? "none"),
     },
   };
 }
@@ -256,13 +279,12 @@ export async function processSourceOfferSearchSelections(
       continue;
     }
 
-    const searchCard = isSearchCardComplete(sel);
-    if (!searchCard) {
-      const urlReason = classifyInvalidSourceUrl(rawUrl);
-      if (urlReason) {
-        pushRejected(sourceOfferImportError(rawUrl, sourceNameHint, urlReason));
-        continue;
-      }
+    // Stage 2 enrichment can fail; candidate creation must not depend on price/image.
+    // Still reject obvious non-listing URLs.
+    const urlReason = classifyInvalidSourceUrl(rawUrl);
+    if (urlReason) {
+      pushRejected(sourceOfferImportError(rawUrl, sourceNameHint, urlReason));
+      continue;
     }
 
     const parseWarnings: string[] = [];
@@ -284,37 +306,32 @@ export async function processSourceOfferSearchSelections(
       };
     }
 
-    if (searchCard) {
-      input = {
-        ...input,
-        rawPayload: {
-          ...input.rawPayload,
-          parseQuality: "search_card",
-          year: sel.year ?? undefined,
-          mileageKm: sel.mileageKm ?? undefined,
-        },
-      };
-    } else {
-      try {
-        const fetched = await fetchPublicHtml(rawUrl);
-        const enriched = extractSourceOfferFromHtml(fetched, defaults);
-        if (enriched) {
-          const enrichedDraft = sanitizeSourceOfferDraftInput({
-            ...enriched,
-            sourceName: sourceNameHint,
-            sourceUrl: rawUrl,
-          });
-          if (enrichedDraft) {
-            input = mergeEnrichedInput(input, enrichedDraft);
-          } else {
-            parseWarnings.push("full_page_parse_failed");
-          }
+    // Always enrich when creating candidates from selected search results.
+    try {
+      const fetched = await fetchPublicHtml(rawUrl);
+      const enriched = extractSourceOfferFromHtml(fetched, defaults);
+      if (enriched) {
+        const enrichedDraft = sanitizeSourceOfferDraftInput({
+          ...enriched,
+          sourceName: sourceNameHint,
+          sourceUrl: rawUrl,
+        });
+        if (enrichedDraft) {
+          input = mergeEnrichedInput(input, enrichedDraft);
         } else {
           parseWarnings.push("full_page_parse_failed");
+          input = {
+            ...input,
+            rawPayload: { ...input.rawPayload, parseStatus: "enrich_failed" },
+          };
         }
-      } catch {
+      } else {
         parseWarnings.push("full_page_parse_failed");
+        input = { ...input, rawPayload: { ...input.rawPayload, parseStatus: "enrich_failed" } };
       }
+    } catch {
+      parseWarnings.push("full_page_parse_failed");
+      input = { ...input, rawPayload: { ...input.rawPayload, parseStatus: "enrich_failed" } };
     }
 
     if (!input.shortSnippet?.trim() || input.shortSnippet.length < 8) {
@@ -361,6 +378,7 @@ export async function processSourceOfferSearchSelections(
         sourceName: sourceNameHint,
         message: dupErr.message,
         ...importImageFields(input, sel),
+        ...importPriceFields(input),
       });
       continue;
     }
@@ -383,16 +401,19 @@ export async function processSourceOfferSearchSelections(
       duplicateOfOfferId: null,
     });
     const imageFields = importImageFields(sanitized, sel);
+    const priceFieldsOut = importPriceFields(sanitized);
     outcomes.push({
       url: rawUrl,
       status: "created",
       sourceName: sourceNameHint,
       message: [
         parseWarning ? "Кандидат создан (данные с карточки поиска)" : "Кандидат создан",
+        priceDiagnosticsLabel(sanitized),
         coverImageDiagnosticsLabel(sanitized.coverImageUrl, imageFields.imageSource),
       ].join(" · "),
       parseWarning,
       ...imageFields,
+      ...priceFieldsOut,
     });
   }
 

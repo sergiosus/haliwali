@@ -156,11 +156,37 @@ export function extractAvitoListingThumbnail(ctx: string, baseUrl = "https://www
   return extractAvitoCoverFromCardContext(ctx, baseUrl).coverImageUrl;
 }
 
+/** Admin UI label for image extraction source. */
+export function imageSourceAdminLabel(
+  imageSource: AvitoCoverImageSource | string | null | undefined,
+): string {
+  switch (imageSource) {
+    case "card_img":
+      return "img";
+    case "data_src":
+    case "data_lazy":
+      return "data-src";
+    case "srcset":
+      return "srcset";
+    case "json_ld":
+    case "page_data":
+      return "json";
+    case "og_image":
+      return "og";
+    case "none":
+    case null:
+    case undefined:
+      return "none";
+    default:
+      return String(imageSource);
+  }
+}
+
 export function coverImageDiagnosticsLabel(
   coverImageUrl: string | null | undefined,
   imageSource: AvitoCoverImageSource | string | null | undefined,
 ): string {
   const found = Boolean(coverImageUrl?.trim());
-  const src = found ? (imageSource ?? "none") : "none";
+  const src = imageSourceAdminLabel(found ? imageSource : "none");
   return `image: ${found ? "found" : "not found"} · imageSource: ${src}`;
 }

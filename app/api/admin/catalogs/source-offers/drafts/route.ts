@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { listSourceOfferDrafts } from "../../../../../lib/serverCatalogSourceOfferStore";
+import {
+  listCandidateSourceOfferDrafts,
+  listSourceOfferDrafts,
+} from "../../../../../lib/serverCatalogSourceOfferStore";
 import type { CatalogSourceOfferDraftStatus } from "../../../../../lib/catalogSourceOfferTypes";
 import { normalizeSourceOfferDraftStatus } from "../../../../../lib/catalogSourceOfferTypes";
 import { getAdminPrivilegedFailure, restDenyPrivilegedAdminResponse } from "../../../../../lib/serverAdminSession";
@@ -12,6 +15,11 @@ export async function GET(req: Request) {
   if (deny) return deny;
 
   const statusRaw = new URL(req.url).searchParams.get("status");
+  if (statusRaw === "candidates") {
+    const drafts = await listCandidateSourceOfferDrafts();
+    return NextResponse.json({ ok: true, drafts });
+  }
+
   const status =
     statusRaw ? normalizeSourceOfferDraftStatus(statusRaw) : undefined;
   const drafts = await listSourceOfferDrafts(status as CatalogSourceOfferDraftStatus | undefined);

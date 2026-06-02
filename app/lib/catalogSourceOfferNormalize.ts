@@ -43,11 +43,17 @@ function pickPrice(input: CatalogSourceOfferInput): {
   priceAmount: number | null;
   priceText: string | null;
 } {
-  return mergeOfferPriceFields(offerPriceFromAmount(input.priceAmount), {
+  const fromFields = mergeOfferPriceFields(offerPriceFromAmount(input.priceAmount), {
     priceText: input.priceText,
-    price: offerPriceFromLegacyPrice(input.price).price,
+    price: null,
     priceAmount: input.priceAmount ?? null,
   });
+  if (fromFields.priceAmount != null && fromFields.priceAmount > 0) return fromFields;
+  const src = input.rawPayload?.priceSource;
+  if (src === "json-ld" || src === "og" || src === "app-state" || src === "html" || src === "fallback") {
+    return mergeOfferPriceFields(offerPriceFromLegacyPrice(input.price), fromFields);
+  }
+  return { priceAmount: null, priceText: null, price: null };
 }
 
 function pickCoverImage(input: CatalogSourceOfferInput): string | null {

@@ -43,12 +43,12 @@ export const OFFER_TYPE_FILTER_OPTIONS: { value: OfferTypeFilter; label: string 
 ];
 
 export const OFFER_SEARCH_SOURCE_OPTIONS: { value: OfferSourceFilter; label: string }[] = [
-  { value: "all", label: "Авто: Avito + Auto.ru" },
-  { value: "avito", label: "Avito — активен" },
-  { value: "auto_ru", label: "Auto.ru — активен" },
-  { value: "drom", label: "Drom — экспериментальный" },
-  { value: "youla", label: "Youla — отключён (капча)" },
-  { value: "vk", label: "VK — не реализован" },
+  { value: "all", label: "Avito (по умолчанию)" },
+  { value: "avito", label: "Avito" },
+  { value: "drom", label: "Drom — эксперимент" },
+  { value: "youla", label: "Youla — captcha" },
+  { value: "vk", label: "VK — парсер не реализован" },
+  { value: "auto_ru", label: "Auto.ru — позже" },
 ];
 
 export function useOfferImportLocation() {

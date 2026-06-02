@@ -27,6 +27,11 @@ export async function listSourceOfferDrafts(
   return pg.pgListSourceOfferDrafts(status);
 }
 
+export async function listCandidateSourceOfferDrafts(): Promise<CatalogSourceOfferDraft[]> {
+  assertPostgres();
+  return pg.pgListCandidateSourceOfferDrafts();
+}
+
 export async function upsertSourceOfferDrafts(
   items: {
     input: CatalogSourceOfferInput;

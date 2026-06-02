@@ -85,6 +85,7 @@ export type OfferSearchResultItem = {
   coverImageUrl?: string | null;
   imageFound?: boolean;
   imageSource?: import("./catalogAvitoCoverImage").AvitoCoverImageSource;
+  priceSource?: import("./catalogOfferPriceDiagnostics").OfferPriceSource;
   offerType?: import("./catalogSourceOfferType").CatalogSourceOfferType;
   year?: number | null;
   mileageKm?: number | null;
@@ -173,8 +174,7 @@ function hitToResult(
     sanitizeOfferText(hit.title) || titleFromListingUrl(hit.url) || "";
   const cardComplete = Boolean(
     hit.cardComplete ||
-    (hit.title && (hit.price || hit.priceAmount) && hit.url) ||
-    (hit.sourceName === "auto_ru" && hit.title && hit.price),
+    (hit.title && hit.url),
   );
   return {
     url: hit.url,
@@ -197,6 +197,7 @@ function hitToResult(
     coverImageUrl: hit.coverImageUrl ?? hit.imageUrl ?? null,
     imageFound: Boolean(hit.coverImageUrl ?? hit.imageUrl),
     imageSource: hit.imageSource ?? (hit.coverImageUrl ? "card_img" : "none"),
+    priceSource: hit.priceSource ?? (hit.priceAmount ? "html" : "none"),
     offerType: hit.offerType ?? defaultOfferType,
     year: hit.year ?? null,
     mileageKm: hit.mileageKm ?? null,
@@ -302,9 +303,7 @@ function keepStableSourcesOnRelevanceFailure(
   hidden: Record<string, number>,
   automotive: boolean,
 ): { matched: OfferSearchResultItem[]; skipped: OfferSearchResultItem[] } {
-  const stable = new Set<OfferListingSourceId>(
-    automotive ? ["avito", "auto_ru"] : ["avito"],
-  );
+  const stable = new Set<OfferListingSourceId>(["avito"]);
   const keep = items.filter((i) => stable.has(listingSourceFromUrl(i.url) ?? "avito"));
   const { matched, skipped } = automotive ?
     applyAutomotiveRelevanceFilter(query, keep, "", hidden)

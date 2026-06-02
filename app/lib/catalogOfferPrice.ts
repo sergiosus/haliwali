@@ -13,7 +13,6 @@ export type OfferPriceFields = {
 
 const RUB_PRICE_RE = /([0-9][0-9\s\u00a0]{2,12})\s*(?:₽|руб\.?|р\.)(?!\w)/gi;
 const KM_NEAR_RE = /\d[\d\s\u00a0]{2,12}\s*(?:км|km)\b/i;
-const JSON_PRICE_RE = /"price"\s*:\s*"?(\d[\d\s]{2,})"?/i;
 
 function formatRubText(amount: number): string {
   return `${amount.toLocaleString("ru-RU")} ₽`;
@@ -36,19 +35,7 @@ export function parseListingPriceFromContext(ctx: string): OfferPriceFields {
     candidates.push({ amount, index: m.index });
   }
 
-  if (candidates.length === 0) {
-    const jsonM = ctx.match(JSON_PRICE_RE);
-    if (jsonM?.[1]) {
-      const amount = Number(jsonM[1].replace(/\D/g, ""));
-      if (Number.isFinite(amount) && amount >= 100 && amount <= 500_000_000) {
-        const window = ctx.slice(Math.max(0, (jsonM.index ?? 0) - 40), (jsonM.index ?? 0) + 60);
-        if (!KM_NEAR_RE.test(window) || /(?:₽|руб)/i.test(window)) {
-          return offerPriceFromAmount(amount);
-        }
-      }
-    }
-    return empty;
-  }
+  if (candidates.length === 0) return empty;
 
   candidates.sort((a, b) => a.index - b.index);
   return offerPriceFromAmount(candidates[0]!.amount);
@@ -93,16 +80,5 @@ export function mergeOfferPriceFields(
   return offerPriceFromLegacyPrice(primary.price ?? fallback?.price ?? null);
 }
 
-/** Public card display: priceText → formatted amount → legacy price column. */
-export function displaySourceOfferPrice(offer: {
-  priceText?: string | null;
-  priceAmount?: number | null;
-  price?: string | null;
-}): string | null {
-  const text = offer.priceText?.trim();
-  if (text) return text;
-  if (offer.priceAmount != null && offer.priceAmount > 0) {
-    return formatRubText(offer.priceAmount);
-  }
-  return formatOfferPriceDisplay(offer.price);
-}
+/** Public card display — verified RUB only (see catalogOfferPriceDiagnostics). */
+export { displayVerifiedSourceOfferPrice as displaySourceOfferPrice } from "./catalogOfferPriceDiagnostics";

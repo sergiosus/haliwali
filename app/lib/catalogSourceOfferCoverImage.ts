@@ -50,6 +50,8 @@ export function slimSourceOfferRawPayload(
   } else {
     base.imageSource = imageSource ?? "none";
   }
+  const priceSource = raw?.priceSource;
+  if (typeof priceSource === "string") base.priceSource = priceSource;
   delete base.imageUrl;
   delete base.image_url;
   return base;

@@ -34,22 +34,22 @@ const REGISTRY: CatalogSourceRegistryEntry[] = [
   },
   {
     id: "auto_ru",
-    label: CATALOG_SOURCE_NAME_LABEL.auto_ru,
-    status: "experimental",
+    label: "Auto.ru — позже",
+    status: "future",
     supportsSearch: false,
     supportsImportByUrl: false,
-    supportsImages: true,
-    note: "Auto.ru experimental — parser not implemented yet",
+    supportsImages: false,
+    note: "Auto.ru — позже (парсер не реализован)",
     disabledReason: "parser_not_implemented",
   },
   {
     id: "drom",
-    label: CATALOG_SOURCE_NAME_LABEL.drom,
+    label: "Drom — эксперимент",
     status: "experimental",
     supportsSearch: true,
     supportsImportByUrl: true,
     supportsImages: true,
-    note: "Drom — экспериментальный fallback",
+    note: "Drom — эксперимент (включайте вручную)",
   },
   {
     id: "youla",
@@ -69,7 +69,7 @@ const REGISTRY: CatalogSourceRegistryEntry[] = [
     supportsImportByUrl: false,
     supportsImages: false,
     disabledReason: "parser_not_implemented",
-    note: "VK parser not implemented yet",
+    note: "VK — парсер не реализован",
   },
   {
     id: "company_site",
@@ -129,10 +129,13 @@ export function isMarketplaceRegistryId(id: string): id is CatalogSourceName {
   );
 }
 
-/** Sources that may be searched when explicitly enabled in admin UI. */
+/** Sources that may be searched when explicitly enabled in admin UI (Avito + Drom). */
 export function adminSearchableMarketplaceIds(): OfferListingSourceId[] {
   return REGISTRY.filter(
-    (e) => isMarketplaceRegistryId(e.id) && (e.status === "active" || e.status === "experimental"),
+    (e) =>
+      isMarketplaceRegistryId(e.id) &&
+      e.supportsSearch &&
+      (e.status === "active" || e.status === "experimental"),
   ).map((e) => e.id as OfferListingSourceId);
 }
 
@@ -158,7 +161,7 @@ export function resolveAdminSearchSources(
     const entry = getCatalogSourceRegistryEntry(id);
     if (!entry || entry.status === "disabled" || entry.status === "future") continue;
     if (entry.id === "all_sources_future" || entry.id === "all_active") continue;
-    if (!entry.supportsSearch && entry.status !== "experimental") continue;
+    if (!entry.supportsSearch) continue;
     uniq.add(id);
   }
   return [...uniq];
@@ -177,24 +180,18 @@ export function catalogSourceDiagnosticMessage(
     case "avito":
       return links > 0 ? "" : "Avito: нет ссылок на объявления в HTML выдачи";
     case "auto_ru":
-      if (!entry?.supportsSearch && links === 0) {
-        return entry?.note ?? "Auto.ru experimental — parser not implemented yet";
-      }
-      if (links === 0) {
-        return zero === "no_selector" ?
-            "Auto.ru experimental — parser not implemented yet (нет карточек в выдаче)"
-          : (entry?.note ?? "Auto.ru experimental — parser not implemented yet");
-      }
-      return "Auto.ru experimental — карточки только из поиска";
+      return entry?.note ?? "Auto.ru — позже (парсер не реализован)";
     case "drom":
       if (links === 0) {
-        return entry?.note ?? "Drom — экспериментальный fallback";
+        return zero === "no_selector" ?
+            "Drom — нет ссылок на объявления в HTML выдачи"
+          : (entry?.note ?? "Drom — эксперимент");
       }
-      return "Drom — экспериментальный fallback";
+      return "";
     case "youla":
-      return entry?.note ?? "Youla blocked by captcha (источник отключён).";
+      return entry?.note ?? "Youla — captcha, источник отключён";
     case "vk":
-      return entry?.note ?? "VK parser not implemented yet";
+      return entry?.note ?? "VK — парсер не реализован";
     default:
       return entry?.note ?? "";
   }

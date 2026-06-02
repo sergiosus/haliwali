@@ -60,7 +60,11 @@ function resolveRedirect(current: URL, location: string | null): URL {
   return assertCatalogFetchAllowed(next.toString());
 }
 
-export async function fetchPublicHtml(rawUrl: string, retry = true): Promise<FetchedHtml> {
+export async function fetchPublicHtml(
+  rawUrl: string,
+  retry = true,
+  opts?: { timeoutMs?: number },
+): Promise<FetchedHtml> {
   let url = assertCatalogFetchAllowed(rawUrl);
   await assertPublicResolvableHost(url);
 
@@ -69,7 +73,8 @@ export async function fetchPublicHtml(rawUrl: string, retry = true): Promise<Fet
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), CATALOG_FETCH_TIMEOUT_MS);
+    const timeoutMs = Math.max(1000, opts?.timeoutMs ?? CATALOG_FETCH_TIMEOUT_MS);
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
       let hops = 0;
       let res = await fetchOnce(url, ac.signal);

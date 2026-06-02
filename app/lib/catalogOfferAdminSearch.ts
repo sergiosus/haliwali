@@ -124,6 +124,11 @@ export type OfferSearchStats = {
   diagnostics: OfferSourceSearchDiagnostic[];
   directSearchUrls: Partial<Record<OfferListingSourceId, string[]>>;
   pagesPerSource: number;
+  /** Diagnostics for admin UX. */
+  linksShown: number;
+  timedOut: boolean;
+  priceFoundCount: number;
+  imageFoundCount: number;
 };
 
 export type OfferSearchResponse = {
@@ -473,6 +478,10 @@ function emptyStats(
     diagnostics: [],
     directSearchUrls,
     pagesPerSource: PAGES_PER_SOURCE,
+    linksShown: 0,
+    timedOut: false,
+    priceFoundCount: 0,
+    imageFoundCount: 0,
   };
 }
 
@@ -692,6 +701,10 @@ export async function searchOffersForAdmin(opts: {
     diagnostics,
     directSearchUrls,
     pagesPerSource: PAGES_PER_SOURCE,
+    linksShown: 0,
+    timedOut: diagnostics.some((d) => d.timedOut),
+    priceFoundCount: 0,
+    imageFoundCount: 0,
   };
 
   if (items.length === 0) {
@@ -791,6 +804,7 @@ export async function searchOffersForAdmin(opts: {
   stats.relevanceFilterFailed = filterFailed;
   stats.sourceCounts = countBySource(items);
   stats.diagnostics = enrichDiagnosticsWithRelevance(diagnostics, matched, skipped);
+  stats.linksShown = items.length;
 
   logCatalogOfferSearch("admin_relevance_done", {
     relevant: matched.length,
@@ -805,6 +819,10 @@ export async function searchOffersForAdmin(opts: {
     relevant: items.length,
     rejected: skipped.length,
   });
+
+  // Stage-1 search is lightweight → price/image are expected to be missing.
+  stats.priceFoundCount = items.filter((i) => Boolean(i.priceAmount && i.priceAmount > 0)).length;
+  stats.imageFoundCount = items.filter((i) => Boolean(i.coverImageUrl)).length;
 
   const response: OfferSearchResponse = {
     ok: true,

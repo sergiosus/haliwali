@@ -65,6 +65,13 @@ export type OfferSourceSearchDiagnostic = {
   sourceName: OfferListingSourceId;
   searched: boolean;
   blocked: boolean;
+  timedOut?: boolean;
+  partial?: boolean;
+  maxPages?: number;
+  maxLinks?: number;
+  linksShown?: number;
+  priceFoundCount?: number;
+  imageFoundCount?: number;
   /** Direct marketplace search URLs opened (not Google/Bing). */
   searchUrls: string[];
   httpStatus: number | null;
@@ -110,9 +117,11 @@ export type OfferSourceSearchHit = {
   cardComplete?: boolean;
 };
 
-const MAX_PAGES_PER_SOURCE = 3;
+const MAX_PAGES_PER_SOURCE = 2;
+const MAX_LINKS_PER_SOURCE = 30;
 const MAX_TOTAL_HITS = 100;
-const FETCH_TIMEOUT_MS = 12_000;
+const FETCH_TIMEOUT_MS = 8_000;
+const SEARCH_DEADLINE_MS = 15_000;
 
 const MOBILE_UA =
   "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36";
@@ -184,7 +193,8 @@ async function fetchSearchPage(
     }
     return { ok: true, status, html, url: url.toString() };
   } catch {
-    return { ok: false, status: null, error: "FETCH_ERROR" };
+    const timedOut = ac.signal.aborted;
+    return { ok: false, status: null, error: timedOut ? "TIMEOUT" : "FETCH_ERROR" };
   } finally {
     clearTimeout(timer);
   }
@@ -588,7 +598,7 @@ function buildSearchUrls(
   if (source === "avito") {
     const base =
       slug ?
-        `https://www.avito.ru/${slug}/all?q=${q}`
+        `https://www.avito.ru/${slug}?q=${q}`
       : `https://www.avito.ru/all?q=${q}`;
     const url = page <= 1 ? base : `${base}&p=${page}`;
     return { urls: [url], cityInUrl: Boolean(slug) };
@@ -661,6 +671,13 @@ function disabledSourceDiagnostic(
     sourceName: source,
     searched: false,
     blocked: zeroReason === "captcha",
+    timedOut: false,
+    partial: false,
+    maxPages: MAX_PAGES_PER_SOURCE,
+    maxLinks: MAX_LINKS_PER_SOURCE,
+    linksShown: 0,
+    priceFoundCount: 0,
+    imageFoundCount: 0,
     searchUrls: [],
     httpStatus: null,
     pagesScanned: 0,
@@ -724,6 +741,7 @@ export async function searchOfferListingSources(opts: {
   const diagnostics: OfferSourceSearchDiagnostic[] = [];
   const allHits: OfferSourceSearchHit[] = [];
   const globalSeen = new Set<string>();
+  const startedAt = Date.now();
 
   logCatalogOfferSearch("search_start", { query: query.slice(0, 60), sources: opts.sources });
 
@@ -769,11 +787,22 @@ export async function searchOfferListingSources(opts: {
       let lastHtml = "";
       let dromMeta: DromParseMeta | undefined;
       let avitoMeta: AvitoParseMeta | undefined;
+      let timedOut = false;
+      let partial = false;
 
       let triedBroad = false;
 
       for (let page = 1; page <= maxPages; page += 1) {
+        if (Date.now() - startedAt > SEARCH_DEADLINE_MS) {
+          timedOut = true;
+          partial = true;
+          break;
+        }
         if (allHits.length >= maxTotal) break;
+        if (linksExtracted >= MAX_LINKS_PER_SOURCE) {
+          partial = true;
+          break;
+        }
         let cityForBuild = city;
         if (page === 1 && triedBroad) cityForBuild = "";
         const { urls, cityInUrl } = buildSearchUrls(source, query, cityForBuild, page);
@@ -786,7 +815,16 @@ export async function searchOfferListingSources(opts: {
         let pageOk = false;
 
         for (const searchUrl of urls) {
+          if (Date.now() - startedAt > SEARCH_DEADLINE_MS) {
+            timedOut = true;
+            partial = true;
+            break;
+          }
           if (allHits.length >= maxTotal) break;
+          if (linksExtracted >= MAX_LINKS_PER_SOURCE) {
+            partial = true;
+            break;
+          }
           searchUrls.push(searchUrl);
           lastRequestUrl = searchUrl;
           logCatalogOfferSearch("source_request", { source, url: searchUrl.slice(0, 160) });
@@ -800,6 +838,12 @@ export async function searchOfferListingSources(opts: {
               httpStatus: fetched.status,
               error: fetched.error,
             });
+            if (fetched.error === "TIMEOUT") {
+              timedOut = true;
+              partial = true;
+              if (page === 1) zeroReason = "fetch_error";
+              break;
+            }
             if (page === 1) zeroReason = zeroReasonFromError(fetched.error, 0);
             continue;
           }
@@ -877,6 +921,10 @@ export async function searchOfferListingSources(opts: {
             skipReasons.cap = (skipReasons.cap ?? 0) + 1;
             continue;
           }
+          if (linksExtracted >= MAX_LINKS_PER_SOURCE) {
+            partial = true;
+            break;
+          }
           globalSeen.add(key);
           allHits.push(hit);
           linksExtracted += 1;
@@ -951,6 +999,13 @@ export async function searchOfferListingSources(opts: {
         sourceName: source,
         searched: searchUrls.length > 0,
         blocked,
+        timedOut,
+        partial,
+        maxPages,
+        maxLinks: MAX_LINKS_PER_SOURCE,
+        linksShown: linksExtracted,
+        priceFoundCount: 0,
+        imageFoundCount: 0,
         searchUrls,
         httpStatus,
         pagesScanned,
@@ -960,7 +1015,9 @@ export async function searchOfferListingSources(opts: {
         zeroReason: linksExtracted > 0 ? null : zeroReason,
         skipReasons,
         message:
-          linksExtracted === 0 ?
+          timedOut ?
+            "timeout: частичные результаты"
+          : linksExtracted === 0 ?
             detailMessage ?? lastErrorMessage ?? undefined
           : parserErrors > 0 ?
             `ошибки разбора: ${parserErrors}`

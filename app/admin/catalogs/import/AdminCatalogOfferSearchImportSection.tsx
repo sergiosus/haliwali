@@ -228,6 +228,8 @@ export function AdminCatalogOfferSearchImportSection({
 
   const resultsSectionRef = useRef<HTMLDivElement>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchDeadlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cityLabel = catalogDiscoverCityLabel(location);
 
@@ -371,6 +373,7 @@ export function AdminCatalogOfferSearchImportSection({
       setMessage("Выберите хотя бы один источник поиска");
       return;
     }
+    if (busy) return;
     setBusy(true);
     setMessage(null);
     setEmptyReason(null);
@@ -379,10 +382,17 @@ export function AdminCatalogOfferSearchImportSection({
     setCreatedCount(0);
     setImportErrors([]);
     try {
+      if (searchAbortRef.current) searchAbortRef.current.abort();
+      const ac = new AbortController();
+      searchAbortRef.current = ac;
+      if (searchDeadlineTimerRef.current) clearTimeout(searchDeadlineTimerRef.current);
+      searchDeadlineTimerRef.current = setTimeout(() => ac.abort(), 15_000);
+
       const r = await fetch("/api/admin/catalogs/source-offers/search", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        signal: ac.signal,
         body: JSON.stringify({
           query: query.trim(),
           city: cityLabel,
@@ -496,6 +506,12 @@ export function AdminCatalogOfferSearchImportSection({
       });
       focusResults();
     } catch (transportErr) {
+      if (transportErr instanceof DOMException && transportErr.name === "AbortError") {
+        setMessage("Поиск остановлен — показаны частичные результаты (если были).");
+        setSearched(true);
+        persistNow({ searched: true });
+        return;
+      }
       const transportMessage =
         transportErr instanceof Error ? transportErr.message : String(transportErr);
       const errDetail: OfferSearchApiErrorDetail = {
@@ -508,6 +524,8 @@ export function AdminCatalogOfferSearchImportSection({
       setSearched(true);
       persistNow({ searched: true });
     } finally {
+      if (searchDeadlineTimerRef.current) clearTimeout(searchDeadlineTimerRef.current);
+      searchDeadlineTimerRef.current = null;
       setBusy(false);
     }
   }, [
@@ -522,7 +540,12 @@ export function AdminCatalogOfferSearchImportSection({
     offerTypeFilter,
     persistNow,
     focusResults,
+    busy,
   ]);
+
+  const stopSearch = useCallback(() => {
+    searchAbortRef.current?.abort();
+  }, []);
 
   const sourceBadgeClass = (source: string) =>
     SOURCE_BADGE_CLASS[source] ?? "bg-violet-50 text-violet-900";
@@ -784,6 +807,15 @@ export function AdminCatalogOfferSearchImportSection({
               >
                 {busy ? "Поиск…" : "Найти предложения"}
               </button>
+              {busy ?
+                <button
+                  type="button"
+                  onClick={stopSearch}
+                  className="w-full rounded-xl border border-black/15 bg-white px-4 py-2.5 text-sm font-medium text-black/70"
+                >
+                  Остановить поиск
+                </button>
+              : null}
               <button
                 type="button"
                 disabled={busy}
@@ -885,6 +917,10 @@ export function AdminCatalogOfferSearchImportSection({
               {searchStats?.linksExtracted != null ?
                 ` · с площадок извлечено: ${searchStats.linksExtracted}`
               : null}
+              {searchStats ?
+                ` · показано: ${searchStats.linksShown ?? pageResults.length}`
+              : null}
+              {searchStats?.timedOut ? " · timeout: да" : null}
               {fromCache ? " · кэш 30 мин" : null}
             </p>
             <p className="flex flex-wrap gap-2 text-xs">
@@ -909,7 +945,10 @@ export function AdminCatalogOfferSearchImportSection({
                   <thead className="border-b border-black/10 bg-black/[0.03] text-black/60">
                     <tr>
                       <th className="px-3 py-2 font-medium">Источник</th>
+                      <th className="px-3 py-2 font-medium">Страниц</th>
                       <th className="px-3 py-2 font-medium">Найдено</th>
+                      <th className="px-3 py-2 font-medium">Показано</th>
+                      <th className="px-3 py-2 font-medium">Timeout</th>
                       <th className="px-3 py-2 font-medium">Релевантно</th>
                       <th className="px-3 py-2 font-medium">Отклонено</th>
                       <th className="px-3 py-2 font-medium">Ошибка</th>
@@ -923,7 +962,13 @@ export function AdminCatalogOfferSearchImportSection({
                           <td className="px-3 py-2 font-medium text-black">
                             {SOURCE_DIAG_LABEL[diag.sourceName] ?? diag.sourceName}
                           </td>
+                          <td className="px-3 py-2">
+                            {diag.pagesScanned ?? 0}
+                            {diag.maxPages ? ` / ${diag.maxPages}` : ""}
+                          </td>
                           <td className="px-3 py-2">{diag.linksExtracted}</td>
+                          <td className="px-3 py-2">{diag.linksShown ?? "—"}</td>
+                          <td className="px-3 py-2">{diag.timedOut ? "да" : "нет"}</td>
                           <td className="px-3 py-2">{diag.relevantCount ?? "—"}</td>
                           <td className="px-3 py-2">{diag.rejectedByRelevance ?? "—"}</td>
                           <td className="px-3 py-2 text-amber-900">{errText}</td>

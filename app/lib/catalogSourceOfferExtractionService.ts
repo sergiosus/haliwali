@@ -308,7 +308,7 @@ export async function processSourceOfferSearchSelections(
 
     // Always enrich when creating candidates from selected search results.
     try {
-      const fetched = await fetchPublicHtml(rawUrl);
+      const fetched = await fetchPublicHtml(rawUrl, true, { timeoutMs: 8_000 });
       const enriched = extractSourceOfferFromHtml(fetched, defaults);
       if (enriched) {
         const enrichedDraft = sanitizeSourceOfferDraftInput({
@@ -468,7 +468,7 @@ export async function processSourceOfferUrlBatch(
       continue;
     }
     try {
-      const fetched = await fetchPublicHtml(rawUrl);
+      const fetched = await fetchPublicHtml(rawUrl, true, { timeoutMs: 8_000 });
       const input = extractSourceOfferFromHtml(fetched, defaults);
       if (!input) {
         errors.push({ url: rawUrl, error: "NO_OFFER_EXTRACTED" });
@@ -510,7 +510,7 @@ export async function previewSourceOffersFromUrls(
       continue;
     }
     try {
-      const fetched = await fetchPublicHtml(rawUrl);
+      const fetched = await fetchPublicHtml(rawUrl, true, { timeoutMs: 8_000 });
       const input = extractSourceOfferFromHtml(fetched, defaults);
       if (!input) {
         errors.push({ url: rawUrl, error: "NO_OFFER_EXTRACTED" });

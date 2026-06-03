@@ -256,9 +256,9 @@ export function extractSourceOfferFromHtml(
   const title = sanitizeOfferText(titlePicked).slice(0, 200);
   if (!title) return null;
   const titleSource =
-    ldName ? "json"
-    : ogTitle ? "og"
-    : "html";
+    ldName ? "metadata"
+    : ogTitle ? "metadata"
+    : "listing";
 
   const shortSnippet = sanitizeOfferText((ogDesc || title).trim()).slice(0, SOURCE_OFFER_SNIPPET_MAX);
   const codeBlob = `${title} ${ogDesc ?? ""} ${ldBrand ?? ""}`.slice(0, 500);

@@ -6,7 +6,7 @@ import { coverImageDiagnosticsLabel } from "../../lib/catalogSourceOfferCoverIma
 import { priceDiagnosticsLabel } from "../../lib/catalogOfferPriceDiagnostics";
 import { resolveCoverImageUrl } from "../../lib/catalogSourceOfferCoverImage";
 import { SourceOfferPriceDisplay } from "./SourceOfferPriceDisplay";
-import { maybeCleanTitleForPublic } from "../../lib/catalogTitleCleanup";
+import { formatUrlSlugTitle } from "../../lib/catalogTitleCleanup";
 import type { CatalogSourceOffer, CatalogSourceOfferDraft } from "../../lib/catalogSourceOfferTypes";
 
 type OfferLike = Pick<
@@ -105,7 +105,7 @@ export function SourceOfferModerationCardBody({
   showDiagnostics?: boolean;
 }) {
   const titleSource = typeof offer.rawPayload?.titleSource === "string" ? offer.rawPayload.titleSource : null;
-  const titleDisplay = maybeCleanTitleForPublic(offer.title, titleSource);
+  const titleDisplay = titleSource === "url" ? (formatUrlSlugTitle(offer.title) || "Название не извлечено") : offer.title;
   return (
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
@@ -124,7 +124,7 @@ export function SourceOfferModerationCardBody({
       {showDiagnostics ?
         <SourceOfferTruthDiagnostics offer={offer} />
       : null}
-      {titleSource === "url_slug" ?
+      {titleSource === "url" ?
         <p className="mt-1 text-[11px] text-amber-900">
           Заголовок взят из URL, может быть неточным
         </p>

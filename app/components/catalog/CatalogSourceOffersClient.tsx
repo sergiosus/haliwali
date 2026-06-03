@@ -105,16 +105,21 @@ function SourceOfferFiltersForm({
 }) {
   const id = (name: string) => (idPrefix ? `${idPrefix}-${name}` : name);
 
+  const inputClass =
+    "mt-1 h-10 w-full rounded-lg border border-black/10 bg-white px-2.5 text-sm placeholder:font-normal placeholder:text-black/[0.28] dark:placeholder:text-white/[0.35]";
+
   return (
     <div className="flex flex-col gap-3">
+      <p className="text-xs font-normal text-black/45">Поля можно оставить пустыми</p>
+
       <label className="block text-xs" htmlFor={id("city")}>
         <span className="font-medium text-black/55">Город</span>
         <input
           id={id("city")}
           value={draftFilters.city}
           onChange={(e) => setDraftFilters((f) => ({ ...f, city: e.target.value }))}
-          placeholder="Ижевск"
-          className="mt-1 h-10 w-full rounded-lg border border-black/10 bg-white px-2.5 text-sm"
+          placeholder="Например: Ижевск"
+          className={inputClass}
         />
       </label>
 
@@ -161,8 +166,8 @@ function SourceOfferFiltersForm({
           id={id("brand")}
           value={draftFilters.brand}
           onChange={(e) => setDraftFilters((f) => ({ ...f, brand: e.target.value }))}
-          placeholder="Volkswagen"
-          className="mt-1 h-10 w-full rounded-lg border border-black/10 bg-white px-2.5 text-sm"
+          placeholder="Например: Volkswagen"
+          className={inputClass}
         />
       </label>
 
@@ -172,8 +177,8 @@ function SourceOfferFiltersForm({
           id={id("oem")}
           value={draftFilters.oemArticle}
           onChange={(e) => setDraftFilters((f) => ({ ...f, oemArticle: e.target.value }))}
-          placeholder="1K0615301"
-          className="mt-1 h-10 w-full rounded-lg border border-black/10 bg-white px-2.5 text-sm"
+          placeholder="Например: 1K0615301"
+          className={inputClass}
         />
       </label>
 
@@ -185,8 +190,8 @@ function SourceOfferFiltersForm({
           min={0}
           value={draftFilters.priceMin}
           onChange={(e) => setDraftFilters((f) => ({ ...f, priceMin: e.target.value }))}
-          placeholder="100 000"
-          className="mt-1 h-10 w-full rounded-lg border border-black/10 bg-white px-2.5 text-sm"
+          placeholder="от 100 000"
+          className={inputClass}
         />
       </label>
 
@@ -198,8 +203,8 @@ function SourceOfferFiltersForm({
           min={0}
           value={draftFilters.priceMax}
           onChange={(e) => setDraftFilters((f) => ({ ...f, priceMax: e.target.value }))}
-          placeholder="500 000"
-          className="mt-1 h-10 w-full rounded-lg border border-black/10 bg-white px-2.5 text-sm"
+          placeholder="до 500 000"
+          className={inputClass}
         />
       </label>
 

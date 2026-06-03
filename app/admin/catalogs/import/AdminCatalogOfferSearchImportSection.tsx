@@ -13,7 +13,7 @@ import { catalogSourceDiagnosticMessage } from "../../../lib/catalogSourceRegist
 import { coverImageDiagnosticsLabel } from "../../../lib/catalogSourceOfferCoverImage";
 import { priceDiagnosticsLabel } from "../../../lib/catalogOfferPriceDiagnostics";
 import { SourceOfferPriceDisplay } from "../../../components/catalog/SourceOfferPriceDisplay";
-import { cleanUrlSlugTitle } from "../../../lib/catalogTitleCleanup";
+import { formatUrlSlugTitle } from "../../../lib/catalogTitleCleanup";
 import type {
   OfferSearchResultItem,
   OfferSearchSortMode,
@@ -1083,7 +1083,7 @@ export function AdminCatalogOfferSearchImportSection({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-black">
-                          {item.titleSource === "url_slug" ? cleanUrlSlugTitle(item.title) : item.title}
+                          {item.titleSource === "url" ? (formatUrlSlugTitle(item.title) || "Название не извлечено") : item.title}
                         </span>
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-semibold ${sourceBadgeClass(item.sourceName)}`}
@@ -1092,7 +1092,7 @@ export function AdminCatalogOfferSearchImportSection({
                         </span>
                         <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-black/55">
                           Заголовок:{" "}
-                          {item.titleSource === "url_slug" ? "url" : item.titleSource ?? "card"}
+                          {item.titleSource ?? "card"}
                         </span>
                         {item.parseQuality === "search_card" ?
                           <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
@@ -1133,7 +1133,7 @@ export function AdminCatalogOfferSearchImportSection({
                       <p className="mt-1 text-[10px] text-black/40">
                         {coverImageDiagnosticsLabel(item.coverImageUrl, item.imageSource)}
                       </p>
-                      {item.titleSource === "url_slug" ?
+                      {item.titleSource === "url" ?
                         <p className="mt-1 text-[11px] text-amber-900">
                           Заголовок взят из URL, может быть неточным
                         </p>

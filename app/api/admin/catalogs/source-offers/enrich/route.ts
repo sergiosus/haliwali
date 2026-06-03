@@ -38,7 +38,7 @@ export async function POST(req: Request) {
         coverImageUrl: draft.coverImageUrl ?? null,
         imageSource: typeof draft.rawPayload?.imageSource === "string" ? draft.rawPayload.imageSource : "none",
         priceSource: typeof draft.rawPayload?.priceSource === "string" ? draft.rawPayload.priceSource : "none",
-        titleSource: typeof draft.rawPayload?.titleSource === "string" ? draft.rawPayload.titleSource : "html",
+        titleSource: typeof draft.rawPayload?.titleSource === "string" ? draft.rawPayload.titleSource : "listing",
         shortSnippet: draft.shortSnippet,
       },
     });

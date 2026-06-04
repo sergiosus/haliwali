@@ -10,10 +10,13 @@ import {
 } from "../../../lib/catalogDiscoverLocationStorage";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
 import { catalogSourceDiagnosticMessage } from "../../../lib/catalogSourceRegistry";
-import { coverImageDiagnosticsLabel } from "../../../lib/catalogSourceOfferCoverImage";
-import { priceDiagnosticsLabel } from "../../../lib/catalogOfferPriceDiagnostics";
-import { SourceOfferPriceDisplay } from "../../../components/catalog/SourceOfferPriceDisplay";
-import { formatUrlSlugTitle } from "../../../lib/catalogTitleCleanup";
+import {
+  SourceOfferCardStatusBadge,
+  SourceOfferCoverThumb,
+  SourceOfferPriceDisplay,
+  SourceOfferTitleBlock,
+} from "../../../components/catalog/SourceOfferDisplay";
+import { sourceOfferDisplayTitle } from "../../../lib/catalogSourceOfferCardUi";
 import type {
   OfferSearchResultItem,
   OfferSearchSortMode,
@@ -84,11 +87,6 @@ const HIDDEN_REASON_LABEL: Record<string, string> = {
   generic_title: "общий заголовок",
   query_mismatch: "не совпадает с запросом",
   cap: "лимит 100",
-};
-
-const PARSE_QUALITY_LABEL: Record<string, string> = {
-  link_only: "ссылка с поиска",
-  search_card: "карточка поиска",
 };
 
 function diagnosticTableErrorText(diag: OfferSourceSearchDiagnostic): string {
@@ -1021,20 +1019,8 @@ export function AdminCatalogOfferSearchImportSection({
                     : o.status === "duplicate" ? "дубликат"
                     : o.status === "rejected" ? "отклонён"
                     : "ошибка"}
-                    {o.parseWarning ? ` · ${o.parseWarning}` : ""}
                   </p>
                   <p className="mt-0.5 text-xs text-black/55">{o.message}</p>
-                  {o.priceFound != null || o.imageFound != null ?
-                    <p className="mt-1 text-[10px] text-black/45">
-                      {o.priceFound != null ?
-                        `price: ${o.priceFound ? "found" : "not found"} · priceSource: ${o.priceSource ?? "none"}`
-                      : null}
-                      {o.priceFound != null && o.imageFound != null ? " · " : null}
-                      {o.imageFound != null ?
-                        `image: ${o.imageFound ? "found" : "not found"} · imageSource: ${o.imageSource ?? "none"}`
-                      : null}
-                    </p>
-                  : null}
                 </li>
               ))}
             </ul>
@@ -1060,7 +1046,12 @@ export function AdminCatalogOfferSearchImportSection({
         {searched && totalFound > 0 ?
           <div className="mt-4 space-y-3">
             <ul className="space-y-3">
-              {pageResults.map((item) => (
+              {pageResults.map((item) => {
+                const titleDisplay = sourceOfferDisplayTitle({
+                  title: item.title,
+                  titleSource: item.titleSource,
+                });
+                return (
                 <li key={item.url} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
                   <div className="flex items-start gap-3">
                     <input
@@ -1069,76 +1060,55 @@ export function AdminCatalogOfferSearchImportSection({
                       onChange={() => toggleUrl(item.url)}
                       className="mt-1 shrink-0"
                     />
-                    {item.coverImageUrl ?
-                      <div className="hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-black/[0.04] sm:block">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.coverImageUrl}
-                          alt=""
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      </div>
-                    : null}
+                    <SourceOfferCoverThumb
+                      offer={{
+                        coverImageUrl: item.coverImageUrl ?? null,
+                        title: titleDisplay,
+                      }}
+                      size="admin"
+                      alt={titleDisplay}
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-black">
-                          {item.titleSource === "url" ? (formatUrlSlugTitle(item.title) || "Название не извлечено") : item.title}
-                        </span>
+                        <SourceOfferTitleBlock
+                          offer={{
+                            title: item.title,
+                            titleSource: item.titleSource,
+                            rawPayload: { titleSource: item.titleSource },
+                          }}
+                          showSlugDebug
+                        />
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-semibold ${sourceBadgeClass(item.sourceName)}`}
                         >
                           {catalogSourceNameLabel(item.sourceName)}
                         </span>
-                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-black/55">
-                          Заголовок:{" "}
-                          {item.titleSource ?? "card"}
-                        </span>
-                        {item.parseQuality === "search_card" ?
-                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
-                            {PARSE_QUALITY_LABEL.search_card}
-                          </span>
-                        : null}
-                        {item.relevanceScore != null && item.relevanceScore > 0 ?
-                          <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs text-black/55">
-                            score {item.relevanceScore}
-                          </span>
-                        : null}
-                        {item.relevance === "match" ?
-                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
-                            релевантно
-                          </span>
-                        : item.relevance === "relevance_unknown" ?
-                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-900">
-                            релевантность не проверена
-                          </span>
-                        : null}
+                        <SourceOfferCardStatusBadge
+                          offer={{
+                            title: item.title,
+                            titleSource: item.titleSource,
+                            city: item.city,
+                            coverImageUrl: item.coverImageUrl ?? null,
+                            priceText: item.priceText ?? null,
+                            priceAmount: item.priceAmount ?? null,
+                            rawPayload: { priceSource: item.priceSource },
+                          }}
+                        />
                       </div>
                       <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-black/55">
-                        <SourceOfferPriceDisplay offer={item} />
-                        {item.year ?
-                          <span>{item.year} г.</span>
-                        : null}
-                        {item.mileageKm != null ?
-                          <span>{item.mileageKm.toLocaleString("ru-RU")} км</span>
-                        : null}
+                        <SourceOfferPriceDisplay
+                          offer={{
+                            price: item.price,
+                            priceText: item.priceText,
+                            priceAmount: item.priceAmount,
+                            rawPayload: { priceSource: item.priceSource },
+                          }}
+                        />
                         {item.city ?
                           <span>{item.city}</span>
                         : null}
                       </p>
-                      <p className="mt-0.5 text-[10px] text-black/40">{priceDiagnosticsLabel(item)}</p>
-                      {item.shortSnippet ?
-                        <p className="mt-1 line-clamp-2 text-black/45">{item.shortSnippet}</p>
-                      : null}
-                      <p className="mt-1 text-[10px] text-black/40">
-                        {coverImageDiagnosticsLabel(item.coverImageUrl, item.imageSource)}
-                      </p>
-                      {item.titleSource === "url" ?
-                        <p className="mt-1 text-[11px] text-amber-900">
-                          Заголовок взят из URL, может быть неточным
-                        </p>
-                      : null}
-                      <div className="mt-2 flex flex-wrap gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           disabled={busy}
@@ -1168,19 +1138,20 @@ export function AdminCatalogOfferSearchImportSection({
                         >
                           Дозагрузить данные
                         </button>
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-full border border-[#c25a00]/30 bg-[#fff8f3] px-3 py-1 text-xs font-medium text-[#c25a00]"
+                        >
+                          Открыть на площадке
+                        </a>
                       </div>
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2 inline-block break-all text-xs font-medium text-[#c25a00] underline"
-                      >
-                        {item.url}
-                      </a>
                     </div>
                   </div>
                 </li>
-              ))}
+              );
+              })}
             </ul>
           </div>
         : null}

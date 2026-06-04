@@ -13,5 +13,7 @@ export function SourceOfferPriceDisplay({
   if (label) {
     return <span className={["font-semibold text-black", className].filter(Boolean).join(" ")}>{label}</span>;
   }
-  return <span className={["text-black/40", className].filter(Boolean).join(" ")}>Цена не указана</span>;
+  return (
+    <span className={["text-xs text-black/40", className].filter(Boolean).join(" ")}>Цена уточняется</span>
+  );
 }

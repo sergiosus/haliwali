@@ -13,6 +13,7 @@ import type {
   CatalogSourceOfferListQuery,
   CatalogSourceOfferListResult,
 } from "./catalogSourceOfferQuery";
+import { isGenericOfferTitle, sanitizeOfferText } from "./catalogOfferSearchText";
 import { buildSourceOfferSearchFields } from "./catalogSourceOfferSearchFields";
 import { sanitizeSourceOfferInput } from "./catalogSourceOfferNormalize";
 import { resolveOfferTypeForStorage } from "./catalogSourceOfferType";
@@ -606,6 +607,39 @@ const PUBLISHABLE_DRAFT_STATUSES = new Set<CatalogSourceOfferDraftStatus>([
 
 function isPublishableDraftRow(status: string): boolean {
   return PUBLISHABLE_DRAFT_STATUSES.has(normalizeSourceOfferDraftStatus(status));
+}
+
+export async function pgPatchSourceOfferDraftTitle(
+  id: number,
+  title: string,
+): Promise<CatalogSourceOfferDraft | null> {
+  const pool = getPool();
+  const { rows: draftRows } = await pool.query<DraftRow>(
+    `SELECT ${DRAFT_COLS} FROM catalog_source_offer_import_drafts WHERE id = $1`,
+    [id],
+  );
+  const d = draftRows[0];
+  if (!d || d.status === "published") return null;
+
+  const trimmed = sanitizeOfferText(title).slice(0, 200);
+  if (!trimmed || trimmed.length <= 8 || isGenericOfferTitle(trimmed)) return null;
+
+  const input = draftRowToInput(d);
+  const nextInput: CatalogSourceOfferInput = {
+    ...input,
+    title: trimmed,
+    rawPayload: {
+      ...(input.rawPayload ?? {}),
+      titleEdited: true,
+      titleSource: "manual",
+    },
+  };
+  const search = buildSourceOfferSearchFields(nextInput);
+  const row = await updateSourceOfferDraftRow(pool, id, d.status, nextInput, search, {
+    duplicateHint: d.duplicate_hint,
+    duplicateOfOfferId: d.duplicate_of_offer_id,
+  });
+  return row ? rowToDraft(row) : null;
 }
 
 export async function pgDeleteSourceOfferDrafts(ids: number[]): Promise<number> {

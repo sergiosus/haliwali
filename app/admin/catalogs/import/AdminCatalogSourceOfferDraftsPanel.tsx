@@ -8,6 +8,11 @@ import {
   SourceOfferCoverThumb,
   SourceOfferModerationCardBody,
 } from "../../../components/catalog/SourceOfferDisplay";
+import {
+  canPublishSourceOffer,
+  sourceOfferDisplayTitle,
+  SOURCE_OFFER_TITLE_MISSING,
+} from "../../../lib/catalogSourceOfferCardUi";
 import { CATALOG_CATEGORY_SEED } from "../../../lib/catalogTypes";
 
 const STATUS_LABEL: Record<CatalogSourceOfferDraftStatus, string> = {
@@ -40,6 +45,90 @@ function categoryTitle(slug: string): string {
 
 type DraftAction = "publish" | "reject" | "delete";
 
+function SourceOfferDraftTitleEditor({
+  draft,
+  disabled,
+  onSaved,
+}: {
+  draft: CatalogSourceOfferDraft;
+  disabled: boolean;
+  onSaved: (updated: CatalogSourceOfferDraft) => void;
+}) {
+  const initialTitle = () => {
+    const display = sourceOfferDisplayTitle(draft);
+    return display === SOURCE_OFFER_TITLE_MISSING ? "" : display;
+  };
+  const [value, setValue] = useState(initialTitle);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const display = sourceOfferDisplayTitle(draft);
+    setValue(display === SOURCE_OFFER_TITLE_MISSING ? "" : display);
+    setError(null);
+  }, [draft.id, draft.title, draft.rawPayload, draft.updatedAt]);
+
+  async function saveTitle() {
+    const trimmed = value.trim();
+    if (trimmed.length <= 8) {
+      setError("Минимум 9 символов");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/catalogs/source-offers/drafts", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: draft.id, title: trimmed }),
+      });
+      const data = (await r.json()) as {
+        ok?: boolean;
+        draft?: CatalogSourceOfferDraft;
+        message?: string;
+        error?: string;
+      };
+      if (!r.ok || !data.ok || !data.draft) {
+        setError(data.message ?? data.error ?? "Не удалось сохранить");
+        return;
+      }
+      onSaved(data.draft);
+    } catch {
+      setError("Ошибка сети");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5 rounded-xl border border-black/10 bg-black/[0.02] p-2.5">
+      <label className="block text-[11px] font-medium text-black/55">Название для публикации</label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        disabled={disabled || saving}
+        className="w-full rounded-lg border border-black/15 bg-white px-2.5 py-1.5 text-sm"
+        placeholder="Введите название объявления"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={disabled || saving}
+          onClick={() => void saveTitle()}
+          className="rounded-full border border-black/15 bg-white px-3 py-1 text-xs font-medium disabled:opacity-40"
+        >
+          {saving ? "Сохранение…" : "Сохранить название"}
+        </button>
+        {error ?
+          <span className="text-xs text-red-800">{error}</span>
+        : null}
+      </div>
+    </div>
+  );
+}
+
 export function AdminCatalogSourceOfferDraftsPanel({
   onChanged,
   embedded = false,
@@ -62,6 +151,10 @@ export function AdminCatalogSourceOfferDraftsPanel({
   const [message, setMessage] = useState("");
   const [tablesReady, setTablesReady] = useState(true);
   const [schemaMissing, setSchemaMissing] = useState<string[] | undefined>();
+
+  const replaceDraft = useCallback((updated: CatalogSourceOfferDraft) => {
+    setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+  }, []);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -94,6 +187,11 @@ export function AdminCatalogSourceOfferDraftsPanel({
   }, [listStatus, load, tablesReady, refreshSignal]);
 
   const filtered = useMemo(() => drafts, [drafts]);
+
+  const publishableIds = useMemo(
+    () => new Set(filtered.filter((d) => canPublishSourceOffer(d)).map((d) => d.id)),
+    [filtered],
+  );
 
   const selectAllVisible = useCallback(() => {
     setSelected(new Set(filtered.map((d) => d.id)));
@@ -187,8 +285,8 @@ export function AdminCatalogSourceOfferDraftsPanel({
           </button>
           <button
             type="button"
-            disabled={busy || selected.size === 0}
-            onClick={() => void runAction("publish", [...selected])}
+            disabled={busy || selected.size === 0 || ![...selected].some((id) => publishableIds.has(id))}
+            onClick={() => void runAction("publish", [...selected].filter((id) => publishableIds.has(id)))}
             className="rounded-full bg-black px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
           >
             Опубликовать выбранные
@@ -217,7 +315,9 @@ export function AdminCatalogSourceOfferDraftsPanel({
       : null}
 
       <ul className="space-y-3">
-        {filtered.map((d) => (
+        {filtered.map((d) => {
+          const publishable = canPublishSourceOffer(d);
+          return (
           <li key={d.id} className="rounded-2xl border border-black/10 bg-white p-4 text-sm">
             <div className="flex items-start gap-3">
               {queueMode === "candidates" ?
@@ -238,6 +338,15 @@ export function AdminCatalogSourceOfferDraftsPanel({
               <SourceOfferCoverThumb offer={d} size="admin" alt={d.title} />
               <SourceOfferModerationCardBody
                 offer={d}
+                titleEditor={
+                  queueMode === "candidates" ?
+                    <SourceOfferDraftTitleEditor
+                      draft={d}
+                      disabled={busy}
+                      onSaved={replaceDraft}
+                    />
+                  : undefined
+                }
                 meta={
                   <>
                     {queueMode === "duplicate" || d.duplicateHint ?
@@ -261,7 +370,7 @@ export function AdminCatalogSourceOfferDraftsPanel({
                   <div className="mt-3">
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || !publishable}
                       onClick={() => void runAction("publish", [d.id])}
                       className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white disabled:opacity-40"
                     >
@@ -287,7 +396,8 @@ export function AdminCatalogSourceOfferDraftsPanel({
               </SourceOfferModerationCardBody>
             </div>
           </li>
-        ))}
+        );
+        })}
       </ul>
 
       {filtered.length === 0 ?

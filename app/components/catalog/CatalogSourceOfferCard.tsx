@@ -3,6 +3,7 @@ import { catalogSourceNameLabel } from "../../lib/catalogSourceName";
 import { sourceOfferPublicPath } from "../../lib/catalogSourceOfferSeo";
 import { resolveSourceOfferDisplayCity } from "../../lib/catalogSourceOfferDisplay";
 import { SOURCE_OFFER_SNIPPET_MAX } from "../../lib/catalogSourceOfferNormalize";
+import { sourceOfferDisplayTitle } from "../../lib/catalogSourceOfferCardUi";
 import { SourceOfferCoverThumb, SourceOfferPriceDisplay } from "./SourceOfferDisplay";
 import type { CatalogSourceOffer } from "../../lib/catalogSourceOfferTypes";
 
@@ -15,11 +16,12 @@ export function CatalogSourceOfferCard({
 }) {
   const snippet = offer.shortSnippet?.trim().slice(0, SOURCE_OFFER_SNIPPET_MAX) ?? "";
   const cityLabel = resolveSourceOfferDisplayCity(offer, displayCityFallback);
+  const titleDisplay = sourceOfferDisplayTitle(offer);
   const detailHref = offer.id ? sourceOfferPublicPath(offer.id) : null;
 
   const media = (
     <div className="relative shrink-0">
-      <SourceOfferCoverThumb offer={offer} size="public" alt={offer.title} />
+      <SourceOfferCoverThumb offer={offer} size="public" alt={titleDisplay} />
       <span className="absolute left-2 top-2 rounded-full bg-white/95 px-2 py-0.5 text-[10px] font-semibold text-violet-900 shadow-sm sm:text-xs">
         {catalogSourceNameLabel(offer.sourceName)}
       </span>
@@ -38,10 +40,10 @@ export function CatalogSourceOfferCard({
           {detailHref ?
             <h2 className="text-base font-semibold leading-snug text-black sm:text-lg">
               <Link href={detailHref} className="hover:text-[#ff7a00]">
-                {offer.title}
+                {titleDisplay}
               </Link>
             </h2>
-          : <h2 className="text-base font-semibold leading-snug text-black sm:text-lg">{offer.title}</h2>}
+          : <h2 className="text-base font-semibold leading-snug text-black sm:text-lg">{titleDisplay}</h2>}
 
           <p className="mt-2 text-xl font-bold tracking-tight sm:text-2xl">
             <SourceOfferPriceDisplay offer={offer} />

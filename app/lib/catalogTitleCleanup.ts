@@ -1,64 +1,43 @@
-export type TitleSource = "card" | "listing" | "metadata" | "url";
+export type TitleSource = "card" | "listing" | "metadata" | "url_slug" | "manual";
 
-const BRAND_CASE: Record<string, string> = {
-  volkswagen: "Volkswagen",
-  bmw: "BMW",
-  toyota: "Toyota",
-  mercedes: "Mercedes",
-  audi: "Audi",
-  skoda: "Skoda",
-  ford: "Ford",
-  kia: "Kia",
-  hyundai: "Hyundai",
-  renault: "Renault",
-  nissan: "Nissan",
-};
+/** @deprecated stored as url_slug */
+const LEGACY_URL_SLUG = "url";
 
-function titleCaseToken(w: string): string {
-  if (!w) return w;
-  const lower = w.toLowerCase();
-  if (BRAND_CASE[lower]) return BRAND_CASE[lower]!;
-  // Preserve short all-caps tokens.
-  if (/^[A-Z]{2,6}$/.test(w)) return w;
-  // Preserve OEM-ish tokens.
-  if (/^[a-z0-9]{2,10}$/i.test(w) && /\d/.test(w)) return w.toUpperCase();
-  return w[0]!.toUpperCase() + w.slice(1);
+export function isUrlSlugTitleSource(src: string | null | undefined): boolean {
+  const s = src?.trim();
+  return s === "url_slug" || s === LEGACY_URL_SLUG;
 }
 
-function normalizeSlugFormatting(raw: string): string {
-  return raw
+export function normalizeTitleSource(src: string | null | undefined): TitleSource | null {
+  const s = src?.trim();
+  if (!s) return null;
+  if (s === LEGACY_URL_SLUG) return "url_slug";
+  if (s === "card" || s === "listing" || s === "metadata" || s === "url_slug" || s === "manual") {
+    return s;
+  }
+  return null;
+}
+
+export function truncateSlugDebug(slug: string, max = 48): string {
+  const s = slug.trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…`;
+}
+
+function decodeSlugRaw(raw: string): string {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, " "));
+  } catch {
+    return raw;
+  }
+}
+
+/** Normalize slug segment for admin debug line only (not shown as offer title). */
+export function normalizeSlugDebugText(raw: string): string {
+  return decodeSlugRaw(raw)
     .trim()
-    .replace(/[_/]+/g, " ")
-    .replace(/-+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/[_/]+/g, "_")
+    .replace(/-+/g, "_")
+    .replace(/\s+/g, "_")
+    .toLowerCase();
 }
-
-function slugQualityPoor(t: string): boolean {
-  if (!t) return true;
-  // If it has no letters at all, it’s useless.
-  if (!/[A-Za-zА-Яа-яЁё]/.test(t)) return true;
-  // Extremely long slugs are usually garbage.
-  if (t.length > 140) return true;
-  return false;
-}
-
-/**
- * URL slug formatting only.
- * Rules:
- * - replace "-" and "_" with spaces
- * - collapse spaces
- * - capitalize tokens
- * - preserve known brand casing
- * Never translate individual words.
- */
-export function formatUrlSlugTitle(raw: string): string {
-  const normalized = normalizeSlugFormatting(raw);
-  if (slugQualityPoor(normalized)) return "";
-  const tokens = normalized.split(" ").filter(Boolean);
-  const capped = tokens.map(titleCaseToken).join(" ").trim();
-  if (slugQualityPoor(capped)) return "";
-  return capped;
-}
-
-

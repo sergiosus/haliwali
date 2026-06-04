@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { catalogSourceNameLabel } from "../../../lib/catalogSourceName";
+import { sourceOfferDisplayTitle } from "../../../lib/catalogSourceOfferCardUi";
 import { SourceOfferPriceDisplay } from "../../../components/catalog/SourceOfferPriceDisplay";
 import { resolveCoverImageUrl } from "../../../lib/catalogSourceOfferCoverImage";
 import {
@@ -47,7 +48,7 @@ export async function generateMetadata(props: PageProps): Promise<Metadata> {
   }
 
   const city = sourceOfferDisplayCityLabel(offer);
-  const title = sourceOfferPageTitle(offer.title, city);
+  const title = sourceOfferPageTitle(offer.title, city, offer);
   const description = sourceOfferMetaDescription(offer);
   const canonical = `${base}${sourceOfferPublicPath(id)}`;
   const image = resolveCoverImageUrl({
@@ -88,6 +89,7 @@ export default async function CatalogSourceOfferDetailPage(props: PageProps) {
   if (!offer) notFound();
 
   const city = sourceOfferDisplayCityLabel(offer);
+  const titleDisplay = sourceOfferDisplayTitle(offer);
   const cover = resolveCoverImageUrl({
     coverImageUrl: offer.coverImageUrl,
     imageUrl: offer.imageUrl,
@@ -125,7 +127,7 @@ export default async function CatalogSourceOfferDetailPage(props: PageProps) {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={cover}
-                alt={offer.title}
+                alt={titleDisplay}
                 className="h-full w-full object-cover"
                 width={640}
                 height={400}
@@ -139,7 +141,7 @@ export default async function CatalogSourceOfferDetailPage(props: PageProps) {
           : null}
 
           <div className="p-4 sm:p-6">
-            <h1 className="text-xl font-extrabold tracking-tight text-black sm:text-2xl">{offer.title}</h1>
+            <h1 className="text-xl font-extrabold tracking-tight text-black sm:text-2xl">{titleDisplay}</h1>
             <p className="mt-3 text-2xl font-bold tracking-tight">
               <SourceOfferPriceDisplay offer={offer} className="text-2xl" />
             </p>

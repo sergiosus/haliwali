@@ -1,5 +1,9 @@
 import { displaySourceOfferPrice } from "./catalogOfferPrice";
 import { resolveCoverImageUrl } from "./catalogSourceOfferCoverImage";
+import {
+  SOURCE_OFFER_TITLE_MISSING,
+  sourceOfferDisplayTitle,
+} from "./catalogSourceOfferCardUi";
 import { sourceOfferMetaDescription, sourceOfferPublicPath } from "./catalogSourceOfferSeo";
 import { resolveSourceOfferDisplayCity } from "./catalogSourceOfferDisplay";
 import type { CatalogSourceOffer } from "./catalogSourceOfferTypes";
@@ -117,7 +121,10 @@ export function sourceOfferJsonLd(offer: CatalogSourceOffer): JsonLd {
   const json: JsonLd = {
     "@context": "https://schema.org",
     "@type": "Offer",
-    name: (offer.title ?? "").trim(),
+    name: (() => {
+      const n = sourceOfferDisplayTitle(offer);
+      return n === SOURCE_OFFER_TITLE_MISSING ? "Предложение" : n;
+    })(),
     description: sourceOfferMetaDescription(offer),
     url,
     ...(image ? { image: [image] } : {}),
@@ -134,12 +141,15 @@ export function sourceOfferJsonLd(offer: CatalogSourceOffer): JsonLd {
   return json;
 }
 
-export function sourceOfferBreadcrumbs(offer: Pick<CatalogSourceOffer, "id" | "title">): {
+export function sourceOfferBreadcrumbs(
+  offer: Pick<CatalogSourceOffer, "id" | "title" | "rawPayload">,
+): {
   name: string;
   path: string;
 }[] {
   const id = offer.id ?? 0;
-  const title = (offer.title ?? "").trim() || "Предложение";
+  const display = sourceOfferDisplayTitle(offer);
+  const title = display === SOURCE_OFFER_TITLE_MISSING ? "Предложение" : display;
   return [
     { name: "Haliwali", path: "/" },
     { name: "Предложения", path: "/catalogs/predlozheniya" },

@@ -57,6 +57,14 @@ export async function publishSourceOfferDrafts(ids: number[]): Promise<CatalogSo
   return pg.pgPublishSourceOfferDrafts(ids);
 }
 
+export async function patchSourceOfferDraftTitle(
+  id: number,
+  title: string,
+): Promise<CatalogSourceOfferDraft | null> {
+  assertPostgres();
+  return pg.pgPatchSourceOfferDraftTitle(id, title);
+}
+
 export async function deleteSourceOfferDrafts(ids: number[]): Promise<number> {
   assertPostgres();
   return pg.pgDeleteSourceOfferDrafts(ids);

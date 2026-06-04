@@ -7,6 +7,8 @@ import {
   sanitizeOfferText,
   titleFromListingUrl,
 } from "./catalogOfferSearchText";
+import { isUrlSlugTitleSource } from "./catalogTitleCleanup";
+import { SOURCE_OFFER_TITLE_MISSING } from "./catalogSourceOfferCardUi";
 import { offerListingSourceFromUrl, sanitizeSourceOfferDraftInput } from "./catalogSourceOfferNormalize";
 import { fetchPublicHtml } from "./catalogHtmlFetch";
 import { MAX_URLS_PER_BATCH } from "./catalogImportLimits";
@@ -28,12 +30,8 @@ import {
 import { inferOfferTypeFromListing } from "./catalogSourceOfferType";
 import { isCatalogMarketplaceSourceName } from "./catalogSourceOfferTypes";
 import { mergeOfferPriceFields, offerPriceFromLegacyPrice } from "./catalogOfferPrice";
-import {
-  priceDiagnosticsLabel,
-  type OfferPriceSource,
-} from "./catalogOfferPriceDiagnostics";
+import type { OfferPriceSource } from "./catalogOfferPriceDiagnostics";
 import type { AvitoCoverImageSource } from "./catalogAvitoCoverImage";
-import { coverImageDiagnosticsLabel } from "./catalogSourceOfferCoverImage";
 import type { SourceOfferImportOutcome } from "./catalogSourceOfferImportErrors";
 
 export type SourceOfferSearchSelection = {
@@ -85,9 +83,13 @@ function buildInputFromSearchSelection(
   parseWarnings: string[],
 ): CatalogSourceOfferInput {
   const listingSource = offerListingSourceFromUrl(sel.url)!;
-  const title =
+  const rawTitle =
     sanitizeOfferText(sel.title) || titleFromListingUrl(sel.url) || "Объявление";
-  const shortSnippet = sanitizeOfferText(sel.shortSnippet || sel.title).slice(0, 280) || title.slice(0, 280);
+  const selSource = sel.titleSource === "url" || sel.titleSource === "url_slug" ? "url_slug" : sel.titleSource;
+  const fromSlug = selSource === "url_slug";
+  const title = fromSlug ? SOURCE_OFFER_TITLE_MISSING : rawTitle;
+  const shortSnippet =
+    sanitizeOfferText(sel.shortSnippet || rawTitle).slice(0, 280) || rawTitle.slice(0, 280);
   const parseQuality = isSearchCardComplete(sel) ? "search_card" : "link_only";
   const priceFields = mergeOfferPriceFields(offerPriceFromLegacyPrice(sel.price), {
     priceAmount: sel.priceAmount ?? null,
@@ -128,7 +130,8 @@ function buildInputFromSearchSelection(
       // Stage 1 results do not guarantee price/image.
       priceSource: (sel.priceSource ?? "none") as OfferPriceSource,
       parseStatus: "search_only",
-      titleSource: (sel.titleSource ? String(sel.titleSource) : ""),
+      titleSource: selSource ? String(selSource) : "",
+      ...(fromSlug && rawTitle ? { urlSlug: rawTitle.slice(0, 200) } : {}),
     },
   };
 }
@@ -166,20 +169,48 @@ function importPriceFields(
   return { priceFound: found, priceSource: found ? src : "none" };
 }
 
+function enrichedListingTitle(enriched: CatalogSourceOfferInput): string | null {
+  const t = sanitizeOfferText(enriched.title);
+  if (!t || isGenericOfferTitle(t)) return null;
+  const src = enriched.rawPayload?.titleSource;
+  if (isUrlSlugTitleSource(typeof src === "string" ? src : null)) return null;
+  return t;
+}
+
 function mergeEnrichedInput(
   base: CatalogSourceOfferInput,
   enriched: CatalogSourceOfferInput,
 ): CatalogSourceOfferInput {
+  const baseSrc = base.rawPayload?.titleSource;
+  const fromPage = enrichedListingTitle(enriched);
+
   const pickTitle = (): string => {
-    if (!isGenericOfferTitle(base.title)) return base.title;
-    if (enriched.title && !isGenericOfferTitle(enriched.title)) return enriched.title;
+    if (isUrlSlugTitleSource(typeof baseSrc === "string" ? baseSrc : null)) {
+      return fromPage ?? SOURCE_OFFER_TITLE_MISSING;
+    }
+    if (!isGenericOfferTitle(base.title) && base.title !== SOURCE_OFFER_TITLE_MISSING) {
+      return base.title;
+    }
+    if (fromPage) return fromPage;
     const fromUrl = titleFromListingUrl(base.sourceUrl);
     if (fromUrl && !isGenericOfferTitle(fromUrl)) return fromUrl;
     return base.title;
   };
+
+  const pickTitleSource = (): string => {
+    if (fromPage && enriched.rawPayload?.titleSource) {
+      return String(enriched.rawPayload.titleSource);
+    }
+    if (isUrlSlugTitleSource(typeof baseSrc === "string" ? baseSrc : null)) {
+      return "url_slug";
+    }
+    return typeof baseSrc === "string" ? baseSrc : "";
+  };
+
+  const pickedTitle = pickTitle();
   return {
     ...base,
-    title: pickTitle(),
+    title: pickedTitle,
     price: base.price ?? enriched.price,
     priceAmount: base.priceAmount ?? enriched.priceAmount,
     priceText: base.priceText ?? enriched.priceText,
@@ -197,6 +228,7 @@ function mergeEnrichedInput(
       ...base.rawPayload,
       enrichedFromPage: true,
       parseStatus: "enriched",
+      titleSource: pickTitleSource(),
       parseWarnings: base.rawPayload?.parseWarnings,
       imageSource:
         base.coverImageUrl ?
@@ -408,11 +440,10 @@ export async function processSourceOfferSearchSelections(
       url: rawUrl,
       status: "created",
       sourceName: sourceNameHint,
-      message: [
-        parseWarning ? "Кандидат создан (данные с карточки поиска)" : "Кандидат создан",
-        priceDiagnosticsLabel(sanitized),
-        coverImageDiagnosticsLabel(sanitized.coverImageUrl, imageFields.imageSource),
-      ].join(" · "),
+      message:
+        parseWarning ?
+          "Кандидат создан — часть данных с карточки поиска"
+        : "Кандидат создан",
       parseWarning,
       ...imageFields,
       ...priceFieldsOut,

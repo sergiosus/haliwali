@@ -64,7 +64,7 @@ export function priceDiagnosticsLabel(offer: {
   return `price: ${d.found ? "found" : "not found"} · priceSource: ${d.source}`;
 }
 
-/** Public/admin display — null means show «Цена не указана». */
+/** Verified price label — null means caller shows «Цена уточняется». */
 export function displayVerifiedSourceOfferPrice(offer: {
   priceText?: string | null;
   priceAmount?: number | null;

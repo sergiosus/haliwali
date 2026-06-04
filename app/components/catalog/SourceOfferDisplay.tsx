@@ -2,11 +2,18 @@
 
 import type { ReactNode } from "react";
 import { catalogSourceNameLabel } from "../../lib/catalogSourceName";
-import { coverImageDiagnosticsLabel } from "../../lib/catalogSourceOfferCoverImage";
-import { priceDiagnosticsLabel } from "../../lib/catalogOfferPriceDiagnostics";
 import { resolveCoverImageUrl } from "../../lib/catalogSourceOfferCoverImage";
+import {
+  canPublishSourceOffer,
+  sourceOfferAdminSlugDebugLine,
+  sourceOfferCardDataLevel,
+  sourceOfferCardStatusLabel,
+  sourceOfferDisplayTitle,
+  SOURCE_OFFER_TITLE_MISSING,
+  SOURCE_OFFER_TITLE_MISSING_HINT,
+  type SourceOfferCardFields,
+} from "../../lib/catalogSourceOfferCardUi";
 import { SourceOfferPriceDisplay } from "./SourceOfferPriceDisplay";
-import { formatUrlSlugTitle } from "../../lib/catalogTitleCleanup";
 import type { CatalogSourceOffer, CatalogSourceOfferDraft } from "../../lib/catalogSourceOfferTypes";
 
 type OfferLike = Pick<
@@ -29,20 +36,44 @@ type OfferLike = Pick<
 
 export { SourceOfferPriceDisplay } from "./SourceOfferPriceDisplay";
 
-export function SourceOfferTruthDiagnostics({ offer }: { offer: OfferLike }) {
-  const imageSrc =
-    typeof offer.rawPayload?.imageSource === "string" ? offer.rawPayload.imageSource : null;
-  const cover = resolveCoverImageUrl({
-    coverImageUrl: offer.coverImageUrl,
-    imageUrl: offer.imageUrl,
-    rawPayload: offer.rawPayload,
-  });
+export function SourceOfferCardStatusBadge({ offer }: { offer: SourceOfferCardFields }) {
+  const level = sourceOfferCardDataLevel(offer);
+  const full = level === "full";
   return (
-    <p className="mt-1 text-[10px] leading-snug text-black/45">
-      {priceDiagnosticsLabel(offer)}
-      {" · "}
-      {coverImageDiagnosticsLabel(cover, imageSrc)}
-    </p>
+    <span
+      className={[
+        "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+        full ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900",
+      ].join(" ")}
+    >
+      {sourceOfferCardStatusLabel(level)}
+    </span>
+  );
+}
+
+export function SourceOfferTitleBlock({
+  offer,
+  showSlugDebug = false,
+  titleClassName = "font-semibold text-black",
+}: {
+  offer: SourceOfferCardFields;
+  showSlugDebug?: boolean;
+  titleClassName?: string;
+}) {
+  const titleDisplay = sourceOfferDisplayTitle(offer);
+  const missing = titleDisplay === SOURCE_OFFER_TITLE_MISSING;
+  const slugLine = showSlugDebug ? sourceOfferAdminSlugDebugLine(offer) : null;
+
+  return (
+    <div className="min-w-0">
+      <span className={titleClassName}>{titleDisplay}</span>
+      {missing ?
+        <p className="mt-0.5 text-xs text-black/40">{SOURCE_OFFER_TITLE_MISSING_HINT}</p>
+      : null}
+      {slugLine ?
+        <p className="mt-0.5 font-mono text-[10px] text-black/35">{slugLine}</p>
+      : null}
+    </div>
   );
 }
 
@@ -60,6 +91,7 @@ export function SourceOfferCoverThumb({
     imageUrl: offer.imageUrl,
     rawPayload: offer.rawPayload,
   });
+  const altText = (alt ?? sourceOfferDisplayTitle(offer) ?? "").trim() || "Фото предложения";
 
   if (cover) {
     const box =
@@ -71,7 +103,7 @@ export function SourceOfferCoverThumb({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={cover}
-          alt={(alt ?? offer.title ?? "").trim() || "Фото предложения"}
+          alt={altText}
           className="h-full w-full object-cover"
           width={size === "public" ? 180 : 120}
           height={size === "public" ? 120 : 80}
@@ -87,8 +119,8 @@ export function SourceOfferCoverThumb({
       "flex h-[72px] max-h-[120px] w-full max-w-[180px] items-center justify-center sm:h-[120px] sm:w-[180px]"
     : "flex h-16 w-[120px] max-h-[80px] items-center justify-center";
   return (
-    <div className={`${placeholder} shrink-0 rounded-lg border border-dashed border-black/10 bg-black/[0.02]`}>
-      <span className="text-[10px] font-medium text-black/30">Без фото</span>
+    <div className={`${placeholder} shrink-0 rounded-lg border border-dashed border-black/10 bg-[#fff8f3] text-center`}>
+      <span className="px-1 text-[10px] font-medium leading-tight text-black/45">📷 Фото загружается</span>
     </div>
   );
 }
@@ -97,38 +129,31 @@ export function SourceOfferModerationCardBody({
   offer,
   meta,
   children,
-  showDiagnostics = true,
+  titleEditor,
 }: {
   offer: OfferLike;
   meta?: ReactNode;
   children?: ReactNode;
-  showDiagnostics?: boolean;
+  titleEditor?: ReactNode;
 }) {
-  const titleSource = typeof offer.rawPayload?.titleSource === "string" ? offer.rawPayload.titleSource : null;
-  const titleDisplay = titleSource === "url" ? (formatUrlSlugTitle(offer.title) || "Название не извлечено") : offer.title;
+  const publishable = canPublishSourceOffer(offer);
   return (
     <div className="min-w-0 flex-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-black">{titleDisplay}</span>
+      <div className="flex flex-wrap items-start gap-2">
+        <SourceOfferTitleBlock offer={offer} />
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
           {catalogSourceNameLabel(offer.sourceName)}
         </span>
+        <SourceOfferCardStatusBadge offer={offer} />
         {meta}
       </div>
+      {titleEditor}
       <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <SourceOfferPriceDisplay offer={offer} />
         {offer.city ?
           <span className="text-black/55">{offer.city}</span>
         : null}
       </p>
-      {showDiagnostics ?
-        <SourceOfferTruthDiagnostics offer={offer} />
-      : null}
-      {titleSource === "url" ?
-        <p className="mt-1 text-[11px] text-amber-900">
-          Заголовок взят из URL, может быть неточным
-        </p>
-      : null}
       {(offer.companyName || offer.sellerName) ?
         <p className="mt-1 text-xs text-black/50">
           {offer.companyName ? `Компания: ${offer.companyName}` : ""}
@@ -155,6 +180,11 @@ export function SourceOfferModerationCardBody({
         {offer.sourceUrl}
       </a>
       {children}
+      {!publishable && children ?
+        <p className="mt-1 text-[11px] text-black/45">
+          Для публикации укажите название вручную или дозагрузите с площадки; также нужны город и цена или фото
+        </p>
+      : null}
     </div>
   );
 }

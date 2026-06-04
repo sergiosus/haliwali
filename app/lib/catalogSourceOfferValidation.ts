@@ -9,8 +9,13 @@ import {
   sanitizeOfferText,
   titleFromListingUrl,
 } from "./catalogOfferSearchText";
+import { hasVerifiedSourceOfferPrice } from "./catalogOfferPriceDiagnostics";
 import { offerListingSourceFromUrl } from "./catalogSourceName";
 import type { CatalogSourceName, CatalogSourceOfferInput } from "./catalogSourceOfferTypes";
+import {
+  sourceOfferDisplayTitle,
+  sourceOfferHasPublishableTitle,
+} from "./catalogSourceOfferCardUi";
 
 export type SourceOfferRejectReason =
   | "invalid_source_page"
@@ -99,28 +104,29 @@ export function meetsPublishedSourceOfferMinimum(input: {
   sourceUrl: string;
   sourceName: CatalogSourceName;
   price: string | null;
+  priceAmount?: number | null;
+  priceText?: string | null;
   city: string;
   shortSnippet: string;
   companyName?: string;
   sellerName?: string;
+  coverImageUrl?: string | null;
+  rawPayload?: Record<string, unknown>;
 }): boolean {
-  if (!input.sourceUrl?.trim() || !input.title?.trim()) return false;
-  if (input.title.trim().length < 5) return false;
-  if (hasBadEncoding(input.title)) return false;
-  if (isGenericOfferTitle(input.title)) return false;
+  const displayTitle = sourceOfferDisplayTitle(input);
+  if (!sourceOfferHasPublishableTitle(input)) return false;
+  if (hasBadEncoding(displayTitle)) return false;
+  if (isGenericOfferTitle(displayTitle)) return false;
+  if (!input.city?.trim()) return false;
+  if (isSearchOnlySourceOffer(input)) return false;
 
-  const snippet = sanitizeOfferText(input.shortSnippet);
-  const snippetOk = Boolean(
-    snippet.length > 14 && !isGenericOfferTitle(snippet) && !hasBadEncoding(snippet),
-  );
+  const hasPrice = hasVerifiedSourceOfferPrice(input);
+  const hasImage = Boolean(input.coverImageUrl?.trim());
+  return hasPrice || hasImage;
+}
 
-  return Boolean(
-    input.price?.trim() ||
-    input.city?.trim() ||
-    input.companyName?.trim() ||
-    input.sellerName?.trim() ||
-    snippetOk,
-  );
+function isSearchOnlySourceOffer(input: { rawPayload?: Record<string, unknown> }): boolean {
+  return input.rawPayload?.parseStatus === "search_only";
 }
 
 export type SourceOfferValidationResult =
@@ -138,6 +144,11 @@ export function validateSourceOfferInput(
     return { ok: false, reason: "missing_required_fields" };
   }
 
+  const publishTitle = sourceOfferDisplayTitle(input);
+  if (!sourceOfferHasPublishableTitle(input)) {
+    return { ok: false, reason: "missing_required_fields" };
+  }
+
   const urlReason = classifyInvalidSourceUrl(sourceUrl);
   if (urlReason) return { ok: false, reason: urlReason };
 
@@ -149,11 +160,11 @@ export function validateSourceOfferInput(
 
   if (isGenericOfferTitle(title)) return { ok: false, reason: "generic_title" };
 
-  if (!meetsPublishedSourceOfferMinimum({ ...input, title })) {
+  if (!meetsPublishedSourceOfferMinimum({ ...input, title: publishTitle })) {
     return { ok: false, reason: "missing_required_fields" };
   }
 
-  return { ok: true, input: { ...input, title } };
+  return { ok: true, input: { ...input, title: publishTitle } };
 }
 
 export function isValidPublishedSourceOffer(input: CatalogSourceOfferInput): boolean {

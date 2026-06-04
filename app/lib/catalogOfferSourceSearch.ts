@@ -97,7 +97,7 @@ export type OfferSourceSearchDiagnostic = {
 export type OfferSourceSearchHit = {
   url: string;
   title: string;
-  titleSource?: "card" | "metadata" | "url";
+  titleSource?: "card" | "metadata" | "url_slug";
   snippet: string;
   price: string | null;
   priceAmount?: number | null;
@@ -271,7 +271,7 @@ function pushAvitoHit(
   const titleSource: OfferSourceSearchHit["titleSource"] =
     sanitizeOfferText(titleHint || cardTitle || "") ? "card"
     : sanitizeOfferText(jsonTitle || "") ? "metadata"
-    : "url";
+    : "url_slug";
   const snippet = sanitizeOfferText(
     decodeJsonString(ctx.match(/"description"\s*:\s*"([^"]{8,280})"/i)?.[1] ?? "") ||
       decodeJsonString(ctx.match(/data-marker="item-description"[^>]*>([^<]{8,280})/i)?.[1] ?? "") ||

@@ -185,7 +185,7 @@ function hitToResult(
   return {
     url: hit.url,
     title,
-    titleSource: (hit.titleSource ?? "url") as import("./catalogTitleCleanup").TitleSource,
+    titleSource: (hit.titleSource ?? "url_slug") as import("./catalogTitleCleanup").TitleSource,
     price: hit.price,
     priceAmount: hit.priceAmount ?? null,
     priceText: hit.priceText ?? null,

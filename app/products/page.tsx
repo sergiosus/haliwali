@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { CategoryGuideCtaCard } from "../components/CategoryGuideCtaCard";
+import { PRODUCT_AUTO_TRANSPORT_GUIDE_CTAS } from "../lib/categoryGuideCtas";
 import { directoryColumns } from "../lib/directory";
 import { isPublicStatus, useListingsStore } from "../lib/listings";
 
@@ -53,6 +55,12 @@ export default function ProductsIndexPage() {
                 </Link>
               );
             })}
+          </div>
+          <div className="mt-4 space-y-2 border-t border-gray-100 pt-3">
+            <p className="px-2 text-xs font-medium text-gray-500">Авто и транспорт — не нашли?</p>
+            {PRODUCT_AUTO_TRANSPORT_GUIDE_CTAS.map((cta) => (
+              <CategoryGuideCtaCard key={cta.href} cta={cta} />
+            ))}
           </div>
         </div>
       </main>

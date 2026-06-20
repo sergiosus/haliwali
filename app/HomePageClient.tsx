@@ -48,6 +48,11 @@ import {
   type HomeCategoryGroup,
 } from "./lib/categories";
 import { CityCombobox } from "./components/CityCombobox";
+import { CategoryGuideCtaCard } from "./components/CategoryGuideCtaCard";
+import {
+  PRODUCT_AUTO_TRANSPORT_GUIDE_CTAS,
+  PRODUCT_AUTO_TRANSPORT_PARENT_SLUG,
+} from "./lib/categoryGuideCtas";
 import { ListingLocationSection } from "./components/ListingLocationSection";
 import { CompactListingCard } from "./components/CompactListingCard";
 import { appendReturnUrlQuery } from "./lib/returnNavigation";
@@ -841,6 +846,12 @@ function HaliwaliLanding() {
   );
 }
 
+function homeCategoryCountSuffix(count: number | undefined, loading: boolean): string {
+  if (loading) return " (…)";
+  if (count != null && count > 0) return ` (${count})`;
+  return "";
+}
+
 function HomeCategorySectionCard({
   heading,
   groups,
@@ -920,7 +931,8 @@ function HomeCategorySectionCard({
           const expandable = homeGroupHasExpandableChildren(group);
           const children = homeGroupChildLinks(group);
           const expanded = expandedParentSlug === group.parentSlug;
-          const parentCount = countsLoading || !counts ? "..." : String(counts[group.parentSlug] ?? 0);
+          const parentCountNum = counts?.[group.parentSlug] ?? 0;
+          const parentCountSuffix = homeCategoryCountSuffix(parentCountNum, countsLoading);
 
           return (
             <div key={`${heading}-${group.parentSlug}`} className="flex flex-col gap-1">
@@ -943,8 +955,10 @@ function HomeCategorySectionCard({
                       }
                     >
                       {group.title}
-                    </span>{" "}
-                    <span className="text-[13px] font-normal text-gray-400">({parentCount})</span>
+                    </span>
+                    {parentCountSuffix ?
+                      <span className="text-[13px] font-normal text-gray-400">{parentCountSuffix}</span>
+                    : null}
                   </span>
                   <span
                     className="shrink-0 text-[13px] text-gray-400 transition-transform"
@@ -965,8 +979,10 @@ function HomeCategorySectionCard({
                       }
                     >
                       {group.title}
-                    </span>{" "}
-                    <span className="text-[13px] text-gray-400">({parentCount})</span>
+                    </span>
+                    {parentCountSuffix ?
+                      <span className="text-[13px] font-normal text-gray-400">{parentCountSuffix}</span>
+                    : null}
                   </span>
                   <span
                     className="shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100"
@@ -983,8 +999,8 @@ function HomeCategorySectionCard({
                   aria-label={group.title}
                 >
                   {children.map((child) => {
-                    const childCount =
-                      countsLoading || !counts ? "..." : String(counts[child.slug] ?? 0);
+                    const childCountNum = counts?.[child.slug] ?? 0;
+                    const childCountSuffix = homeCategoryCountSuffix(childCountNum, countsLoading);
                     return (
                       <Link
                         key={`${group.parentSlug}-${child.slug}`}
@@ -992,10 +1008,19 @@ function HomeCategorySectionCard({
                         className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md py-0.5 pr-2 pl-1.5 text-left text-[14px] font-normal leading-[1.3] text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-800"
                       >
                         <span className="min-w-0 truncate">{child.label}</span>
-                        <span className="shrink-0 text-[13px] text-gray-400">({childCount})</span>
+                        {childCountSuffix ?
+                          <span className="shrink-0 text-[13px] text-gray-400">{childCountSuffix}</span>
+                        : null}
                       </Link>
                     );
                   })}
+                  {group.parentSlug === PRODUCT_AUTO_TRANSPORT_PARENT_SLUG ?
+                    <div className="mt-1.5 flex flex-col gap-1.5">
+                      {PRODUCT_AUTO_TRANSPORT_GUIDE_CTAS.map((cta) => (
+                        <CategoryGuideCtaCard key={cta.href} cta={cta} />
+                      ))}
+                    </div>
+                  : null}
                 </div>
               : null}
             </div>

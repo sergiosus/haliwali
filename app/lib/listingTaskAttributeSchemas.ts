@@ -370,6 +370,12 @@ export const LISTING_TASK_SCHEMAS: Record<ListingTaskSchemaId, ListingTaskSchema
 export const TASK_CATEGORY_NAME_TO_SCHEMA_ID: Readonly<Record<string, ListingTaskSchemaId>> = {
   вакансии: "task_vacancies",
   "вывезти мусор": "task_waste_removal",
+  "забрать и доставить": "task_delivery",
+  "проверить наличие товара": "task_other",
+  "осмотреть авто": "task_find_car",
+  "купить от имени заказчика": "task_other",
+  "доставить документы": "task_courier",
+  "найти автозапчасти": "task_other",
   грузчики: "task_loaders",
   доставка: "task_delivery",
   "интернет и настройка": "task_internet_setup",
